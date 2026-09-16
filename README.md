@@ -24,7 +24,7 @@
 
 | 指令 | 说明 |
 | :--- | :--- |
-| `/xbimg` | 查看当前完整控制台状态与功能菜单 (别名: `/msg2img`, `/转图`) |
+| `/xbimg` | 查看当前完整控制台状态与功能菜单 |
 | `/xbimg on` / `/xbimg off` | 快速开启或暂停消息转图功能 |
 | `/xbimg trigger always` / `violation` | 切换转图触发时机（始终转图 / 仅违规转图） |
 | `/xbimg minlen <字数>` | 设定触发转图最小字数门槛 |
@@ -36,7 +36,7 @@
 | `/xbimg mod on` / `off` | 开启或关闭敏感屏蔽词过滤 |
 | `/xbimg ai on` / `off` | 开启或关闭独立 AI 大模型审查 |
 | `/xbimg action half` / `full` / `block` / `notice` | 设定违规处置动作 |
-| `/xbimg size [群号] 50-500` | 设置字体百分比（亦支持 `/fontsize 120` / `/textimg 120`） |
+| `/xbimg size [群号] 50-500` | 设置字体百分比（例如 `/xbimg size 120`） |
 | `/xbimg test [文本]` | 立即生成一张测试效果图片 |
 | `/text` | 查看当前群专属配置卡片与指令指南 |
 | `/text set <50-500>` | 调整当前群专属字体大小 |

@@ -770,10 +770,10 @@ class Msg2ImgPlugin(Star):
         return True
 
     # ==========================================
-    # 管理指令交互 (主指令: /xbimg，兼容 /msg2img /转图 /t2i)
+    # 管理指令交互 (仅保留纯净的 /xbimg 指令)
     # ==========================================
-    @filter.command("xbimg", alias={"msg2img", "转图", "t2i", "xb"})
-    async def cmd_msg2img(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
+    @filter.command("xbimg")
+    async def cmd_xbimg(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
         """消息转图助手管理指令"""
         sub = sub.strip().lower()
         arg = arg.strip()
@@ -840,7 +840,7 @@ class Msg2ImgPlugin(Star):
                 "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
                 "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
                 "• /xbimg groupmode whitelist / all / blacklist - 群生效模式\n"
-                "• /xbimg size [群号] 50-500 - 字体百分比 (或 /fontsize 120)\n"
+                "• /xbimg size [群号] 50-500 - 字体百分比\n"
                 "• /xbimg test [文本] - 立即生成测试效果图"
             )
             return
@@ -867,7 +867,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("✅ 转图触发时机已设为：🔄 始终转图")
             else:
-                yield event.plain_result("用法：/msg2img trigger always 或 /msg2img trigger violation")
+                yield event.plain_result("用法：/xbimg trigger always 或 /xbimg trigger violation")
         elif sub in ("minlen", "minlength", "len"):
             try:
                 num = max(1, min(1000, int(arg)))
@@ -875,14 +875,14 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result(f"✅ 触发转图字数门槛已设为：{num} 字")
             except Exception:
-                yield event.plain_result("用法：/msg2img minlen <1-1000>")
+                yield event.plain_result("用法：/xbimg minlen <1-1000>")
         elif sub == "style":
             if arg in ("ios", "android16"):
                 cfg["style"] = arg
                 self.cfg_mgr.save()
                 yield event.plain_result(f"🎨 全局视觉风格已切换为：{arg.upper()}")
             else:
-                yield event.plain_result("用法：/msg2img style ios 或 /msg2img style android16")
+                yield event.plain_result("用法：/xbimg style ios 或 /xbimg style android16")
         elif sub in ("theme", "配色"):
             if arg in ("light", "浅色"):
                 cfg["theme_mode"] = "light"
@@ -893,7 +893,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("🎨 全局配色已设为：🌙 深色暗黑")
             else:
-                yield event.plain_result("用法：/msg2img theme light 或 /msg2img theme dark")
+                yield event.plain_result("用法：/xbimg theme light 或 /xbimg theme dark")
         elif sub == "star":
             if arg in ("on", "开启", "1"):
                 cfg["star_background"] = True
@@ -915,7 +915,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("✨ 小星星密度已设为：标准 (~50颗)")
             else:
-                yield event.plain_result("用法：/msg2img density sparse / medium / dense")
+                yield event.plain_result("用法：/xbimg density sparse / medium / dense")
         elif sub in ("quality", "compress", "压缩", "文件大小"):
             if arg in ("low", "原画", "无损", "png"):
                 cfg["img_compress_level"] = "low"
@@ -930,7 +930,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("💾 文件体积优化已设为：均衡适中 (JPEG 92% · 推荐)")
             else:
-                yield event.plain_result("用法：/msg2img quality low / medium / high")
+                yield event.plain_result("用法：/xbimg quality low / medium / high")
         elif sub in ("link", "linkmode", "链接"):
             if arg in ("image", "as_image", "图", "图片"):
                 cfg["link_mode"] = "as_image"
@@ -945,7 +945,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("🔗 链接策略已设为：转图后附带提取纯文本链接")
             else:
-                yield event.plain_result("用法：/msg2img link image / text / append")
+                yield event.plain_result("用法：/xbimg link image / text / append")
         elif sub in ("mod", "审查"):
             if arg in ("on", "开启", "1"):
                 cfg["enable_keywords_moderation"] = True
@@ -960,7 +960,7 @@ class Msg2ImgPlugin(Star):
                 self.moderator = ContentModerator(cfg)
                 yield event.plain_result("⚪ 敏感屏蔽词库审查已关闭。")
             else:
-                yield event.plain_result("用法：/msg2img mod on 或 /msg2img mod off")
+                yield event.plain_result("用法：/xbimg mod on 或 /xbimg mod off")
         elif sub in ("ai", "aimod"):
             if arg in ("on", "开启", "1"):
                 cfg["enable_ai_moderation"] = True
@@ -973,7 +973,7 @@ class Msg2ImgPlugin(Star):
                 self.moderator = ContentModerator(cfg)
                 yield event.plain_result("⚪ AI 大模型内容安全审查已关闭。")
             else:
-                yield event.plain_result("用法：/msg2img ai on 或 /msg2img ai off")
+                yield event.plain_result("用法：/xbimg ai on 或 /xbimg ai off")
         elif sub in ("action", "处置"):
             if arg in ("half", "mosaic_half", "半打码", "半马赛克"):
                 cfg["violation_action"] = "mosaic_half"
@@ -992,7 +992,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("⚠️ 违规处置动作已设为：替换为合规警示卡片")
             else:
-                yield event.plain_result("用法：/msg2img action half / full / block / notice")
+                yield event.plain_result("用法：/xbimg action half / full / block / notice")
         elif sub in ("mosaic", "打码类型"):
             if arg in ("pixel", "像素"):
                 cfg["mosaic_type"] = "pixel"
@@ -1003,7 +1003,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("🌫️ 马赛克类型已设为：高斯磨砂毛玻璃")
             else:
-                yield event.plain_result("用法：/msg2img mosaic pixel 或 /msg2img mosaic blur")
+                yield event.plain_result("用法：/xbimg mosaic pixel 或 /xbimg mosaic blur")
         elif sub in ("mosaicpos", "半码位置"):
             if arg in ("bottom", "下半", "下"):
                 cfg["mosaic_half_pos"] = "bottom"
@@ -1018,7 +1018,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("🎲 半字打码位置已设为：每字随机上下")
             else:
-                yield event.plain_result("用法：/msg2img mosaicpos bottom / top / random")
+                yield event.plain_result("用法：/xbimg mosaicpos bottom / top / random")
         elif sub in ("groupmode", "群模式"):
             if arg in ("whitelist", "白名单"):
                 cfg["group_mode"] = "whitelist"
@@ -1036,7 +1036,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("🚫 群生效模式已设为：黑名单排除模式")
             else:
-                yield event.plain_result("用法：/msg2img groupmode whitelist / all / blacklist")
+                yield event.plain_result("用法：/xbimg groupmode whitelist / all / blacklist")
         elif sub in ("kwset", "preset", "词库"):
             presets = cfg.get("keyword_presets", {})
             if not isinstance(presets, dict):
@@ -1051,7 +1051,7 @@ class Msg2ImgPlugin(Star):
                 yield event.plain_result(f"✅ 全局词库方案已切换为：{name}")
             else:
                 names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
-                yield event.plain_result("用法：/msg2img kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
+                yield event.plain_result("用法：/xbimg kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
         elif sub in ("fontsize", "groupfont", "gscale", "font", "size", "字号", "文字大小"):
             # /xbimg size <gid> <scale>  或  /xbimg size <scale>（当前群）
             parts = [p for p in re.split(r"[\s,]+", arg) if p]
@@ -1071,7 +1071,7 @@ class Msg2ImgPlugin(Star):
                     scale = None
             if scale is None or not (50 <= scale <= 500):
                 cur = self._get_group_font_scale(self._extract_group_id(event)) if not gid else self._get_group_font_scale(gid)
-                yield event.plain_result(f"用法：/xbimg size [群号] <50-500> (或 /fontsize 120)\n当前{'群 '+gid if gid else '全局'}字体：{cur}%\n示例：/xbimg size 120  或  /xbimg size 123456 130")
+                yield event.plain_result(f"用法：/xbimg size [群号] <50-500>\n当前{'群 '+gid if gid else '全局'}字体：{cur}%\n示例：/xbimg size 120  或  /xbimg size 123456 130")
                 return
             target_gid = gid or self._extract_group_id(event)
             if not target_gid:
@@ -1404,56 +1404,6 @@ class Msg2ImgPlugin(Star):
         raw[gid_str] = cur
         cfg["group_configs"] = raw
         self.cfg_mgr.save({"group_configs": raw})
-
-    @filter.command("fontsize", alias={"textimg", "文字大小", "字体大小", "字号", "textsize"})
-    async def cmd_textimg(self, event: AstrMessageEvent, scale: str = ""):
-        """快捷字体大小指令：/fontsize 120  或  /fontsize 123456 130（兼容 /textimg /字号）"""
-        scale = scale.strip()
-        parts = [p for p in re.split(r"[\s,]+", scale) if p]
-        gid = ""
-        val = None
-        if len(parts) == 2:
-            gid = re.sub(r"\D", "", parts[0])
-            try:
-                val = int(parts[1])
-            except Exception:
-                val = None
-        elif len(parts) == 1:
-            try:
-                val = int(parts[0])
-                gid = self._extract_group_id(event)
-            except Exception:
-                val = None
-        if val is None or not (50 <= val <= 500):
-            cur = self._get_group_font_scale(self._extract_group_id(event))
-            yield event.plain_result(f"用法：/fontsize <50-500>  或  /fontsize <群号> <50-500>\n当前字体：{cur}%\n示例：/fontsize 120 (亦支持 /textimg 120)")
-            return
-        if not self._is_admin_event(event):
-            yield event.plain_result("⛔ 仅群管理员可修改字体大小。")
-            return
-        target_gid = gid or self._extract_group_id(event)
-        if not target_gid:
-            self.cfg_mgr.config["font_scale"] = val
-            self.cfg_mgr.save({"font_scale": val})
-            yield event.plain_result(f"✅ 全局字体已设为 {val}%")
-        else:
-            raw = self.cfg_mgr.config.get("group_font_scales", {})
-            if isinstance(raw, str):
-                try:
-                    import json as _js
-                    raw = _js.loads(raw) if raw.strip() else {}
-                except Exception:
-                    raw = {}
-            if not isinstance(raw, dict):
-                raw = {}
-            if val == 100:
-                raw.pop(str(target_gid), None)
-                raw.pop(target_gid, None)
-            else:
-                raw[str(target_gid)] = val
-            self.cfg_mgr.config["group_font_scales"] = raw
-            self.cfg_mgr.save({"group_font_scales": raw})
-            yield event.plain_result(f"✅ 群 {target_gid} 字体已设为 {val}%（100% 为默认）")
 
     def _schedule_delete(self, path: Path, delay: int = 45):
         """生成图片即时自动清理（默认 45 秒后删除，用完即删）"""
