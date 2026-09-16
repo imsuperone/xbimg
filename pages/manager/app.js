@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  const PLUGIN_ID = "astrbot_plugin_msg2img";
+  const PLUGIN_ID = "astrbot_plugin_xbimg";
 
   // ---- 安全 AstrBot 通信桥接层 ----
   function getBridge() {
@@ -75,7 +75,9 @@
 
       const prefixes = [
         `/${PLUGIN_ID}/`,
+        `/astrbot_plugin_msg2img/`,
         `/api/plugins/${PLUGIN_ID}/`,
+        `/api/plugins/astrbot_plugin_msg2img/`,
         `api/`,
         `./api/`,
         `./`,
@@ -96,7 +98,7 @@
         try {
           return await b.apiPost(endpoint, data);
         } catch (e) {
-          console.warn(`[msg2img] bridge.apiPost(${endpoint}) 失败，回退 fetch:`, e);
+          console.warn(`[xbimg] bridge.apiPost(${endpoint}) 失败，回退 fetch:`, e);
         }
       }
       const options = {
@@ -111,7 +113,9 @@
       }
       const prefixes = [
         `/${PLUGIN_ID}/`,
+        `/astrbot_plugin_msg2img/`,
         `/api/plugins/${PLUGIN_ID}/`,
+        `/api/plugins/astrbot_plugin_msg2img/`,
         `api/`,
         `./api/`,
         `./`,

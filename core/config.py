@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-PLUGIN_NAME = "astrbot_plugin_msg2img"
+PLUGIN_NAME = "astrbot_plugin_xbimg"
 
 DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
     "default": {
@@ -94,7 +94,10 @@ def resolve_data_dir() -> Path:
     """解析持久化数据目录"""
     try:
         from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-        p = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
+        base = Path(get_astrbot_data_path()) / "plugin_data"
+        p = base / PLUGIN_NAME
+        if not p.exists() and (base / "astrbot_plugin_msg2img").exists():
+            return base / "astrbot_plugin_msg2img"
         p.mkdir(parents=True, exist_ok=True)
         return p
     except Exception:
@@ -102,7 +105,9 @@ def resolve_data_dir() -> Path:
 
     for cand in [
         Path.cwd() / "data" / "plugin_data" / PLUGIN_NAME,
+        Path.cwd() / "data" / "plugin_data" / "astrbot_plugin_msg2img",
         Path(__file__).resolve().parent.parent / "data" / "plugin_data" / PLUGIN_NAME,
+        Path(__file__).resolve().parent.parent / "data" / "plugin_data" / "astrbot_plugin_msg2img",
     ]:
         try:
             cand.mkdir(parents=True, exist_ok=True)

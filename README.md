@@ -1,6 +1,6 @@
-# astrbot_plugin_msg2img (消息转图助手)
+# astrbot_plugin_xbimg (消息转图助手 xbimg)
 
-🎨 一个精致美观、功能强大的 AstrBot 消息文本转图片（Text-to-Image）渲染插件。
+🎨 一个精致美观、功能强大的 AstrBot 消息文本转图片（xbimg）渲染插件。
 
 - 📦 项目主页：https://github.com/imsuperone/textimg
 
@@ -10,13 +10,13 @@
 
 - 🍏 **iOS 风格**：高质感磨砂玻璃效果、Apple 连续曲率圆角（Squircle）、细腻多层投影。
 - 🤖 **Android 16 风格**：Material 3 Expressive 胶囊容器、大胆圆角排版与动态色调。
-- ✨ **随机星空背景**：动态在背景四周随机生成闪烁星芒、十字星、光晕微粒与菱形碎星。
+- ✨ **优化星空背景**：柔和微晕星芒，边缘散布不形成卡片杂乱噪点。
+- 💾 **无损/极小体积**：支持 4:4:4 色度无噪点极速编码，兼具超清与极限省流。
 - 🔗 **智能链接策略**：支持链接转图、包含链接保持纯文本发送、或转图并附带提取纯文本直达链接。
-- 🛡️ **双轨安全审查**：内置屏蔽词库过滤与外接大模型 AI（OpenAI/DeepSeek 兼容）双重审查机制。
+- 🛡️ **多套敏感词库与独立 AI 审查**：内置涉毒、涉赌、涉黄、黑产与互动娱乐等多套方案，支持单群绑定。
 - 🎭 **违规半马赛克（Half Mosaic）**：命中敏感内容时，保留上半部分正常阅读，下半段自动施加真实像素块或高斯毛玻璃打码，并打上警示封条。
-- 🔤 **字体自动补齐与自定义**：缺中文字体时自动从官方下载 Noto Sans SC 到插件数据目录；支持自定义字体文件/直链；WebUI 可查看已安装字体并随时删除。
-- 😀 **Emoji 全自动**：复杂表情全彩图、单个表情优先 Noto 全彩字体，缺失自动云端补全并缓存（Twemoji CC-BY 4.0），零配置永不崩溃。
-- 📱 **Android 16 WebUI 控制台**：配备 Hero 统计卡片、M3 分段按钮、深浅主题切换及实时交互预览台。
+- 🔤 **字体与 Emoji 自由管理**：精选字体一键安装与彻底卸载，Emoji 样式按需下载与清空，零残留不锁盘。
+- 📱 **纯正 Android 16 风格 WebUI**：全新单列全屏响应式设计，配备独立交互预览台，手机电脑完美自适应。
 
 ---
 
@@ -24,12 +24,27 @@
 
 | 指令 | 说明 |
 | :--- | :--- |
-| `/msg2img` | 查看当前转图助手状态与功能菜单 |
-| `/msg2img on` / `/msg2img off` | 快速开启或暂停消息转图功能 |
-| `/msg2img style ios` | 切换为 iOS 磨砂玻璃风格 |
-| `/msg2img style android16` | 切换为 Android 16 (M3 Expressive) 风格 |
-| `/msg2img star on` / `off` | 开启或关闭背景随机小星星 |
-| `/msg2img test [文本]` | 立即生成一张测试效果图片 |
+| `/xbimg` | 查看当前完整控制台状态与功能菜单 (别名: `/msg2img`, `/转图`) |
+| `/xbimg on` / `/xbimg off` | 快速开启或暂停消息转图功能 |
+| `/xbimg trigger always` / `violation` | 切换转图触发时机（始终转图 / 仅违规转图） |
+| `/xbimg minlen <字数>` | 设定触发转图最小字数门槛 |
+| `/xbimg style ios` / `android16` | 切换全局视觉风格 |
+| `/xbimg theme light` / `dark` | 切换全局浅色/深色主题 |
+| `/xbimg star on` / `off` | 开启或关闭背景随机小星星 |
+| `/xbimg density sparse` / `medium` / `dense` | 调节背景小星星密度 |
+| `/xbimg quality low` / `medium` / `high` | 切换输出文件体积优化档位 |
+| `/xbimg mod on` / `off` | 开启或关闭敏感屏蔽词过滤 |
+| `/xbimg ai on` / `off` | 开启或关闭独立 AI 大模型审查 |
+| `/xbimg action half` / `full` / `block` / `notice` | 设定违规处置动作 |
+| `/xbimg size [群号] 50-500` | 设置字体百分比（亦支持 `/fontsize 120` / `/textimg 120`） |
+| `/xbimg test [文本]` | 立即生成一张测试效果图片 |
+| `/text` | 查看当前群专属配置卡片与指令指南 |
+| `/text set <50-500>` | 调整当前群专属字体大小 |
+| `/text style ios` / `android16` / `default` | 调整当前群风格（`default` 恢复跟随全局） |
+| `/text theme light` / `dark` / `default` | 调整当前群主题（`default` 恢复跟随全局） |
+| `/text kw <方案ID>` / `default` | 绑定当前群专属敏感词方案 |
+| `/text reset` | 一键恢复当前群所有配置跟随全局默认 |
+| `/text test` | 发送当前群专属效果测试图 |
 
 ---
 

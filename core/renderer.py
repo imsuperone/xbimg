@@ -1464,33 +1464,34 @@ def _draw_star_sparkle(
     star_type: str = "sparkle",
 ):
     fill_rgba = (*color, alpha)
+    # 柔和外发光微晕，消除像素锯齿感
+    glow_r = radius * 1.6
+    draw.ellipse([cx - glow_r, cy - glow_r, cx + glow_r, cy + glow_r], fill=(*color, max(8, int(alpha * 0.18))))
 
     if star_type == "sparkle":
         points = []
-        r_inner = radius * 0.22
+        r_inner = radius * 0.24
         r_outer = radius
         for i in range(8):
             angle = i * (math.pi / 4)
             r = r_outer if i % 2 == 0 else r_inner
             points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
         draw.polygon(points, fill=fill_rgba)
-        core_r = max(1.2, radius * 0.2)
-        draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(255, 255, 255, min(255, alpha + 60)))
+        core_r = max(1.2, radius * 0.22)
+        draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(255, 255, 255, min(255, alpha + 70)))
 
     elif star_type == "cross":
-        thick = max(1, int(radius * 0.16))
+        thick = max(1.2, radius * 0.16)
         draw.rectangle([cx - radius, cy - thick / 2, cx + radius, cy + thick / 2], fill=fill_rgba)
         draw.rectangle([cx - thick / 2, cy - radius, cx + thick / 2, cy + radius], fill=fill_rgba)
-        core_r = max(1.0, radius * 0.2)
+        core_r = max(1.0, radius * 0.22)
         draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(255, 255, 255, alpha))
 
-    elif star_type == "diamond":
-        draw.polygon([(cx, cy - radius), (cx + radius * 0.65, cy), (cx, cy + radius), (cx - radius * 0.65, cy)], fill=fill_rgba)
-
     else:
-        draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=fill_rgba)
-        glow_r = radius * 1.5
-        draw.ellipse([cx - glow_r, cy - glow_r, cx + glow_r, cy + glow_r], fill=(*color, int(alpha * 0.35)))
+        # diamond
+        draw.polygon([(cx, cy - radius), (cx + radius * 0.65, cy), (cx, cy + radius), (cx - radius * 0.65, cy)], fill=fill_rgba)
+        core_r = max(1.0, radius * 0.18)
+        draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(255, 255, 255, min(255, alpha + 50)))
 
 
 def _fast_linear_gradient(
@@ -1499,14 +1500,14 @@ def _fast_linear_gradient(
     start_color: Tuple[int, int, int],
     end_color: Tuple[int, int, int],
 ) -> Image.Image:
-    """Numpy 矩阵广播极速生成平滑双向渐变底图（< 5ms，numpy 懒加载不拖慢插件启动）"""
+    """极速生成平滑双向渐变底图（1D 生成后水平拉伸，< 4ms）"""
     import numpy as np
     start = np.array(start_color, dtype=np.float32)
     end = np.array(end_color, dtype=np.float32)
     alpha = np.linspace(0, 1, height, dtype=np.float32)[:, None]
-    arr = (start * (1 - alpha) + end * alpha).astype(np.uint8)
-    arr = np.repeat(arr[:, None, :], width, axis=1)
-    return Image.fromarray(arr, "RGB").convert("RGBA")
+    col = (start * (1 - alpha) + end * alpha).astype(np.uint8)
+    col_img = Image.fromarray(col.reshape(height, 1, 3), "RGB")
+    return col_img.resize((width, height), Image.NEAREST).convert("RGBA")
 
 
 # ==========================================
@@ -1690,21 +1691,36 @@ class MessageImageRenderer:
         # 4. 极速生成背景渐变
         canvas = _fast_linear_gradient(canvas_w, canvas_h, theme.bg_gradient_start, theme.bg_gradient_end)
 
-        # 5. 星空微粒背景
+        # 5. 星空微粒背景 (主要散布在卡片外部留白与边缘四周，避免在卡片文字区域形成杂乱噪点)
         if star_background:
-            star_counts = {"sparse": 24, "medium": 45, "dense": 70}
-            count = star_counts.get(star_density, 45)
+            star_counts = {"sparse": 18, "medium": 36, "dense": 60}
+            count = star_counts.get(star_density, 36)
             star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
             s_draw = ImageDraw.Draw(star_layer)
 
             rng = random.Random(_stable_seed(text))
             for _ in range(count):
-                sx = rng.uniform(10, canvas_w - 10)
-                sy = rng.uniform(10, canvas_h - 10)
-                s_radius = rng.uniform(2.5, 8.5)
+                zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
+                if zone == "top":
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(8, max(margin_y + 12, 40))
+                elif zone == "bottom":
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(min(margin_y + card_h - 12, canvas_h - 40), canvas_h - 8)
+                elif zone == "left":
+                    sx = rng.uniform(8, max(margin_x + 12, 40))
+                    sy = rng.uniform(8, canvas_h - 8)
+                elif zone == "right":
+                    sx = rng.uniform(min(margin_x + card_w - 12, canvas_w - 40), canvas_w - 8)
+                    sy = rng.uniform(8, canvas_h - 8)
+                else:
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(8, canvas_h - 8)
+
+                s_radius = rng.uniform(2.8, 8.5)
                 s_color = rng.choice(theme.star_colors)
-                s_alpha = rng.randint(90, 210)
-                st_type = rng.choice(["sparkle", "sparkle", "cross", "diamond", "dot"])
+                s_alpha = rng.randint(85, 200)
+                st_type = rng.choice(["sparkle", "cross", "diamond"])
                 _draw_star_sparkle(s_draw, sx, sy, s_radius, s_color, s_alpha, st_type)
 
             canvas = Image.alpha_composite(canvas, star_layer)

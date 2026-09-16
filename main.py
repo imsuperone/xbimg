@@ -327,25 +327,25 @@ class Msg2ImgPlugin(Star):
         cfg = self.cfg_mgr.config
         lvl = str(cfg.get("img_compress_level", "medium") or "medium").lower()
 
-        # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡）
+        # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡，4:4:4 无色度抽样噪点）
         if lvl == "high":
-            # 极限紧凑：高质量 JPEG (Q80) + 优化，体积缩减 70%
+            # 极小文件：高质量紧凑 JPEG (Q86) + 4:4:4 无抽样，体积极小无噪点
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.jpg"
             img_path = self.cache_dir / img_filename
             save_img = img.convert("RGB") if img.mode != "RGB" else img
-            save_kwargs = {"format": "JPEG", "quality": 82, "optimize": True}
+            save_kwargs = {"format": "JPEG", "quality": 86, "optimize": True, "subsampling": 0}
         elif lvl == "low":
-            # 高清大图：无损 PNG，低压缩比最高画质
+            # 原画无损：无损 PNG，低压缩比最高画质
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.png"
             img_path = self.cache_dir / img_filename
             save_img = img
             save_kwargs = {"format": "PNG", "compress_level": 3}
         else:
-            # 标准均衡：高质量 JPEG (Q92)，兼具锐利与适中体积
+            # 均衡适中：超清 JPEG (Q94)，4:4:4 锐利无杂色
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.jpg"
             img_path = self.cache_dir / img_filename
             save_img = img.convert("RGB") if img.mode != "RGB" else img
-            save_kwargs = {"format": "JPEG", "quality": 92, "optimize": True}
+            save_kwargs = {"format": "JPEG", "quality": 94, "optimize": True, "subsampling": 0}
 
         try:
             await asyncio.to_thread(save_img.save, str(img_path), **save_kwargs)
@@ -770,51 +770,78 @@ class Msg2ImgPlugin(Star):
         return True
 
     # ==========================================
-    # 管理指令交互
+    # 管理指令交互 (主指令: /xbimg，兼容 /msg2img /转图 /t2i)
     # ==========================================
-    @filter.command("msg2img", alias={"转图", "t2i"})
+    @filter.command("xbimg", alias={"msg2img", "转图", "t2i", "xb"})
     async def cmd_msg2img(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
         """消息转图助手管理指令"""
         sub = sub.strip().lower()
         arg = arg.strip()
         cfg = self.cfg_mgr.config
 
+        comp_map = {
+            "high": "⚡ 极小文件 (省流紧凑)",
+            "medium": "⚖️ 均衡适中 (推荐)",
+            "low": "💎 原画无损 (高清大图)",
+        }
+        action_map = {
+            "mosaic_half": "🎭 打一半马赛克",
+            "mosaic_full": "🔒 全图正文打码",
+            "block": "🚫 彻底拦截静默",
+            "notice": "⚠️ 替换合规警示卡片",
+        }
+        group_map = {
+            "whitelist": "🛡️ 仅白名单群生效",
+            "all": "🌐 全部所有群直接生效",
+            "blacklist": "🚫 黑名单排除模式",
+        }
+        link_map = {
+            "as_image": "图片渲染",
+            "keep_text": "保持纯文本直接发送",
+            "extract_append": "转图并附带纯文本链接",
+        }
+        density_map = {
+            "sparse": "稀疏 (~25颗)",
+            "medium": "标准 (~50颗)",
+            "dense": "星海 (~80颗)",
+        }
+
         if not sub or sub in ("help", "status", "菜单"):
             yield event.plain_result(
-                "🎨【消息转图助手 - 完整控制台】\n"
+                "🎨【xbimg 消息转图助手 · 控制台】\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 f"• 总开关状态：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'}\n"
                 f"• 触发时机：{'🔄 始终转图' if cfg.get('render_trigger') == 'always' else '🛡️ 仅违规时转图'}\n"
                 f"• 最少字数：{cfg.get('min_length_threshold', 1)} 字\n"
                 f"• 视觉风格：{cfg.get('style', 'ios').upper()}\n"
                 f"• 配色主题：{'🌞 浅色明亮' if cfg.get('theme_mode') == 'light' else '🌙 深色暗黑'}\n"
-                f"• 星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'} (密度: {cfg.get('star_density', 'medium')})\n"
-                f"• 文件体积：{cfg.get('img_compress_level', 'medium').upper()}\n"
-                f"• 链接策略：{cfg.get('link_mode', 'as_image')}\n"
+                f"• 星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'} ({density_map.get(cfg.get('star_density', 'medium'), '标准')})\n"
+                f"• 文件体积：{comp_map.get(cfg.get('img_compress_level', 'medium'), '均衡适中')}\n"
+                f"• 链接策略：{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
                 f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
                 f"• AI 审查开关：{'🤖 开启' if cfg.get('enable_ai_moderation') else '⚪ 关闭'}\n"
-                f"• 违规处置：{cfg.get('violation_action', 'mosaic_half')}\n"
+                f"• 违规处置：{action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
                 f"• 全局字体：{cfg.get('font_scale', 100)}%\n"
-                f"• 群生效模式：{cfg.get('group_mode', 'whitelist')}\n"
+                f"• 群生效模式：{group_map.get(cfg.get('group_mode', 'whitelist'), '仅白名单群生效')}\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
-                "💡 变量修改指令：\n"
-                "• /msg2img on / off - 总开关\n"
-                "• /msg2img trigger always / violation - 触发时机\n"
-                "• /msg2img minlen <字数> - 最小字数门槛\n"
-                "• /msg2img style ios / android16 - 全局风格\n"
-                "• /msg2img theme light / dark - 全局配色\n"
-                "• /msg2img star on / off - 背景星空开关\n"
-                "• /msg2img density sparse / medium / dense - 星星密度\n"
-                "• /msg2img quality low / medium / high - 输出文件体积优化\n"
-                "• /msg2img link image / text / append - 链接策略\n"
-                "• /msg2img mod on / off - 屏蔽词审查开关\n"
-                "• /msg2img ai on / off - AI 审查独立开关\n"
-                "• /msg2img action half / full / block / notice - 违规处置\n"
-                "• /msg2img mosaic pixel / blur - 马赛克颗粒/模糊\n"
-                "• /msg2img mosaicpos bottom / top / random - 半字打码位置\n"
-                "• /msg2img groupmode whitelist / all / blacklist - 群生效模式\n"
-                "• /msg2img fontsize [群号] 50-500 - 字体百分比\n"
-                "• /msg2img test [文本] - 立即生成测试效果图"
+                "💡 常用修改指令：\n"
+                "• /xbimg on / off - 总开关\n"
+                "• /xbimg trigger always / violation - 触发时机\n"
+                "• /xbimg minlen <字数> - 最小字数门槛\n"
+                "• /xbimg style ios / android16 - 全局风格\n"
+                "• /xbimg theme light / dark - 全局配色\n"
+                "• /xbimg star on / off - 背景星空开关\n"
+                "• /xbimg density sparse / medium / dense - 星星密度\n"
+                "• /xbimg quality low / medium / high - 输出文件大小档位\n"
+                "• /xbimg link image / text / append - 链接策略\n"
+                "• /xbimg mod on / off - 屏蔽词审查开关\n"
+                "• /xbimg ai on / off - AI 审查独立开关\n"
+                "• /xbimg action half / full / block / notice - 违规处置\n"
+                "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
+                "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
+                "• /xbimg groupmode whitelist / all / blacklist - 群生效模式\n"
+                "• /xbimg size [群号] 50-500 - 字体百分比 (或 /fontsize 120)\n"
+                "• /xbimg test [文本] - 立即生成测试效果图"
             )
             return
 
@@ -1025,8 +1052,8 @@ class Msg2ImgPlugin(Star):
             else:
                 names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
                 yield event.plain_result("用法：/msg2img kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
-        elif sub in ("fontsize", "groupfont", "gscale", "font"):
-            # /msg2img fontsize <gid> <scale>  或  /msg2img fontsize <scale>（当前群）
+        elif sub in ("fontsize", "groupfont", "gscale", "font", "size", "字号", "文字大小"):
+            # /xbimg size <gid> <scale>  或  /xbimg size <scale>（当前群）
             parts = [p for p in re.split(r"[\s,]+", arg) if p]
             gid = ""
             scale = None
@@ -1044,7 +1071,7 @@ class Msg2ImgPlugin(Star):
                     scale = None
             if scale is None or not (50 <= scale <= 500):
                 cur = self._get_group_font_scale(self._extract_group_id(event)) if not gid else self._get_group_font_scale(gid)
-                yield event.plain_result(f"用法：/msg2img fontsize [群号] <50-500>\n当前{'群 '+gid if gid else '全局'}字体：{cur}%\n示例：/msg2img fontsize 120  或  /msg2img fontsize 123456 130")
+                yield event.plain_result(f"用法：/xbimg size [群号] <50-500> (或 /fontsize 120)\n当前{'群 '+gid if gid else '全局'}字体：{cur}%\n示例：/xbimg size 120  或  /xbimg size 123456 130")
                 return
             target_gid = gid or self._extract_group_id(event)
             if not target_gid:
@@ -1088,7 +1115,7 @@ class Msg2ImgPlugin(Star):
             await asyncio.to_thread(img.save, str(test_path), "PNG")
             yield event.chain_result([AstrImage.fromFileSystem(str(test_path))])
         else:
-            yield event.plain_result("未知子指令，请输入 /msg2img 查看指令菜单。")
+            yield event.plain_result("未知子指令，请输入 /xbimg 查看指令菜单。")
 
     @filter.command("text")
     async def cmd_text(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
@@ -1378,11 +1405,10 @@ class Msg2ImgPlugin(Star):
         cfg["group_configs"] = raw
         self.cfg_mgr.save({"group_configs": raw})
 
-    @filter.command("textimg", alias={"文字大小", "字体大小"})
+    @filter.command("fontsize", alias={"textimg", "文字大小", "字体大小", "字号", "textsize"})
     async def cmd_textimg(self, event: AstrMessageEvent, scale: str = ""):
-        """快捷字体大小指令：/textimg 120  或  /textimg 123456 130"""
+        """快捷字体大小指令：/fontsize 120  或  /fontsize 123456 130（兼容 /textimg /字号）"""
         scale = scale.strip()
-        # 兼容 /textimg 120  和  /textimg 123456 130  两种形式
         parts = [p for p in re.split(r"[\s,]+", scale) if p]
         gid = ""
         val = None
@@ -1394,14 +1420,13 @@ class Msg2ImgPlugin(Star):
                 val = None
         elif len(parts) == 1:
             try:
-                # 单参数时视为当前群/全局
                 val = int(parts[0])
                 gid = self._extract_group_id(event)
             except Exception:
                 val = None
         if val is None or not (50 <= val <= 500):
             cur = self._get_group_font_scale(self._extract_group_id(event))
-            yield event.plain_result(f"用法：/textimg <50-500>  或  /textimg <群号> <50-500>\n当前字体：{cur}%\n示例：/textimg 120")
+            yield event.plain_result(f"用法：/fontsize <50-500>  或  /fontsize <群号> <50-500>\n当前字体：{cur}%\n示例：/fontsize 120 (亦支持 /textimg 120)")
             return
         if not self._is_admin_event(event):
             yield event.plain_result("⛔ 仅群管理员可修改字体大小。")
@@ -1454,27 +1479,28 @@ class Msg2ImgPlugin(Star):
         if not _HAS_WEB_API:
             return
         reg = self.context.register_web_api
-        reg(f"/{PLUGIN_NAME}/config", self._api_get_config, ["GET"], "获取插件配置")
-        reg(f"/{PLUGIN_NAME}/config", self._api_save_config, ["POST"], "保存插件配置")
-        reg(f"/{PLUGIN_NAME}/config/get", self._api_get_config, ["GET"], "获取插件配置(别名)")
-        reg(f"/{PLUGIN_NAME}/config/save", self._api_save_config, ["POST"], "保存插件配置(别名)")
-        reg(f"/{PLUGIN_NAME}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
-        reg(f"/{PLUGIN_NAME}/groups", self._api_fetch_groups, ["GET"], "列出群聊列表")
-        reg(f"/{PLUGIN_NAME}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
-        reg(f"/{PLUGIN_NAME}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
-        reg(f"/{PLUGIN_NAME}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
-        reg(f"/{PLUGIN_NAME}/reset", self._api_reset_config, ["POST"], "重置默认配置")
-        reg(f"/{PLUGIN_NAME}/fonts/status", self._api_fonts_status, ["GET"], "查询字体状态")
-        reg(f"/{PLUGIN_NAME}/fonts/download", self._api_fonts_download, ["POST"], "下载缺失字体")
-        reg(f"/{PLUGIN_NAME}/fonts/files", self._api_fonts_files, ["GET"], "列出持久化目录字体")
-        reg(f"/{PLUGIN_NAME}/fonts/delete", self._api_fonts_delete, ["POST"], "删除持久化目录字体")
-        reg(f"/{PLUGIN_NAME}/fonts/curated", self._api_fonts_curated, ["GET"], "精选字体列表")
-        reg(f"/{PLUGIN_NAME}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
-        reg(f"/{PLUGIN_NAME}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
-        reg(f"/{PLUGIN_NAME}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
-        reg(f"/{PLUGIN_NAME}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
-        reg(f"/{PLUGIN_NAME}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
-        reg(f"/{PLUGIN_NAME}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
+        for pfx in set([PLUGIN_NAME, "astrbot_plugin_msg2img", "astrbot_plugin_xbimg"]):
+            reg(f"/{pfx}/config", self._api_get_config, ["GET"], "获取插件配置")
+            reg(f"/{pfx}/config", self._api_save_config, ["POST"], "保存插件配置")
+            reg(f"/{pfx}/config/get", self._api_get_config, ["GET"], "获取插件配置(别名)")
+            reg(f"/{pfx}/config/save", self._api_save_config, ["POST"], "保存插件配置(别名)")
+            reg(f"/{pfx}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
+            reg(f"/{pfx}/groups", self._api_fetch_groups, ["GET"], "列出群聊列表")
+            reg(f"/{pfx}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
+            reg(f"/{pfx}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
+            reg(f"/{pfx}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
+            reg(f"/{pfx}/reset", self._api_reset_config, ["POST"], "重置默认配置")
+            reg(f"/{pfx}/fonts/status", self._api_fonts_status, ["GET"], "查询字体状态")
+            reg(f"/{pfx}/fonts/download", self._api_fonts_download, ["POST"], "下载缺失字体")
+            reg(f"/{pfx}/fonts/files", self._api_fonts_files, ["GET"], "列出持久化目录字体")
+            reg(f"/{pfx}/fonts/delete", self._api_fonts_delete, ["POST"], "删除持久化目录字体")
+            reg(f"/{pfx}/fonts/curated", self._api_fonts_curated, ["GET"], "精选字体列表")
+            reg(f"/{pfx}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
+            reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
+            reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
+            reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
+            reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
+            reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
 
     async def _api_get_config(self):
         return json_response({
@@ -1742,7 +1768,7 @@ class Msg2ImgPlugin(Star):
             preview_path = self.cache_dir / "preview_latest.jpg"
             preview_rgb = preview_img.convert("RGB")
             buf = io.BytesIO()
-            preview_rgb.save(buf, format="JPEG", quality=82, optimize=True)
+            preview_rgb.save(buf, format="JPEG", quality=92, optimize=True, subsampling=0)
             jpeg_bytes = buf.getvalue()
             try:
                 preview_path.write_bytes(jpeg_bytes)

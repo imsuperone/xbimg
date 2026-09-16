@@ -1,15 +1,16 @@
-name: astrbot_plugin_msg2img
-display_name: 消息转图助手
-short_desc: 智能将机器人消息渲染为高颜值图片，支持iOS/Android16双风格、星空背景、链接直发控制与违规半马赛克审查。
+name: astrbot_plugin_xbimg
+display_name: 消息转图助手 (xbimg)
+short_desc: 智能将机器人消息渲染为高颜值图片，支持iOS/Android16双风格、星空背景、链接直发控制、多套屏蔽词方案与AI审查。
 desc: |
-  🎨 AstrBot 高颜值消息文本转图片（Text-to-Image）渲染插件：
+  🎨 AstrBot 高颜值消息文本转图片（xbimg）渲染插件：
   - ✨ 双主题视觉：精致透亮的 iOS 磨砂玻璃风格 & 现代活泼的 Android 16 (Material 3 Expressive) 胶囊卡片风格
-  - 🌟 灵动星空背景：自动在卡片与背景周围散落随机生成的十字星、闪烁星芒与光晕微粒
+  - 🌟 灵动星空背景：自动在背景四周散落随机生成的十字星、闪烁星芒与光晕微粒（无卡片内噪点）
   - 🔗 智能链接策略：可自由设定遇到 URL 链接时转图、保留纯文本或附带提取纯文本链接
-  - 🛡️ 双轨审查机制：支持自定义屏蔽词库与外接大模型 AI 内容安全审查
+  - 🛡️ 多套敏感词库：内置涉毒、涉赌、涉黄、脚本与互动娱乐等多套违规词方案，支持单群绑定
+  - 🤖 独立 AI 审查：一键开关大模型双轨审查，支持 AstrBot 已接入模型与自定义 OpenAI 接口
   - 🎭 违规半马赛克：支持对违规内容进行创意“打一半马赛克/下半截马赛克”处理，保障群聊安全
-  - 📱 纯正 Android 16 风格 WebUI：交互式仪表盘，支持实时文本渲染测试与所见即所得调优
-version: 1.0.3
+  - 📱 全新全屏 WebUI：交互式仪表盘，单列全屏优雅排版，支持独立实时文本渲染测试台
+version: 1.0.4
 author: Light
 repo: https://github.com/imsuperone/textimg
 support_platforms:
