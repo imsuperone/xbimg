@@ -12,6 +12,27 @@ from typing import Any, Dict, Optional
 PLUGIN_NAME = "astrbot_plugin_xbimg"
 
 DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
+    "anti_nsfw_ultra": {
+        "name": "🔥 强力综合违禁与色情库 (日常/AI发情/SM/玩法/百合/小白)",
+        "keywords": (
+            "色情,黄色,搞黄色,做爱,性交,房事,野战,车震,口交,深喉,吞精,颜射,口爆,射精,射在里面,内射,中出,精液,精子,浓精,精液狂飙,射爆,灌满,"
+            "自慰,手淫,撸管,打飞机,飞机杯,扣逼,扣穴,手交,足交,乳交,舔逼,舔阴,舔穴,舔肛,毒龙钻,潮吹,喷水,绝顶,高潮,高潮抽搐,呻吟,娇喘,发情,发骚,"
+            "骚逼,骚货,骚母狗,肉便器,性奴,母狗调教,母猪,发情母狗,荡妇,淫妇,小骚货,小淫娃,阴道,小穴,肉穴,肉缝,花蕊,花缝,蜜穴,蜜汁,淫水,紧致,湿透,"
+            "鸡巴,肉棒,大肉棒,巨根,阴茎,龟头,屌,抽插,猛烈抽插,狠狠干,狠狠操,操死你,肏逼,操逼,干死你,干烂,破处,开苞,破身,处女膜,落红,"
+            "奶子,大胸,大波,巨乳,揉奶,抓奶,揉胸,乳头,乳晕,凸点,露点,偷拍,走光,私密照,裸照,裸聊,裸体,无码,无修正,步兵,骑兵,av女优,番号,三级片,黄片,成人网站,"
+            "援交,约炮,卖淫,嫖娼,包养,外围女,楼凤,上门服务,洗浴暗娼,站街女,强奸,轮奸,迷奸,下药,听话水,催情春药,乱伦,换妻,绿帽,ntr,幼女,萝莉岛,"
+            "催眠调教,恶堕,触手侵犯,产卵,强制高潮,绝顶升天,肉体契约,深度开发,敏感体质,敏感点,肆意玩弄,玩坏,肉体玩物,榨干精气,榨精,榨汁机,雌堕,雌犬化,"
+            "身体渴望,止不住的流水,承受不住,狠狠进入,深入到底,抵到花心,顶到宫颈,疯狂顶撞,贯穿到底,填满肉穴,塞满小穴,注入爱液,注入浓精,无法合拢,瘫软无力,痉挛颤抖,"
+            "翻白眼吐舌头,失去理智,彻底沦陷,放荡浪叫,淫语连篇,求你干我,求你给我,想要大肉棒,被玩弄得神志不清,沦为欲望的奴隶,身体诚实地迎合,"
+            "SM,BDSM,主奴,字母圈,dom,sub,sp,绳艺,紧缚,龟甲缚,五花大绑,吊缚,束缚,口塞,口枷,环口,开口器,鼻钩,拘束带,拘束衣,贞操带,贞操锁,锁精环,"
+            "狗链,项圈,牵引绳,狗爬,狗奴,母狗认主,专属奴隶,私奴,男奴,女奴,滴蜡,皮鞭,散鞭,鞭打,掌掴,抽耳光,抽屁股,打屁股,戒尺,红肿破皮,羞辱惩罚,精神控制,"
+            "跪下舔鞋,舔脚趾,踩踏,重度踩踏,圣水,黄金,饮尿,灌肠,后庭爆菊,爆菊,肛交,后庭开发,肛塞,狐尾肛塞,震动棒,跳蛋,遥控跳蛋,假阳具,双头龙,穿刺,乳夹,阴蒂夹,电击,"
+            "拘禁,关笼子,小黑屋拘禁,人体盛,私调,公调,绳师,重口调教,"
+            "百合色色,磨豆腐,磨逼,磨穴,互相摩擦,指交,百合高潮,蕾丝边,拉拉色情,双头龙对插,互相舔穴,穿戴假阳具,百合捆绑,姐妹百合调教,"
+            "奴隶买卖,折磨奴隶,买下奴隶,皮鞭调教,关小黑屋,逼良为娼,强行卖身,拐卖人口,抢劫金币,偷窃财产,赌场下注,赌庄出千,挂机刷币,脚本刷币,辅助刷钱,私下交易,"
+            "充值漏洞,破解脚本,绑架勒索,撕票,下毒暗算,强夺奴隶,奴隶市场,奴隶逃跑,烙印惩罚,私设刑房,奴隶契约"
+        ),
+    },
     "default": {
         "name": "标准涉敏与违禁词库 (默认综合)",
         "keywords": (
@@ -27,7 +48,7 @@ DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
         "name": "严格涉黄与低俗色情库",
         "keywords": (
             "色情,黄片,幼女,萝莉岛,援交,约炮,裸聊,裸照,偷拍,露点,原味内衣,迷药,强奸,催情春药,乱伦,换妻,卖淫,嫖娼,包养,"
-            "操逼,肏逼,插穴,口交,吞精,射精,高潮,阴道,肉缝,龟头,阴茎,肉棒,潮吹,后庭,爆菊,群交,淫趴,三级毛片,av女优,番号,无码,成人片"
+            "操逼,肏逼,插穴,口交,吞精,射精,高潮,阴道,肉缝,龟头,阴茎,肉棒,潮吹,后庭,爆菊,群交,淫趴,三级毛片,av女优,番号,无码,成人片,性奴,调教,主奴,母狗,自慰,飞机杯"
         ),
     },
     "anti_gambling": {
@@ -94,10 +115,7 @@ def resolve_data_dir() -> Path:
     """解析持久化数据目录"""
     try:
         from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-        base = Path(get_astrbot_data_path()) / "plugin_data"
-        p = base / PLUGIN_NAME
-        if not p.exists() and (base / "astrbot_plugin_msg2img").exists():
-            return base / "astrbot_plugin_msg2img"
+        p = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
         p.mkdir(parents=True, exist_ok=True)
         return p
     except Exception:
@@ -105,9 +123,7 @@ def resolve_data_dir() -> Path:
 
     for cand in [
         Path.cwd() / "data" / "plugin_data" / PLUGIN_NAME,
-        Path.cwd() / "data" / "plugin_data" / "astrbot_plugin_msg2img",
         Path(__file__).resolve().parent.parent / "data" / "plugin_data" / PLUGIN_NAME,
-        Path(__file__).resolve().parent.parent / "data" / "plugin_data" / "astrbot_plugin_msg2img",
     ]:
         try:
             cand.mkdir(parents=True, exist_ok=True)
@@ -156,7 +172,15 @@ class ConfigManager:
                 with open(self.cfg_file, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                     if isinstance(saved, dict):
+                        # 确保新版本的默认预设不丢失，同时保留用户自定义修改
+                        old_presets = saved.get("keyword_presets")
+                        if isinstance(old_presets, dict):
+                            merged = dict(DEFAULT_KEYWORD_PRESETS)
+                            merged.update(old_presets)
+                            saved["keyword_presets"] = merged
                         self.config.update(saved)
+            except Exception:
+                pass
             except Exception:
                 pass
 

@@ -327,25 +327,25 @@ class Msg2ImgPlugin(Star):
         cfg = self.cfg_mgr.config
         lvl = str(cfg.get("img_compress_level", "medium") or "medium").lower()
 
-        # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡，4:4:4 无色度抽样噪点）
+        # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡，4:4:4 无色度抽样噪点，极速编码）
         if lvl == "high":
             # 极小文件：高质量紧凑 JPEG (Q86) + 4:4:4 无抽样，体积极小无噪点
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.jpg"
             img_path = self.cache_dir / img_filename
             save_img = img.convert("RGB") if img.mode != "RGB" else img
-            save_kwargs = {"format": "JPEG", "quality": 86, "optimize": True, "subsampling": 0}
+            save_kwargs = {"format": "JPEG", "quality": 86, "subsampling": 0}
         elif lvl == "low":
-            # 原画无损：无损 PNG，低压缩比最高画质
+            # 原画无损：无损 PNG，低压缩比最高画质与极快保存
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.png"
             img_path = self.cache_dir / img_filename
             save_img = img
-            save_kwargs = {"format": "PNG", "compress_level": 3}
+            save_kwargs = {"format": "PNG", "compress_level": 1}
         else:
-            # 均衡适中：超清 JPEG (Q94)，4:4:4 锐利无杂色
+            # 均衡适中：超清 JPEG (Q94)，4:4:4 锐利无杂色，毫秒级快速生图
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.jpg"
             img_path = self.cache_dir / img_filename
             save_img = img.convert("RGB") if img.mode != "RGB" else img
-            save_kwargs = {"format": "JPEG", "quality": 94, "optimize": True, "subsampling": 0}
+            save_kwargs = {"format": "JPEG", "quality": 94, "subsampling": 0}
 
         try:
             await asyncio.to_thread(save_img.save, str(img_path), **save_kwargs)
@@ -1297,7 +1297,7 @@ class Msg2ImgPlugin(Star):
                 "- 代码展示：\n"
                 "```python\n"
                 "def hello_world():\n"
-                "    print('Msg2Img by xbnext - Test Passed!')\n"
+                "    print('Msg2Img by xbimg - Test Passed!')\n"
                 "```"
             )
             img = await asyncio.to_thread(
@@ -1429,28 +1429,28 @@ class Msg2ImgPlugin(Star):
         if not _HAS_WEB_API:
             return
         reg = self.context.register_web_api
-        for pfx in set([PLUGIN_NAME, "astrbot_plugin_msg2img", "astrbot_plugin_xbimg"]):
-            reg(f"/{pfx}/config", self._api_get_config, ["GET"], "获取插件配置")
-            reg(f"/{pfx}/config", self._api_save_config, ["POST"], "保存插件配置")
-            reg(f"/{pfx}/config/get", self._api_get_config, ["GET"], "获取插件配置(别名)")
-            reg(f"/{pfx}/config/save", self._api_save_config, ["POST"], "保存插件配置(别名)")
-            reg(f"/{pfx}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
-            reg(f"/{pfx}/groups", self._api_fetch_groups, ["GET"], "列出群聊列表")
-            reg(f"/{pfx}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
-            reg(f"/{pfx}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
-            reg(f"/{pfx}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
-            reg(f"/{pfx}/reset", self._api_reset_config, ["POST"], "重置默认配置")
-            reg(f"/{pfx}/fonts/status", self._api_fonts_status, ["GET"], "查询字体状态")
-            reg(f"/{pfx}/fonts/download", self._api_fonts_download, ["POST"], "下载缺失字体")
-            reg(f"/{pfx}/fonts/files", self._api_fonts_files, ["GET"], "列出持久化目录字体")
-            reg(f"/{pfx}/fonts/delete", self._api_fonts_delete, ["POST"], "删除持久化目录字体")
-            reg(f"/{pfx}/fonts/curated", self._api_fonts_curated, ["GET"], "精选字体列表")
-            reg(f"/{pfx}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
-            reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
-            reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
-            reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
-            reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
-            reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
+        pfx = PLUGIN_NAME
+        reg(f"/{pfx}/config", self._api_get_config, ["GET"], "获取插件配置")
+        reg(f"/{pfx}/config", self._api_save_config, ["POST"], "保存插件配置")
+        reg(f"/{pfx}/config/get", self._api_get_config, ["GET"], "获取插件配置(别名)")
+        reg(f"/{pfx}/config/save", self._api_save_config, ["POST"], "保存插件配置(别名)")
+        reg(f"/{pfx}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
+        reg(f"/{pfx}/groups", self._api_fetch_groups, ["GET"], "列出群聊列表")
+        reg(f"/{pfx}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
+        reg(f"/{pfx}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
+        reg(f"/{pfx}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
+        reg(f"/{pfx}/reset", self._api_reset_config, ["POST"], "重置默认配置")
+        reg(f"/{pfx}/fonts/status", self._api_fonts_status, ["GET"], "查询字体状态")
+        reg(f"/{pfx}/fonts/download", self._api_fonts_download, ["POST"], "下载缺失字体")
+        reg(f"/{pfx}/fonts/files", self._api_fonts_files, ["GET"], "列出持久化目录字体")
+        reg(f"/{pfx}/fonts/delete", self._api_fonts_delete, ["POST"], "删除持久化目录字体")
+        reg(f"/{pfx}/fonts/curated", self._api_fonts_curated, ["GET"], "精选字体列表")
+        reg(f"/{pfx}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
+        reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
+        reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
+        reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
+        reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
+        reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
 
     async def _api_get_config(self):
         return json_response({

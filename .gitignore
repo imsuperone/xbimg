@@ -5,6 +5,8 @@ __pycache__/
 # Runtime and cache
 data/
 *.log
+dist/
+*.zip
 
 # Editor / OS
 .vscode/

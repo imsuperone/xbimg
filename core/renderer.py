@@ -518,11 +518,13 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
         return {"ok": False, "error": "未知样式"}
     clear_font_cache()
     d = _data_subdir("emoji")
-    if d is None or not d.is_dir():
-        return {"ok": True, "deleted": []}
     deleted = []
+    search_dirs = [d] if d and d.is_dir() else []
+    if _FONT_DATA_DIR and _FONT_DATA_DIR.is_dir() and _FONT_DATA_DIR not in search_dirs:
+        search_dirs.append(_FONT_DATA_DIR)
+
     try:
-        if style in ("ios", "all"):
+        if style in ("ios", "all") and d and d.is_dir():
             for p in list(d.iterdir()):
                 if p.is_file() and (p.suffix.lower() == ".png" or p.name.startswith("ios_pack") or p.name.endswith(".downloading")):
                     try:
@@ -532,33 +534,37 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
                         pass
         if style in ("android", "all"):
             for fname in (ANDROID_EMOJI_FILE, "NotoColorEmoji.ttf"):
-                target = d / fname
-                if target.is_file():
-                    for _ in range(3):
-                        try:
-                            target.unlink(missing_ok=True)
-                            deleted.append(fname)
-                            break
-                        except Exception:
-                            clear_font_cache()
-                            time.sleep(0.05)
+                for sdir in search_dirs:
+                    target = sdir / fname
+                    if target.is_file():
+                        for _ in range(3):
+                            try:
+                                target.unlink(missing_ok=True)
+                                deleted.append(fname)
+                                break
+                            except Exception:
+                                clear_font_cache()
+                                time.sleep(0.05)
         if style in ("windows", "all"):
-            target = d / WINDOWS_EMOJI_FILE
-            if target.is_file():
-                for _ in range(3):
-                    try:
-                        target.unlink(missing_ok=True)
-                        deleted.append(WINDOWS_EMOJI_FILE)
-                        break
-                    except Exception:
-                        clear_font_cache()
-                        time.sleep(0.05)
+            for fname in (WINDOWS_EMOJI_FILE, "EmojiOneColor.otf"):
+                for sdir in search_dirs:
+                    target = sdir / fname
+                    if target.is_file():
+                        for _ in range(3):
+                            try:
+                                target.unlink(missing_ok=True)
+                                deleted.append(fname)
+                                break
+                            except Exception:
+                                clear_font_cache()
+                                time.sleep(0.05)
         # 清理所有残留的 .del_* 临时文件
-        for p in list(d.glob("*.del_*")):
-            try:
-                p.unlink(missing_ok=True)
-            except Exception:
-                pass
+        if d and d.is_dir():
+            for p in list(d.glob("*.del_*")) + list(d.glob("*.downloading")):
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
         clear_font_cache()
         return {"ok": True, "deleted": deleted, "storage_kb": get_emoji_storage_kb()}
     except Exception as e:
@@ -716,21 +722,24 @@ def delete_curated_font(cid: str) -> Dict[str, Any]:
     if not hit:
         return {"ok": False, "error": f"未知字体 ID: {cid}"}
     d = _font_data_dir()
-    if d is None or not d.is_dir():
-        return {"ok": True, "deleted": []}
     clear_font_cache()
     deleted = []
+    search_dirs = [d] if d and d.is_dir() else []
+    if _FONT_DATA_DIR and _FONT_DATA_DIR.is_dir() and _FONT_DATA_DIR not in search_dirs:
+        search_dirs.append(_FONT_DATA_DIR)
+
     for fname, _ in hit.get("files", []):
-        target = d / fname
-        if target.is_file():
-            for _ in range(3):
-                try:
-                    target.unlink(missing_ok=True)
-                    deleted.append(fname)
-                    break
-                except Exception:
-                    clear_font_cache()
-                    time.sleep(0.05)
+        for sdir in search_dirs:
+            target = sdir / fname
+            if target.is_file():
+                for _ in range(3):
+                    try:
+                        target.unlink(missing_ok=True)
+                        deleted.append(fname)
+                        break
+                    except Exception:
+                        clear_font_cache()
+                        time.sleep(0.05)
     clear_font_cache()
     _rebuild_active_fonts()
     return {"ok": True, "deleted": deleted}
@@ -1094,6 +1103,17 @@ _EMOJI_REMOTE_DEAD_UNTIL = 0.0
 
 
 def _data_subdir(name: str) -> Optional[Path]:
+    global _FONT_DATA_DIR
+    if _FONT_DATA_DIR is None:
+        try:
+            from .config import resolve_data_dir
+            _FONT_DATA_DIR = resolve_data_dir()
+        except Exception:
+            try:
+                from core.config import resolve_data_dir
+                _FONT_DATA_DIR = resolve_data_dir()
+            except Exception:
+                pass
     if _FONT_DATA_DIR is None:
         return None
     try:
@@ -1151,7 +1171,8 @@ def _cluster_codes(cluster: str) -> List[str]:
 
 def _load_emoji_png(path: Path, size: int) -> Optional[Image.Image]:
     try:
-        with Image.open(path) as src:
+        raw_bytes = path.read_bytes()
+        with Image.open(io.BytesIO(raw_bytes)) as src:
             src.load()
             im = src.convert("RGBA")
         if im.width < 8 or im.height < 8:
@@ -1314,6 +1335,7 @@ def _draw_mixed_text(
     绘制混合文字：复杂簇（ZWJ/键帽/多码点）优先全彩图；
     单个 emoji 优先全彩字体（Noto 真彩 / 系统），缺图缺字再降级；
     都没有则随正文字体单色绘制。连续普通字符批量绘制。
+    根据字体基线精准对齐 Emoji 垂直居中位置。
     返回每个字符的 (x_start, char_width, y, char) 列表，供打码定位使用。
     """
     emoji_font, emoji_is_color = get_emoji_font(font_size)
@@ -1322,14 +1344,17 @@ def _draw_mixed_text(
     text_len = len(text)
     char_positions: List[Tuple[float, float, float, str]] = []
 
+    # 精确计算 Emoji 垂直居中偏移量，与中文正文字形高度完美对齐
+    emo_offset_y = max(0, int(round(font_size * 0.08)))
+
     def _paste_image(cluster: str) -> bool:
         """全彩图绘制一簇，成功返回 True"""
         nonlocal cur_x
         emo_img = _get_emoji_image(cluster, font_size, emoji_remote)
         if emo_img is None:
             return False
-        canvas.paste(emo_img, (int(cur_x), int(y + 2)), emo_img)
-        w = font_size + 4
+        canvas.paste(emo_img, (int(cur_x), int(y + emo_offset_y)), emo_img)
+        w = font_size + 2
         char_positions.append((cur_x, w, y, cluster))
         cur_x += w
         return True
@@ -1339,12 +1364,13 @@ def _draw_mixed_text(
         nonlocal cur_x
         if len(cluster) != 1 or not is_emoji_char(cluster) or emoji_font is None:
             return False
+        emo_font_y = y + max(0, int(round(font_size * 0.04)))
         try:
-            draw.text((cur_x, y), cluster, font=emoji_font, fill=fill,
+            draw.text((cur_x, emo_font_y), cluster, font=emoji_font, fill=fill,
                       embedded_color=emoji_is_color)
         except TypeError:
-            draw.text((cur_x, y), cluster, font=emoji_font, fill=fill)
-        w = max(_char_advance(emoji_font, cluster), float(font_size))
+            draw.text((cur_x, emo_font_y), cluster, font=emoji_font, fill=fill)
+        w = max(_char_advance(emoji_font, cluster), float(font_size + 2))
         char_positions.append((cur_x, w, y, cluster))
         cur_x += w
         return True
@@ -1423,7 +1449,7 @@ def _wrap_text_line(text: str, font: ImageFont.FreeTypeFont, max_width: int, fon
     while i < n:
         cluster, i = _take_cluster(text, i)
         if _is_emoji_cluster(cluster):
-            w = float(font_size + 4)
+            w = float(font_size + 2)
         else:
             w = 0.0
             for c in cluster:
@@ -1827,7 +1853,7 @@ class MessageImageRenderer:
         footer_line_y = cur_y + footer_gap
         c_draw.line([(inner_pad_x, footer_line_y), (card_w - inner_pad_x, footer_line_y)], fill=theme.divider, width=1)
         foot_font = get_font(11, bold=False)
-        ft_text = "Generated by xbnext"
+        ft_text = "Generated by xbimg"
         c_draw.text((inner_pad_x, footer_line_y + 8), ft_text, font=foot_font, fill=theme.text_muted)
 
         # 11. 处理违规马赛克（字级精准半打码：支持上/下/随机）

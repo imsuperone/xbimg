@@ -673,7 +673,7 @@ async def render_text_to_image(text: str):
           `<span class="font-file-icon">🔤</span>` +
           `<span class="fname" title="${fnameSafe}">${fnameSafe}</span>` +
           `<span class="fsize">${sizeTxt}${f.usable ? "" : " · 异常"}</span>` +
-          `<button type="button" class="font-file-del" data-fname="${fnameSafe}" title="删除该字体">删除</button>`;
+          `<button type="button" class="font-file-del font-del-btn" data-fname="${fnameSafe}" title="删除该字体">删除</button>`;
         box.appendChild(row);
         });
       }
@@ -1051,9 +1051,9 @@ async def render_text_to_image(text: str):
         const bcls=isActive?"badge-active":installed?"badge-ready":"badge-idle";
         let btns = "";
         if (installed) {
-          btns = `<button type="button" class="font-file-del" data-emoji-del="${p.id}" title="删除此样式资源">删除</button>`;
+          btns = `<button type="button" class="font-file-del emoji-del-btn" data-emoji-del="${p.id}" title="删除此样式资源">删除</button>`;
         } else {
-          btns = `<button type="button" class="m3-btn primary-btn" data-emoji-dl="${p.id}" style="padding:4px 12px; font-size:12px;">下载</button>`;
+          btns = `<button type="button" class="m3-btn primary-btn emoji-dl-btn" data-emoji-dl="${p.id}" style="padding:4px 12px; font-size:12px;">下载</button>`;
         }
         row.innerHTML=`<span class="font-file-icon">${p.id==="ios"?"🍎":p.id==="android"?"🤖":"🪟"}</span><span class="fname">${escapeHtml(p.name)}</span><span class="fsize">${escapeHtml(p.desc)} · ${storageTxt}</span><span class="curated-badge ${bcls}">${badge}</span>${btns}`;
         box.appendChild(row);
@@ -1514,7 +1514,7 @@ async def render_text_to_image(text: str):
       }
 
       // 0.4 精选字体卸载/删除
-      const curDel = e.target.closest(".curated-delete-btn");
+      const curDel = e.target.closest(".curated-delete-btn, [data-cid]");
       if (curDel) {
         e.preventDefault();
         e.stopPropagation();
@@ -1537,6 +1537,33 @@ async def render_text_to_image(text: str):
             }
           })();
         }
+        return;
+      }
+
+      // 0.41 Emoji 删除
+      const emojiDel = e.target.closest(".emoji-del-btn, [data-emoji-del]");
+      if (emojiDel) {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteEmojiPack(emojiDel.getAttribute("data-emoji-del"));
+        return;
+      }
+
+      // 0.42 Emoji 下载
+      const emojiDl = e.target.closest(".emoji-dl-btn, [data-emoji-dl]");
+      if (emojiDl) {
+        e.preventDefault();
+        e.stopPropagation();
+        downloadEmojiPack(emojiDl.getAttribute("data-emoji-dl"));
+        return;
+      }
+
+      // 0.43 独立字体文件删除
+      const fontDel = e.target.closest(".font-del-btn, [data-fname]");
+      if (fontDel && fontDel.getAttribute("data-fname")) {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteFont(fontDel.getAttribute("data-fname"));
         return;
       }
 
@@ -1712,15 +1739,6 @@ async def render_text_to_image(text: str):
         return;
       }
 
-      // 10. 字体删除按钮
-      const fontDel = e.target.closest(".font-file-del");
-      if (fontDel && fontDel.hasAttribute("data-fname")) {
-        e.preventDefault();
-        e.stopPropagation();
-        deleteFont(fontDel.getAttribute("data-fname"));
-        return;
-      }
-
       // 11. 精选字体安装按钮
       const curatedBtn = e.target.closest(".curated-install-btn");
       if (curatedBtn && curatedBtn.hasAttribute("data-id")) {
@@ -1744,11 +1762,6 @@ async def render_text_to_image(text: str):
         downloadCustomUrl();
         return;
       }
-      // 14. Emoji 下载/删除
-      const emojiDl = e.target.closest("[data-emoji-dl]");
-      if (emojiDl) { e.preventDefault(); e.stopPropagation(); downloadEmojiPack(emojiDl.getAttribute("data-emoji-dl")); return; }
-      const emojiDel = e.target.closest("[data-emoji-del]");
-      if (emojiDel) { e.preventDefault(); e.stopPropagation(); deleteEmojiPack(emojiDel.getAttribute("data-emoji-del")); return; }
 
       // 14. 字体大小重置
       if (e.target.closest("#fontScaleResetBtn")) {

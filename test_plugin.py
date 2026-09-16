@@ -307,6 +307,13 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertTrue(moderator.check_keywords("私密露点约炮群聊")[0])
         self.assertTrue(moderator.check_keywords("出售自瞄透视挂机脚本")[0])
 
+        # 强力色情违禁词库：测试日常色色、AI发情、SM大圈小圈、百合、小白违规词
+        self.assertTrue(moderator.check_keywords("今晚做爱狠狠内射，爽到潮吹高潮抽搐", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("恶堕触手侵犯，深度开发敏感体质，止不住的流水", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("口塞皮鞭束缚，母狗跪下舔鞋，后庭开发肛塞", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("百合色色磨豆腐，双头龙对插磨穴", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("奴隶买卖私设刑房，赌场下注脚本刷币", preset_name="anti_nsfw_ultra")[0])
+
         # xbbot 专属词库匹配
         self.assertTrue(moderator.check_keywords("强行买下奴隶并进行折磨奴隶", preset_name="xbbot_game")[0])
 
