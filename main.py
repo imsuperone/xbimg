@@ -268,11 +268,12 @@ class Msg2ImgPlugin(Star):
         font_scale: Optional[int] = None,
         style: Optional[str] = None,
         theme_mode: Optional[str] = None,
+        keyword_preset: Optional[str] = None,
     ):
         """统一审查+渲染管线：返回 (Image|None, violated, mosaic, blocked)。
 
         主路径与适配器劫持路径共用，消灭重复代码，保证统计口径一致。
-        支持传入群级别覆盖的 style / theme_mode / font_scale。
+        支持传入群级别覆盖的 style / theme_mode / font_scale / keyword_preset。
         """
         cfg = self.cfg_mgr.config
         if font_scale is None:
@@ -283,7 +284,7 @@ class Msg2ImgPlugin(Star):
         eff_style = str(style or cfg.get("style", "ios")).lower()
         eff_theme = str(theme_mode or cfg.get("theme_mode", "light")).lower()
 
-        mod_res = await self.moderator.review(full_text, self.context)
+        mod_res = await self.moderator.review(full_text, self.context, preset_name=keyword_preset)
         if mod_res.is_violated and mod_res.action == "block":
             return None, True, False, True
         mosaic_mode = "none"
@@ -406,6 +407,7 @@ class Msg2ImgPlugin(Star):
                 font_scale=eff_scale,
                 style=grp_custom.get("style"),
                 theme_mode=grp_custom.get("theme_mode"),
+                keyword_preset=grp_custom.get("keyword_preset"),
             )
             # 仅违规触发：无违规则不转图（保留纯文本）
             if render_trigger == "violation_only" and not violated:
@@ -446,6 +448,7 @@ class Msg2ImgPlugin(Star):
                 font_scale=eff_scale2,
                 style=grp_custom2.get("style"),
                 theme_mode=grp_custom2.get("theme_mode"),
+                keyword_preset=grp_custom2.get("keyword_preset"),
             )
             if render_trigger2 == "violation_only" and not violated:
                 return message
@@ -635,6 +638,7 @@ class Msg2ImgPlugin(Star):
             font_scale=eff_scale_main,
             style=grp_c_main.get("style"),
             theme_mode=grp_c_main.get("theme_mode"),
+            keyword_preset=grp_c_main.get("keyword_preset"),
         )
         # 仅违规触发二次门控：无违规则不转图
         if render_trigger == "violation_only" and not violated:
@@ -775,31 +779,48 @@ class Msg2ImgPlugin(Star):
         arg = arg.strip()
         cfg = self.cfg_mgr.config
 
-        if not sub:
+        if not sub or sub in ("help", "status", "菜单"):
             yield event.plain_result(
-                "🎨【消息转图助手 - 控制台】\n"
-                "--------------------\n"
-                f"当前状态：{'🟢 已开启' if cfg.get('enable', True) else '🔴 已暂停'}\n"
-                f"视觉风格：{cfg.get('style', 'ios').upper()}\n"
-                f"配色主题：{'🌞 浅色' if cfg.get('theme_mode') == 'light' else '🌙 深色'}\n"
-                f"星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'}\n"
-                f"审查模式：{cfg.get('moderation_mode')}\n"
-                f"违规处置：{cfg.get('violation_action')}\n"
-                f"字体大小：{cfg.get('font_scale',100)}%（群单独可在 WebUI 调）\n"
-                "--------------------\n"
-                "💡 可用指令：\n"
-                "• /msg2img on / off - 开关转图\n"
-                "• /msg2img style ios / android16 - 切换风格\n"
-                "• /msg2img star on / off - 开关星空背景\n"
-                "• /msg2img fontsize [群号] 70-150 - 单群字体大小\n"
-                "• /msg2img test <内容> - 立即生成测试图"
+                "🎨【消息转图助手 - 完整控制台】\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"• 总开关状态：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'}\n"
+                f"• 触发时机：{'🔄 始终转图' if cfg.get('render_trigger') == 'always' else '🛡️ 仅违规时转图'}\n"
+                f"• 最少字数：{cfg.get('min_length_threshold', 1)} 字\n"
+                f"• 视觉风格：{cfg.get('style', 'ios').upper()}\n"
+                f"• 配色主题：{'🌞 浅色明亮' if cfg.get('theme_mode') == 'light' else '🌙 深色暗黑'}\n"
+                f"• 星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'} (密度: {cfg.get('star_density', 'medium')})\n"
+                f"• 文件体积：{cfg.get('img_compress_level', 'medium').upper()}\n"
+                f"• 链接策略：{cfg.get('link_mode', 'as_image')}\n"
+                f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
+                f"• AI 审查开关：{'🤖 开启' if cfg.get('enable_ai_moderation') else '⚪ 关闭'}\n"
+                f"• 违规处置：{cfg.get('violation_action', 'mosaic_half')}\n"
+                f"• 全局字体：{cfg.get('font_scale', 100)}%\n"
+                f"• 群生效模式：{cfg.get('group_mode', 'whitelist')}\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 变量修改指令：\n"
+                "• /msg2img on / off - 总开关\n"
+                "• /msg2img trigger always / violation - 触发时机\n"
+                "• /msg2img minlen <字数> - 最小字数门槛\n"
+                "• /msg2img style ios / android16 - 全局风格\n"
+                "• /msg2img theme light / dark - 全局配色\n"
+                "• /msg2img star on / off - 背景星空开关\n"
+                "• /msg2img density sparse / medium / dense - 星星密度\n"
+                "• /msg2img quality low / medium / high - 输出文件体积优化\n"
+                "• /msg2img link image / text / append - 链接策略\n"
+                "• /msg2img mod on / off - 屏蔽词审查开关\n"
+                "• /msg2img ai on / off - AI 审查独立开关\n"
+                "• /msg2img action half / full / block / notice - 违规处置\n"
+                "• /msg2img mosaic pixel / blur - 马赛克颗粒/模糊\n"
+                "• /msg2img mosaicpos bottom / top / random - 半字打码位置\n"
+                "• /msg2img groupmode whitelist / all / blacklist - 群生效模式\n"
+                "• /msg2img fontsize [群号] 50-500 - 字体百分比\n"
+                "• /msg2img test [文本] - 立即生成测试效果图"
             )
             return
 
-        if sub in ("on", "start", "开启", "off", "stop", "关闭", "style", "star", "fontsize", "groupfont", "gscale", "font"):
-            if not self._is_admin_event(event):
-                yield event.plain_result("⛔ 仅群管理员可修改转图配置。")
-                return
+        if not self._is_admin_event(event):
+            yield event.plain_result("⛔ 仅群管理员可修改转图配置。")
+            return
 
         if sub in ("on", "start", "开启"):
             cfg["enable"] = True
@@ -809,13 +830,43 @@ class Msg2ImgPlugin(Star):
             cfg["enable"] = False
             self.cfg_mgr.save()
             yield event.plain_result("⏸️ 消息转图助手已暂停。")
+        elif sub in ("trigger", "trig"):
+            if arg in ("violation", "violation_only", "仅违规", "违规"):
+                cfg["render_trigger"] = "violation_only"
+                self.cfg_mgr.save()
+                yield event.plain_result("✅ 转图触发时机已设为：🛡️ 仅违规时转图（普通消息保持纯文本）")
+            elif arg in ("always", "所有", "始终", "全部"):
+                cfg["render_trigger"] = "always"
+                self.cfg_mgr.save()
+                yield event.plain_result("✅ 转图触发时机已设为：🔄 始终转图")
+            else:
+                yield event.plain_result("用法：/msg2img trigger always 或 /msg2img trigger violation")
+        elif sub in ("minlen", "minlength", "len"):
+            try:
+                num = max(1, min(1000, int(arg)))
+                cfg["min_length_threshold"] = num
+                self.cfg_mgr.save()
+                yield event.plain_result(f"✅ 触发转图字数门槛已设为：{num} 字")
+            except Exception:
+                yield event.plain_result("用法：/msg2img minlen <1-1000>")
         elif sub == "style":
             if arg in ("ios", "android16"):
                 cfg["style"] = arg
                 self.cfg_mgr.save()
-                yield event.plain_result(f"🎨 视觉风格已切换为：{arg.upper()}")
+                yield event.plain_result(f"🎨 全局视觉风格已切换为：{arg.upper()}")
             else:
                 yield event.plain_result("用法：/msg2img style ios 或 /msg2img style android16")
+        elif sub in ("theme", "配色"):
+            if arg in ("light", "浅色"):
+                cfg["theme_mode"] = "light"
+                self.cfg_mgr.save()
+                yield event.plain_result("🎨 全局配色已设为：☀️ 浅色明亮")
+            elif arg in ("dark", "深色"):
+                cfg["theme_mode"] = "dark"
+                self.cfg_mgr.save()
+                yield event.plain_result("🎨 全局配色已设为：🌙 深色暗黑")
+            else:
+                yield event.plain_result("用法：/msg2img theme light 或 /msg2img theme dark")
         elif sub == "star":
             if arg in ("on", "开启", "1"):
                 cfg["star_background"] = True
@@ -823,6 +874,157 @@ class Msg2ImgPlugin(Star):
                 cfg["star_background"] = False
             self.cfg_mgr.save()
             yield event.plain_result(f"✨ 星空背景已设置为：{'开启' if cfg.get('star_background') else '关闭'}")
+        elif sub in ("density", "stardensity"):
+            if arg in ("sparse", "稀疏"):
+                cfg["star_density"] = "sparse"
+                self.cfg_mgr.save()
+                yield event.plain_result("✨ 小星星密度已设为：稀疏 (~25颗)")
+            elif arg in ("dense", "星海", "密集"):
+                cfg["star_density"] = "dense"
+                self.cfg_mgr.save()
+                yield event.plain_result("✨ 小星星密度已设为：星海 (~80颗)")
+            elif arg in ("medium", "标准"):
+                cfg["star_density"] = "medium"
+                self.cfg_mgr.save()
+                yield event.plain_result("✨ 小星星密度已设为：标准 (~50颗)")
+            else:
+                yield event.plain_result("用法：/msg2img density sparse / medium / dense")
+        elif sub in ("quality", "compress", "压缩", "文件大小"):
+            if arg in ("low", "原画", "无损", "png"):
+                cfg["img_compress_level"] = "low"
+                self.cfg_mgr.save()
+                yield event.plain_result("💾 文件体积优化已设为：原画无损 (PNG · 最高画质)")
+            elif arg in ("high", "紧凑", "极小", "省流"):
+                cfg["img_compress_level"] = "high"
+                self.cfg_mgr.save()
+                yield event.plain_result("💾 文件体积优化已设为：极小文件 (JPEG 82% · 极致省流量)")
+            elif arg in ("medium", "标准", "均衡"):
+                cfg["img_compress_level"] = "medium"
+                self.cfg_mgr.save()
+                yield event.plain_result("💾 文件体积优化已设为：均衡适中 (JPEG 92% · 推荐)")
+            else:
+                yield event.plain_result("用法：/msg2img quality low / medium / high")
+        elif sub in ("link", "linkmode", "链接"):
+            if arg in ("image", "as_image", "图", "图片"):
+                cfg["link_mode"] = "as_image"
+                self.cfg_mgr.save()
+                yield event.plain_result("🔗 链接策略已设为：链接一并转为图片")
+            elif arg in ("text", "keep_text", "纯文本"):
+                cfg["link_mode"] = "keep_text"
+                self.cfg_mgr.save()
+                yield event.plain_result("🔗 链接策略已设为：包含链接时保持纯文本直接发送")
+            elif arg in ("append", "extract_append", "兼得", "提取"):
+                cfg["link_mode"] = "extract_append"
+                self.cfg_mgr.save()
+                yield event.plain_result("🔗 链接策略已设为：转图后附带提取纯文本链接")
+            else:
+                yield event.plain_result("用法：/msg2img link image / text / append")
+        elif sub in ("mod", "审查"):
+            if arg in ("on", "开启", "1"):
+                cfg["enable_keywords_moderation"] = True
+                cfg["moderation_mode"] = "keywords"
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("🛡️ 敏感屏蔽词库审查已开启。")
+            elif arg in ("off", "关闭", "0"):
+                cfg["enable_keywords_moderation"] = False
+                cfg["moderation_mode"] = "none"
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("⚪ 敏感屏蔽词库审查已关闭。")
+            else:
+                yield event.plain_result("用法：/msg2img mod on 或 /msg2img mod off")
+        elif sub in ("ai", "aimod"):
+            if arg in ("on", "开启", "1"):
+                cfg["enable_ai_moderation"] = True
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("🤖 AI 大模型内容安全审查已开启！")
+            elif arg in ("off", "关闭", "0"):
+                cfg["enable_ai_moderation"] = False
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("⚪ AI 大模型内容安全审查已关闭。")
+            else:
+                yield event.plain_result("用法：/msg2img ai on 或 /msg2img ai off")
+        elif sub in ("action", "处置"):
+            if arg in ("half", "mosaic_half", "半打码", "半马赛克"):
+                cfg["violation_action"] = "mosaic_half"
+                self.cfg_mgr.save()
+                yield event.plain_result("🎭 违规处置动作已设为：打一半马赛克 (Half Mosaic)")
+            elif arg in ("full", "mosaic_full", "全打码"):
+                cfg["violation_action"] = "mosaic_full"
+                self.cfg_mgr.save()
+                yield event.plain_result("🔒 违规处置动作已设为：全图正文打码")
+            elif arg in ("block", "拦截", "静默"):
+                cfg["violation_action"] = "block"
+                self.cfg_mgr.save()
+                yield event.plain_result("🚫 违规处置动作已设为：彻底拦截静默不发")
+            elif arg in ("notice", "警示", "卡片"):
+                cfg["violation_action"] = "notice"
+                self.cfg_mgr.save()
+                yield event.plain_result("⚠️ 违规处置动作已设为：替换为合规警示卡片")
+            else:
+                yield event.plain_result("用法：/msg2img action half / full / block / notice")
+        elif sub in ("mosaic", "打码类型"):
+            if arg in ("pixel", "像素"):
+                cfg["mosaic_type"] = "pixel"
+                self.cfg_mgr.save()
+                yield event.plain_result("🧱 马赛克类型已设为：复古像素颗粒块")
+            elif arg in ("blur", "模糊", "毛玻璃"):
+                cfg["mosaic_type"] = "blur"
+                self.cfg_mgr.save()
+                yield event.plain_result("🌫️ 马赛克类型已设为：高斯磨砂毛玻璃")
+            else:
+                yield event.plain_result("用法：/msg2img mosaic pixel 或 /msg2img mosaic blur")
+        elif sub in ("mosaicpos", "半码位置"):
+            if arg in ("bottom", "下半", "下"):
+                cfg["mosaic_half_pos"] = "bottom"
+                self.cfg_mgr.save()
+                yield event.plain_result("⬇️ 半字打码位置已设为：遮下半")
+            elif arg in ("top", "上半", "上"):
+                cfg["mosaic_half_pos"] = "top"
+                self.cfg_mgr.save()
+                yield event.plain_result("⬆️ 半字打码位置已设为：遮上半")
+            elif arg in ("random", "随机"):
+                cfg["mosaic_half_pos"] = "random"
+                self.cfg_mgr.save()
+                yield event.plain_result("🎲 半字打码位置已设为：每字随机上下")
+            else:
+                yield event.plain_result("用法：/msg2img mosaicpos bottom / top / random")
+        elif sub in ("groupmode", "群模式"):
+            if arg in ("whitelist", "白名单"):
+                cfg["group_mode"] = "whitelist"
+                self._group_cache_sig = None
+                self.cfg_mgr.save()
+                yield event.plain_result("🛡️ 群生效模式已设为：仅白名单群生效")
+            elif arg in ("all", "全群", "全部"):
+                cfg["group_mode"] = "all"
+                self._group_cache_sig = None
+                self.cfg_mgr.save()
+                yield event.plain_result("🌐 群生效模式已设为：所有群聊直接生效")
+            elif arg in ("blacklist", "黑名单"):
+                cfg["group_mode"] = "blacklist"
+                self._group_cache_sig = None
+                self.cfg_mgr.save()
+                yield event.plain_result("🚫 群生效模式已设为：黑名单排除模式")
+            else:
+                yield event.plain_result("用法：/msg2img groupmode whitelist / all / blacklist")
+        elif sub in ("kwset", "preset", "词库"):
+            presets = cfg.get("keyword_presets", {})
+            if not isinstance(presets, dict):
+                presets = {}
+            if arg in presets:
+                cfg["active_keyword_preset"] = arg
+                item = presets[arg]
+                cfg["custom_keywords"] = item.get("keywords", "") if isinstance(item, dict) else str(item)
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                name = item.get("name", arg) if isinstance(item, dict) else arg
+                yield event.plain_result(f"✅ 全局词库方案已切换为：{name}")
+            else:
+                names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
+                yield event.plain_result("用法：/msg2img kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
         elif sub in ("fontsize", "groupfont", "gscale", "font"):
             # /msg2img fontsize <gid> <scale>  或  /msg2img fontsize <scale>（当前群）
             parts = [p for p in re.split(r"[\s,]+", arg) if p]
@@ -901,20 +1103,25 @@ class Msg2ImgPlugin(Star):
             grp_c = self._get_group_custom_config(gid)
             cur_style = grp_c.get("style", self.cfg_mgr.config.get("style", "ios"))
             cur_theme = grp_c.get("theme_mode", self.cfg_mgr.config.get("theme_mode", "light"))
+            cur_kw = grp_c.get("keyword_preset", "")
+            kw_name = "跟随全局默认" if not cur_kw else cur_kw
             yield event.plain_result(
                 f"🎨【{gname} · 转图专属设置】\n"
                 "--------------------\n"
                 f"当前字体大小：{cur_scale}%\n"
                 f"当前视觉风格：{cur_style.upper()}\n"
                 f"当前配色主题：{'浅色' if cur_theme == 'light' else '深色'}\n"
+                f"绑定词库方案：{kw_name}\n"
                 "--------------------\n"
                 "💡 专属群指令：\n"
                 "• /text set <50-500> - 设置当前群字体大小\n"
+                "• /text style ios / android16 / default - 单群风格\n"
+                "• /text theme light / dark / default - 单群配色\n"
+                "• /text kw <词库方案ID> - 单群绑定指定词库\n"
                 "• /text ttf <id> - 切换当前群精选字体\n"
-                "• /text list - 查看可用字体列表及 id\n"
-                "• /text test - 发送全功能测试图\n"
-                "• /style ios / android16 - 切换当前群风格\n"
-                "• /theme light / dark - 切换当前群配色"
+                "• /text list - 查看可用字体与词库列表\n"
+                "• /text reset - 恢复该群所有设置跟随全局\n"
+                "• /text test - 发送当前群专属测试图"
             )
             return
 
@@ -940,16 +1147,69 @@ class Msg2ImgPlugin(Star):
                 yield event.plain_result(f"✅ 已将【{gname}】的字体大小设置为 {val}%")
 
         elif sub == "list":
-            # 查看字体列表与 id
+            # 查看字体列表与词库列表
             try:
                 from core.renderer import CURATED_FONTS as _CF
             except Exception:
                 _CF = []
+            presets = self.cfg_mgr.config.get("keyword_presets", {})
+            if not isinstance(presets, dict):
+                presets = {}
             lines = [f"🔤【可用字体列表】（共 {len(_CF)} 款）:"]
             for idx, item in enumerate(_CF, 1):
-                lines.append(f"{idx}. {item['name']} - id: {item['id']} ({item['desc']})")
-            lines.append("\n💡 切换指令：/text ttf <id>\n示例：/text ttf lxgw_wenkai")
+                lines.append(f"{idx}. {item['name']} - id: {item['id']}")
+            lines.append("\n🛡️【可用敏感词库方案】:")
+            for pk, pv in presets.items():
+                pname = pv.get("name", pk) if isinstance(pv, dict) else pk
+                lines.append(f"• {pk} - {pname}")
+            lines.append("\n💡 切换指令：\n• /text ttf <字体id>\n• /text kw <词库id>\n• /text reset (恢复全部默认)")
             yield event.plain_result("\n".join(lines))
+
+        elif sub in ("kw", "preset", "词库"):
+            presets = self.cfg_mgr.config.get("keyword_presets", {})
+            if not isinstance(presets, dict):
+                presets = {}
+            if arg in ("default", "reset", "跟随", "默认", ""):
+                if gid:
+                    self._update_group_custom(gid, {"keyword_preset": ""})
+                    yield event.plain_result(f"✅ 已将【{gname}】绑定的敏感词库恢复为：跟随全局默认。")
+                return
+            if arg in presets:
+                if gid:
+                    self._update_group_custom(gid, {"keyword_preset": arg})
+                    pname = presets[arg].get("name", arg) if isinstance(presets[arg], dict) else arg
+                    yield event.plain_result(f"✅ 已将【{gname}】绑定的敏感词库切换为：{pname}")
+            else:
+                names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
+                yield event.plain_result(f"用法：/text kw <词库方案ID>  或  /text kw default(恢复跟随全局)\n当前可用词库：\n" + "\n".join(names))
+
+        elif sub in ("style", "风格"):
+            if arg in ("default", "reset", "跟随", "默认", ""):
+                if gid:
+                    self._update_group_custom(gid, {"style": ""})
+                    yield event.plain_result(f"✅ 已将【{gname}】的视觉风格恢复为跟随全局默认。")
+                return
+            if arg in ("ios", "android16", "android"):
+                st = "android16" if "android" in arg else "ios"
+                if gid:
+                    self._update_group_custom(gid, {"style": st})
+                    yield event.plain_result(f"✅ 已将【{gname}】的视觉风格设置为：{st.upper()}")
+            else:
+                yield event.plain_result("用法：/text style ios 或 /text style android16 或 /text style default")
+
+        elif sub in ("theme", "配色"):
+            if arg in ("default", "reset", "跟随", "默认", ""):
+                if gid:
+                    self._update_group_custom(gid, {"theme_mode": ""})
+                    yield event.plain_result(f"✅ 已将【{gname}】的配色主题恢复为跟随全局默认。")
+                return
+            if arg in ("light", "dark", "浅色", "深色"):
+                tm = "dark" if arg in ("dark", "深色") else "light"
+                if gid:
+                    self._update_group_custom(gid, {"theme_mode": tm})
+                    yield event.plain_result(f"✅ 已将【{gname}】的配色主题设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
+            else:
+                yield event.plain_result("用法：/text theme light 或 /text theme dark 或 /text theme default")
 
         elif sub == "ttf":
             # 切换当前群字体

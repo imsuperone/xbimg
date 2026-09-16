@@ -11,6 +11,46 @@ from typing import Any, Dict, Optional
 
 PLUGIN_NAME = "astrbot_plugin_msg2img"
 
+DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
+    "default": {
+        "name": "标准涉敏与违禁词库 (默认综合)",
+        "keywords": (
+            "贩毒,吸毒,冰毒,海洛因,大麻,摇头丸,麻古,K粉,可卡因,芬太尼,毒瘾,溜冰,毒品,迷药,迷奸,下药,"
+            "赌博,澳门赌场,澳门首家,轮盘赌,百家乐,外围赌球,六合彩,跑分,地下钱庄,洗钱,庄家,出千,赌场返水,"
+            "色情,黄片,幼女,萝莉岛,援交,约炮,裸聊,偷拍走光,露点,私密照,迷奸水,强奸,催情春药,乱伦换妻,卖淫嫖娼,包养模特,"
+            "操逼,肏逼,插穴,口交,射精,潮吹,自慰,后庭爆菊,群交淫趴,成人网站,无码av,三级片,"
+            "诈骗,杀猪盘,刷单返利,挂机脚本,游戏外挂,透视自瞄,辅助破解,代开增值税发票,办假证,开盒人肉,人肉搜索,查户籍,呼死你,"
+            "枪支弹药,管制刀具,自制炸药,氰化钾,高利贷催收,绑架勒索,买卖人口,拐卖儿童,暗网交易"
+        ),
+    },
+    "anti_porn": {
+        "name": "严格涉黄与低俗色情库",
+        "keywords": (
+            "色情,黄片,幼女,萝莉岛,援交,约炮,裸聊,裸照,偷拍,露点,原味内衣,迷药,强奸,催情春药,乱伦,换妻,卖淫,嫖娼,包养,"
+            "操逼,肏逼,插穴,口交,吞精,射精,高潮,阴道,肉缝,龟头,阴茎,肉棒,潮吹,后庭,爆菊,群交,淫趴,三级毛片,av女优,番号,无码,成人片"
+        ),
+    },
+    "anti_gambling": {
+        "name": "严格涉赌涉诈与黑产库",
+        "keywords": (
+            "赌博,澳门赌场,澳门首家,线上赌场,轮盘赌,百家乐,跑分洗钱,地下钱庄,炸金花,六合彩特码,外围赌球,菠菜平台,出千,赌场抽头,"
+            "诈骗,杀猪盘,刷单兼职,挂机脚本,游戏透视自瞄,开专用发票,代办假证,查档查户籍,开盒挂人,呼死你轰炸,出售银行卡四件套,购买实名微信号"
+        ),
+    },
+    "anti_drugs": {
+        "name": "严格涉毒与违禁违禁品库",
+        "keywords": (
+            "贩毒,吸毒,冰毒,海洛因,大麻,摇头丸,麻古,K粉,氯胺酮,可卡因,吗啡,芬太尼,毒瘾,溜冰,飞行员,毒品交易,丧尸药,蓝精灵,聪明药,上头电子烟,罂粟"
+        ),
+    },
+    "xbbot_game": {
+        "name": "互动娱乐/涉黑调教过滤库",
+        "keywords": (
+            "奴隶买卖,折磨奴隶,买下奴隶,皮鞭调教,关小黑屋,滴蜡酷刑,逼良为娼,强行卖身,拐卖人口,抢劫金币,偷窃财产,赌场下注,赌庄出千,脚本刷币,辅助刷钱,私下交易"
+        ),
+    },
+}
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "enable": True,
     "style": "ios",
@@ -19,11 +59,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "star_density": "medium",
     "min_length_threshold": 1,
     "link_mode": "as_image",
+    "enable_keywords_moderation": True,
     "moderation_mode": "keywords",
     "enable_ai_moderation": False,
     "violation_action": "mosaic_half",
     "mosaic_type": "pixel",
-    "custom_keywords": "违禁,赌博,色情,暴力,诈骗,挂机脚本,发票代开",
+    "active_keyword_preset": "default",
+    "keyword_presets": DEFAULT_KEYWORD_PRESETS,
+    "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
     "img_compress_level": "medium",
     "custom_ai_prompt": "",
     "group_configs": {},

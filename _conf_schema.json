@@ -78,11 +78,17 @@
     "options": ["as_image", "keep_text", "extract_append"],
     "default": "as_image"
   },
+  "enable_keywords_moderation": {
+    "description": "启用屏蔽词审查",
+    "hint": "基础敏感词审查开关。开启后自动匹配敏感词库执行打码或拦截；关闭则跳过关键词审查",
+    "type": "bool",
+    "default": true
+  },
   "moderation_mode": {
     "description": "内容安全审查模式",
-    "hint": "none: 不审查; keywords: 仅自定义屏蔽词; ai: 仅 AI 大模型审查; both: 关键词与 AI 双重审查",
+    "hint": "none: 关闭审查; keywords: 启用敏感词审查",
     "type": "string",
-    "options": ["none", "keywords", "ai", "both"],
+    "options": ["none", "keywords"],
     "default": "keywords"
   },
   "enable_ai_moderation": {
@@ -90,6 +96,12 @@
     "hint": "独立总开关。开启后将在屏蔽词未命中时调用大模型审查文本涉敏合规性，关闭则绝不调用 AI 接口",
     "type": "bool",
     "default": false
+  },
+  "active_keyword_preset": {
+    "description": "当前生效的敏感词库预设",
+    "hint": "选择当前全局默认启用的敏感词库套系",
+    "type": "string",
+    "default": "default"
   },
   "violation_action": {
     "description": "违规内容处理方式",
@@ -106,14 +118,14 @@
     "default": "pixel"
   },
   "custom_keywords": {
-    "description": "自定义屏蔽词列表",
-    "hint": "违规屏蔽词，英文逗号分隔，匹配时将判定违规并按策略处置",
+    "description": "当前词库的敏感词列表",
+    "hint": "中英文逗号、分号或换行分隔，命中时将判定违规并按策略处置",
     "type": "string",
-    "default": "违禁,赌博,色情,暴力,诈骗,挂机脚本,发票代开"
+    "default": "贩毒,吸毒,冰毒,海洛因,大麻,摇头丸,麻古,K粉,可卡因,芬太尼,毒瘾,溜冰,毒品,迷药,迷奸,下药,赌博,澳门赌场,澳门首家,轮盘赌,百家乐,外围赌球,六合彩,跑分,地下钱庄,洗钱,庄家,出千,色情,黄片,幼女,萝莉岛,援交,约炮,裸聊,偷拍走光,露点,私密照,迷奸水,强奸,催情春药,乱伦换妻,卖淫嫖娼,包养模特,操逼,肏逼,插穴,口交,射精,潮吹,自慰,后庭爆菊,群交淫趴,成人网站,无码av,三级片,诈骗,杀猪盘,刷单返利,挂机脚本,游戏外挂,透视自瞄,辅助破解,代开增值税发票,办假证,开盒人肉,人肉搜索,查户籍,呼死你,枪支弹药,管制刀具,自制炸药,高利贷催收,绑架勒索,买卖人口,暗网交易"
   },
   "img_compress_level": {
-    "description": "图片压缩力度",
-    "hint": "low: 高清大图(轻微压缩); medium: 标准均衡(清晰且适中); high: 极限紧凑(小体积微损，清晰可读)",
+    "description": "输出图片文件存储大小优化",
+    "hint": "low: 原画无损 (PNG · 文件较大); medium: 均衡适中 (JPEG 92% · 推荐); high: 极小文件 (JPEG 82% · 极省流量)。仅优化文件存储字节体积（KB/MB），绝不改变长宽分辨率与排版清晰度。",
     "type": "string",
     "options": ["low", "medium", "high"],
     "default": "medium"

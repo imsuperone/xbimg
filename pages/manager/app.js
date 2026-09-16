@@ -327,8 +327,9 @@ async def render_text_to_image(text: str):
 
     setSegmentedValue("segImgCompress", cfg.img_compress_level || "medium");
 
-    const kwEl = document.getElementById("cfgKeywords");
-    if (kwEl) kwEl.value = cfg.custom_keywords || "";
+    // 填充与同步多预设词库
+    populateKeywordPresets();
+
     const promptEl = document.getElementById("cfgCustomAiPrompt");
     if (promptEl) {
       promptEl.value = cfg.custom_ai_prompt || (
@@ -436,7 +437,28 @@ async def render_text_to_image(text: str):
       violation_action: getRadioValue("violationAction", "mosaic_half"),
       mosaic_type: getSegmentedValue("segMosaicType", "pixel"),
       mosaic_half_pos: getSegmentedValue("segMosaicHalfPos", "bottom"),
-      custom_keywords: kwEl ? kwEl.value.trim() : "",
+      custom_keywords: (()=>{
+        const sel = document.getElementById("keywordPresetSelect");
+        const txt = document.getElementById("cfgKeywords");
+        const presets = getKeywordPresets();
+        const activeKey = sel ? sel.value : (currentConfig.active_keyword_preset || "default");
+        if (txt) {
+          if (presets[activeKey]) presets[activeKey].keywords = txt.value.trim();
+          return txt.value.trim();
+        }
+        return currentConfig.custom_keywords || "";
+      })(),
+      active_keyword_preset: document.getElementById("keywordPresetSelect")?.value || (currentConfig.active_keyword_preset || "default"),
+      keyword_presets: (()=>{
+        const sel = document.getElementById("keywordPresetSelect");
+        const txt = document.getElementById("cfgKeywords");
+        const presets = getKeywordPresets();
+        const activeKey = sel ? sel.value : (currentConfig.active_keyword_preset || "default");
+        if (txt && presets[activeKey]) {
+          presets[activeKey].keywords = txt.value.trim();
+        }
+        return presets;
+      })(),
       ai_provider_mode: getSegmentedValue("segAiProviderMode","astrbot"),
       ai_astrbot_model: document.getElementById("cfgAiAstrbotModel")?.value.trim() || "",
       ai_api_base: aiBaseEl ? aiBaseEl.value.trim() : "",
@@ -457,22 +479,33 @@ async def render_text_to_image(text: str):
         const m = {};
         curList.forEach(gid=>{
           const prev = existing[gid] || {};
-          const card = document.querySelector(`.selected-group-card:has([data-gid="${gid}"])`) || document;
-          const slider = card.querySelector(`.sg-slider[data-gid="${gid}"]`);
-          const stSel = card.querySelector(`.sg-style[data-gid="${gid}"]`);
-          const thSel = card.querySelector(`.sg-theme[data-gid="${gid}"]`);
-          const ftSel = card.querySelector(`.sg-font[data-gid="${gid}"]`);
+          const slider = document.querySelector(`.sg-slider[data-gid="${gid}"]`);
+          const numEl = document.querySelector(`.sg-num[data-gid="${gid}"]`);
+          const stSel = document.querySelector(`.sg-style[data-gid="${gid}"]`);
+          const thSel = document.querySelector(`.sg-theme[data-gid="${gid}"]`);
+          const ftSel = document.querySelector(`.sg-font[data-gid="${gid}"]`);
+          const kwSel = document.querySelector(`.sg-kw[data-gid="${gid}"]`);
 
-          const scaleVal = slider ? (parseInt(slider.value, 10) || 100) : (prev.font_scale || 100);
+          let scaleVal = null;
+          if (numEl && numEl.value !== "") {
+            scaleVal = parseInt(numEl.value, 10);
+          } else if (slider) {
+            scaleVal = parseInt(slider.value, 10);
+          } else if (prev.font_scale !== undefined) {
+            scaleVal = parseInt(prev.font_scale, 10);
+          }
+
           const styleVal = stSel ? stSel.value : (prev.style || "");
           const themeVal = thSel ? thSel.value : (prev.theme_mode || "");
           const fontVal = ftSel ? ftSel.value : (prev.custom_font_path || "");
+          const kwVal = kwSel ? kwSel.value : (prev.keyword_preset || "");
 
           const item = {};
           if (scaleVal && scaleVal !== 100) item.font_scale = scaleVal;
           if (styleVal) item.style = styleVal;
           if (themeVal) item.theme_mode = themeVal;
           if (fontVal) item.custom_font_path = fontVal;
+          if (kwVal) item.keyword_preset = kwVal;
 
           if (Object.keys(item).length > 0) {
             m[gid] = item;
@@ -838,6 +871,57 @@ async def render_text_to_image(text: str):
     Object.keys(cfgs).forEach(k=>{ if(cfgs[k] && cfgs[k].font_scale) res[k]=cfgs[k].font_scale; });
     return res;
   }
+
+  function getKeywordPresets() {
+    let p = currentConfig.keyword_presets;
+    if (typeof p === "string") {
+      try { p = JSON.parse(p); } catch(e) { p = {}; }
+    }
+    if (!p || typeof p !== "object" || Object.keys(p).length === 0) {
+      p = {
+        default: { name: "标准涉敏与违禁词库 (默认综合)", keywords: currentConfig.custom_keywords || "" }
+      };
+    }
+    return p;
+  }
+
+  function populateKeywordPresets() {
+    const sel = document.getElementById("keywordPresetSelect");
+    const txt = document.getElementById("cfgKeywords");
+    if (!sel) return;
+    const presets = getKeywordPresets();
+    const activeKey = currentConfig.active_keyword_preset || "default";
+    sel.innerHTML = "";
+    Object.keys(presets).forEach((k) => {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = (presets[k] && presets[k].name) ? presets[k].name : k;
+      if (k === activeKey) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (txt) {
+      const activeObj = presets[activeKey] || presets["default"] || Object.values(presets)[0] || {};
+      txt.value = (activeObj.keywords || currentConfig.custom_keywords || "").trim();
+    }
+  }
+
+  function populateGroupKeywordSelects() {
+    const presets = getKeywordPresets();
+    const grpCfgs = getGroupConfigs();
+    document.querySelectorAll(".sg-kw").forEach((sel) => {
+      const gid = sel.getAttribute("data-gid");
+      const cur = (grpCfgs[gid] && grpCfgs[gid].keyword_preset) || "";
+      sel.innerHTML = `<option value="">跟随全局 (默认)</option>`;
+      Object.keys(presets).forEach((k) => {
+        const opt = document.createElement("option");
+        opt.value = k;
+        opt.textContent = (presets[k] && presets[k].name) ? presets[k].name : k;
+        if (cur === k) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
   function renderSelectedGroupsFontList() {
     const box = document.getElementById("selectedGroupsFontList");
     const wrap = document.getElementById("selectedGroupsBox");
@@ -856,6 +940,7 @@ async def render_text_to_image(text: str):
       const curStyle = c.style || "";
       const curTheme = c.theme_mode || "";
       const curFont = c.custom_font_path || "";
+      const curKw = c.keyword_preset || "";
       const globalStyleName = (currentConfig.style || "ios").toUpperCase();
       const globalThemeName = (currentConfig.theme_mode === "dark") ? "深色" : "浅色";
 
@@ -865,42 +950,52 @@ async def render_text_to_image(text: str):
         `<div class="sg-card-head">` +
         `  <span class="sg-name" title="${escapeHtml(gname)}">👥 ${escapeHtml(gname)} <span style="opacity:0.6; font-size:11px">(${gid})</span></span>` +
         `  <div class="sg-head-actions">` +
-        `    <span class="sg-val">${hasCustomScale ? sc + "%" : sc + "% (全局)"}</span>` +
+        `    <span class="sg-val" data-gid="${escapeHtml(gid)}">${hasCustomScale ? sc + "%" : sc + "% (全局)"}</span>` +
         `    <button type="button" class="sg-reset-btn" data-gid="${escapeHtml(gid)}" title="恢复此群全部设置至跟随全局默认">恢复默认</button>` +
         `  </div>` +
         `</div>` +
         `<div class="sg-controls">` +
-        `  <div class="sg-item">` +
+        `  <div class="sg-item sg-item-scale">` +
         `    <div class="sg-label-row"><label>字体大小</label><button type="button" class="sg-mini-reset" data-gid="${escapeHtml(gid)}">默认</button></div>` +
-        `    <input type="range" class="sg-slider" min="50" max="500" step="5" value="${sc}" data-gid="${escapeHtml(gid)}">` +
+        `    <div style="display:flex; align-items:center; gap:8px;">` +
+        `      <input type="range" class="sg-slider" min="50" max="500" step="5" value="${sc}" data-gid="${escapeHtml(gid)}" style="flex:1;">` +
+        `      <input type="number" class="m3-input sg-num" min="50" max="500" step="5" value="${sc}" data-gid="${escapeHtml(gid)}" style="width:68px; padding:4px 6px; font-size:12px; font-weight:700; text-align:center;">` +
+        `    </div>` +
         `  </div>` +
         `  <div class="sg-item">` +
-        `    <label>风格</label>` +
+        `    <label>视觉风格</label>` +
         `    <select class="sg-select sg-style" data-gid="${escapeHtml(gid)}">` +
-        `      <option value=""${!curStyle ? " selected" : ""}>跟随全局 (默认: ${globalStyleName})</option>` +
+        `      <option value=""${!curStyle ? " selected" : ""}>跟随全局 (${globalStyleName})</option>` +
         `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>iOS 磨砂玻璃</option>` +
         `      <option value="android16"${curStyle === "android16" ? " selected" : ""}>Android 16 M3</option>` +
         `    </select>` +
         `  </div>` +
         `  <div class="sg-item">` +
-        `    <label>主题</label>` +
+        `    <label>配色主题</label>` +
         `    <select class="sg-select sg-theme" data-gid="${escapeHtml(gid)}">` +
-        `      <option value=""${!curTheme ? " selected" : ""}>跟随全局 (默认: ${globalThemeName})</option>` +
+        `      <option value=""${!curTheme ? " selected" : ""}>跟随全局 (${globalThemeName})</option>` +
         `      <option value="light"${curTheme === "light" ? " selected" : ""}>浅色明亮</option>` +
         `      <option value="dark"${curTheme === "dark" ? " selected" : ""}>深色暗黑</option>` +
         `    </select>` +
         `  </div>` +
         `  <div class="sg-item">` +
-        `    <label>字体</label>` +
+        `    <label>字体设置</label>` +
         `    <select class="sg-select sg-font" data-gid="${escapeHtml(gid)}">` +
+        `      <option value="">跟随全局 (默认)</option>` +
+        `    </select>` +
+        `  </div>` +
+        `  <div class="sg-item">` +
+        `    <label>审查词库</label>` +
+        `    <select class="sg-select sg-kw" data-gid="${escapeHtml(gid)}">` +
         `      <option value="">跟随全局 (默认)</option>` +
         `    </select>` +
         `  </div>` +
         `</div>`;
       box.appendChild(row);
     });
-    // 填充群字体下拉
+    // 填充群字体与词库下拉
     populateGroupFontSelects();
+    populateGroupKeywordSelects();
   }
 
   function populateGroupFontSelects() {
@@ -1466,6 +1561,46 @@ async def render_text_to_image(text: str):
         return;
       }
 
+      // 0.6 新增自定义词库
+      if (e.target.closest("#addNewPresetBtn")) {
+        e.preventDefault();
+        const name = prompt("请输入新词库方案名称：", "自定义敏感词库");
+        if (name && name.trim()) {
+          const presets = getKeywordPresets();
+          const pid = "custom_" + Date.now();
+          presets[pid] = { name: name.trim(), keywords: "" };
+          currentConfig.keyword_presets = presets;
+          currentConfig.active_keyword_preset = pid;
+          populateKeywordPresets();
+          renderSelectedGroupsFontList();
+          triggerAutoSave();
+          showToast(`✅ 已新建词库方案：${name}`);
+        }
+        return;
+      }
+
+      // 0.7 删除自定义词库
+      if (e.target.closest("#delPresetBtn")) {
+        e.preventDefault();
+        const sel = document.getElementById("keywordPresetSelect");
+        const cur = sel ? sel.value : "default";
+        if (cur === "default") {
+          showToast("⚠️ 默认标准词库不可删除");
+          return;
+        }
+        if (confirm("确定删除当前自定义词库方案吗？")) {
+          const presets = getKeywordPresets();
+          delete presets[cur];
+          currentConfig.keyword_presets = presets;
+          currentConfig.active_keyword_preset = "default";
+          populateKeywordPresets();
+          renderSelectedGroupsFontList();
+          triggerAutoSave();
+          showToast("🗑️ 已删除该词库方案");
+        }
+        return;
+      }
+
       // 1. 群聊勾选胶囊点击
       const groupChip = e.target.closest(".group-select-chip");
       if (groupChip) {
@@ -1655,12 +1790,22 @@ async def render_text_to_image(text: str):
         }
         triggerAutoSave();
       }
+      if (e.target && e.target.id === "keywordPresetSelect") {
+        const presets = getKeywordPresets();
+        const activeKey = e.target.value;
+        currentConfig.active_keyword_preset = activeKey;
+        const txt = document.getElementById("cfgKeywords");
+        if (txt && presets[activeKey]) {
+          txt.value = (presets[activeKey].keywords || "").trim();
+        }
+        triggerAutoSave();
+      }
       if (e.target && e.target.id === "fontSelectDropdown") {
         // 持久化目录字体下拉选择即时生效
         applySelectedFont();
       }
-      if (e.target && (e.target.classList.contains("sg-style") || e.target.classList.contains("sg-theme") || e.target.classList.contains("sg-font"))) {
-        // 群专属风格/主题/字体即时保存
+      if (e.target && (e.target.classList.contains("sg-style") || e.target.classList.contains("sg-theme") || e.target.classList.contains("sg-font") || e.target.classList.contains("sg-kw"))) {
+        // 群专属风格/主题/字体/词库即时保存
         triggerAutoSave();
       }
       if (e.target && (e.target.name === "linkMode" || e.target.name === "violationAction")) {
@@ -1681,11 +1826,41 @@ async def render_text_to_image(text: str):
         triggerAutoSave();
       }
       if (e.target && e.target.classList.contains("sg-slider")) {
-        const card = e.target.closest(".selected-group-card");
-        if (card) {
-          const vEl = card.querySelector(".sg-val");
-          if (vEl) vEl.textContent = e.target.value + "%";
+        const gid = e.target.getAttribute("data-gid");
+        const val = parseInt(e.target.value, 10) || 100;
+        const numEl = document.querySelector(`.sg-num[data-gid="${gid}"]`);
+        if (numEl) numEl.value = val;
+        const valEl = document.querySelector(`.sg-val[data-gid="${gid}"]`);
+        if (valEl) valEl.textContent = val + "%";
+        const cfgs = getGroupConfigs();
+        if (!cfgs[gid]) cfgs[gid] = {};
+        cfgs[gid].font_scale = val;
+        currentConfig.group_configs = cfgs;
+        triggerAutoSave();
+      }
+      if (e.target && e.target.classList.contains("sg-num")) {
+        const gid = e.target.getAttribute("data-gid");
+        let val = parseInt(e.target.value, 10) || 100;
+        val = Math.max(50, Math.min(500, val));
+        const slider = document.querySelector(`.sg-slider[data-gid="${gid}"]`);
+        if (slider) slider.value = val;
+        const valEl = document.querySelector(`.sg-val[data-gid="${gid}"]`);
+        if (valEl) valEl.textContent = val + "%";
+        const cfgs = getGroupConfigs();
+        if (!cfgs[gid]) cfgs[gid] = {};
+        cfgs[gid].font_scale = val;
+        currentConfig.group_configs = cfgs;
+        triggerAutoSave();
+      }
+      if (e.target && e.target.id === "cfgKeywords") {
+        const sel = document.getElementById("keywordPresetSelect");
+        const activeKey = sel ? sel.value : (currentConfig.active_keyword_preset || "default");
+        const presets = getKeywordPresets();
+        if (presets[activeKey]) {
+          presets[activeKey].keywords = e.target.value.trim();
+          currentConfig.keyword_presets = presets;
         }
+        currentConfig.custom_keywords = e.target.value.trim();
         triggerAutoSave();
       }
       if (e.target && (e.target.id === "cfgKeywords" || e.target.id === "cfgMinLength")) {

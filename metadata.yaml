@@ -9,7 +9,7 @@ desc: |
   - 🛡️ 双轨审查机制：支持自定义屏蔽词库与外接大模型 AI 内容安全审查
   - 🎭 违规半马赛克：支持对违规内容进行创意“打一半马赛克/下半截马赛克”处理，保障群聊安全
   - 📱 纯正 Android 16 风格 WebUI：交互式仪表盘，支持实时文本渲染测试与所见即所得调优
-version: 1.0.2
+version: 1.0.3
 author: Light
 repo: https://github.com/imsuperone/textimg
 support_platforms:

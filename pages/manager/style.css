@@ -265,6 +265,7 @@ body {
   display: none;
   flex-direction: column;
   gap: 20px;
+  width: 100%;
 }
 
 .settings-section.active {
@@ -272,19 +273,13 @@ body {
 }
 
 /* ==========================================================================
-   Two Column Main Content Grid
+   Main Workspace Wrap (Single Column Tab Architecture)
    ========================================================================== */
-.main-content-grid {
-  display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  gap: 24px;
-  align-items: start;
-}
-
-@media (max-width: 900px) {
-  .main-content-grid {
-    grid-template-columns: 1fr;
-  }
+.main-content-wrap, .main-content-grid {
+  display: block;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .settings-column {
@@ -1065,21 +1060,25 @@ body {
 
 .sg-controls {
   display: grid;
-  grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr;
-  gap: 8px;
-  align-items: center;
-}
-
-@media (max-width: 700px) {
-  .sg-controls {
-    grid-template-columns: 1fr 1fr;
-  }
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
 .sg-item {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+}
+
+.sg-item-scale {
+  grid-column: span 2;
+}
+
+@media (max-width: 600px) {
+  .sg-item-scale {
+    grid-column: span 1;
+  }
 }
 
 .sg-item label {
@@ -1211,23 +1210,6 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
 @media (max-width: 900px) {
   .mobile-float-preview-btn {
     display: inline-flex;
-  }
-
-  /* When on mobile, preview column can be switched with tab */
-  .main-content-grid.mobile-view-preview .settings-column {
-    display: none !important;
-  }
-  .main-content-grid.mobile-view-preview .preview-column {
-    display: block !important;
-  }
-  .main-content-grid:not(.mobile-view-preview) .preview-column {
-    display: none;
-  }
-}
-
-@media (min-width: 901px) {
-  .preview-column {
-    display: block !important;
   }
 }
 

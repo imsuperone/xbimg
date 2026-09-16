@@ -296,6 +296,20 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             if tmp.exists():
                 tmp.unlink(missing_ok=True)
 
+    def test_keyword_presets(self):
+        """测试多套敏感词方案定义及匹配"""
+        cfg = dict(DEFAULT_CONFIG)
+        moderator = ContentModerator(cfg)
+
+        # 默认综合词库：测试涉毒、涉赌、涉黄
+        self.assertTrue(moderator.check_keywords("这里有人在贩毒和吸毒")[0])
+        self.assertTrue(moderator.check_keywords("欢迎来到线上赌场进行轮盘赌")[0])
+        self.assertTrue(moderator.check_keywords("私密露点约炮群聊")[0])
+        self.assertTrue(moderator.check_keywords("出售自瞄透视挂机脚本")[0])
+
+        # xbbot 专属词库匹配
+        self.assertTrue(moderator.check_keywords("强行买下奴隶并进行折磨奴隶", preset_name="xbbot_game")[0])
+
     def test_group_config_defaults(self):
         """测试群专属配置跟随全局默认"""
         from main import Msg2ImgPlugin

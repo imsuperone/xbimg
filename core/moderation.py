@@ -57,15 +57,43 @@ class ContentModerator:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
 
-    def _get_keywords(self) -> List[str]:
-        raw = str(self.config.get("custom_keywords", "") or "")
-        # 按逗号、分号、换行符分割
-        tokens = [k.strip() for k in _SPLIT_KW_RE.split(raw) if k.strip()]
+    def _get_keywords(self, preset_name: Optional[str] = None) -> List[str]:
+        raw = ""
+        presets = self.config.get("keyword_presets", {})
+        if not isinstance(presets, dict):
+            presets = {}
+
+        # 1. 若指定群预设名，优先获取该预设
+        if preset_name and preset_name in presets:
+            item = presets[preset_name]
+            raw = item.get("keywords", "") if isinstance(item, dict) else str(item)
+        elif not preset_name:
+            # 未指定群预设时，优先合并 custom_keywords 与激活预设
+            active_p = str(self.config.get("active_keyword_preset", "default") or "default")
+            preset_raw = ""
+            if active_p in presets:
+                item = presets[active_p]
+                preset_raw = item.get("keywords", "") if isinstance(item, dict) else str(item)
+            custom_raw = str(self.config.get("custom_keywords", "") or "")
+            raw = f"{custom_raw},{preset_raw}" if (preset_raw and custom_raw != preset_raw) else (custom_raw or preset_raw)
+
+        # 兜底
+        if not raw:
+            raw = str(self.config.get("custom_keywords", "") or "")
+
+        # 按逗号、分号、换行符分割并去重
+        seen = set()
+        tokens = []
+        for k in _SPLIT_KW_RE.split(raw):
+            token = k.strip()
+            if token and token not in seen:
+                seen.add(token)
+                tokens.append(token)
         return tokens
 
-    def check_keywords(self, text: str) -> Tuple[bool, List[str]]:
+    def check_keywords(self, text: str, preset_name: Optional[str] = None) -> Tuple[bool, List[str]]:
         """检查自定义屏蔽词"""
-        keywords = self._get_keywords()
+        keywords = self._get_keywords(preset_name)
         if not keywords or not text:
             return False, []
 
@@ -207,14 +235,15 @@ class ContentModerator:
                 return True, "AI 判定可能违规"
             return False, ""
 
-    async def review(self, text: str, context: Optional[Any] = None) -> ModerationResult:
+    async def review(self, text: str, context: Optional[Any] = None, preset_name: Optional[str] = None) -> ModerationResult:
         """
         全流程审查统一入口
         """
         mode = self.config.get("moderation_mode", "keywords")
         action_pref = self.config.get("violation_action", "mosaic_half")
+        kw_enabled = bool(self.config.get("enable_keywords_moderation", True)) and (mode != "none")
 
-        if mode == "none" or not text.strip():
+        if not text.strip():
             return ModerationResult(is_violated=False, action="pass")
 
         violated = False
@@ -222,8 +251,8 @@ class ContentModerator:
         matched_kw: List[str] = []
 
         # 1. 关键词审查
-        if mode in ("keywords", "both"):
-            kw_hit, matched_kw = self.check_keywords(text)
+        if kw_enabled and mode in ("keywords", "both", "always"):
+            kw_hit, matched_kw = self.check_keywords(text, preset_name)
             if kw_hit:
                 violated = True
                 reason = f"触发敏感屏蔽词: {', '.join(matched_kw[:5])}"
