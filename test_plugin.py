@@ -452,6 +452,28 @@ class TestMsg2ImgPlugin(unittest.TestCase):
                 dev_cfg.unlink()
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_decorative_font_fallback(self):
+        """装饰字体（缺 CJK）自动回退：拉丁跟随主字体，中文切链中字体，国旗成对不断开"""
+        from core.renderer import (
+            _load_font_file, get_font, _font_covers, _resolve_char_font,
+            _take_cluster, _cluster_codes,
+        )
+        latin = _load_font_file("C:/Windows/Fonts/arial.ttf", 32)  # 无 CJK，模拟哥特体
+        cjk = get_font(32)
+        self.assertIsNotNone(latin)
+        self.assertTrue(_font_covers(latin, "A"))
+        self.assertFalse(_font_covers(latin, "中"))
+        self.assertTrue(_font_covers(cjk, "中"))
+        self.assertTrue(_font_covers(latin, " "))
+        self.assertIs(_resolve_char_font("A", latin), latin)
+        fb = _resolve_char_font("中", latin)
+        self.assertIsNot(fb, latin)
+        self.assertTrue(_font_covers(fb, "中"))
+        cl, ni = _take_cluster("🇨🇳好", 0)
+        self.assertEqual(cl, "🇨🇳")
+        self.assertEqual(ni, 2)
+        self.assertEqual(_cluster_codes(cl), ["1f1e8-1f1f3"])
+
     def test_ios_emoji_download_offline(self):
         """无网络时 iOS 下载如实失败，不写 ready 标记，不虚标已下载"""
         import shutil

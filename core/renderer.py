@@ -590,6 +590,14 @@ def clear_font_cache():
     _FONT_BYTES_CACHE.clear()
     _EMOJI_IMG_CACHE.clear()
     try:
+        _COVER_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _RESOLVE_CACHE.clear()
+    except Exception:
+        pass
+    try:
         import gc
         gc.collect()
     except Exception:
@@ -953,6 +961,117 @@ def _char_advance(font: ImageFont.FreeTypeFont, char: str) -> float:
             return 14.0
 
 
+# 无墨字符（空格/控制符/连接符等）永远跟随主字体，不参与回退
+_BLANK_PASSTHROUGH = frozenset(["\u200b", "\u200d", "\ufe0f", "\u00ad"])
+_COVER_CACHE: Dict[Tuple, bool] = {}
+_RESOLVE_CACHE: Dict[Tuple, Any] = {}
+
+
+def _mask_bytes(core) -> bytes:
+    """ImagingCore 位图转字节（Pillow 12 的 getmask 返回无 tobytes 的 core 对象）"""
+    try:
+        c = Image.new("L", core.size, 0)
+        c.im.paste(core, (0, 0) + core.size)
+        return c.tobytes()
+    except Exception:
+        return b""
+
+
+def _font_covers(font: ImageFont.FreeTypeFont, ch: str) -> bool:
+    """判定字体是否真含该字符字形（而非豆腐块占位）。
+
+    原理：缺字时 FreeType 渲染 .notdef 占位块；与 U+FFFF（必缺字，渲染结果即该字体的
+    .notdef 长相）逐像素比对可精准识别。误判方向是安全的：把有字判成缺字只会多用
+    回退字体渲染（字形依然正确），不会制造新的豆腐块。
+    """
+    if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH:
+        return True
+    try:
+        fp = getattr(font, "path", None)
+        key = (fp if isinstance(fp, (str, bytes)) else id(font), getattr(font, "size", 0), ch)
+    except Exception:
+        return True
+    hit = _COVER_CACHE.get(key)
+    if hit is not None:
+        return hit
+    ok = True
+    try:
+        ref = font.getmask("\uffff")
+        m = font.getmask(ch)
+        if m.getbbox() is None:
+            ok = False
+        elif ref.getbbox() is None:
+            ok = True  # 该字体没有 .notdef，有墨即视为覆盖
+        elif m.size != ref.size:
+            ok = True  # 外框不同必为不同字形
+        else:
+            ok = _mask_bytes(m) != _mask_bytes(ref)
+    except Exception:
+        ok = True
+    if len(_COVER_CACHE) > 6000:
+        _COVER_CACHE.clear()
+    _COVER_CACHE[key] = ok
+    return ok
+
+
+def _fallback_font_paths() -> List[str]:
+    """回退候选字体路径（已按优先级排序，去重）"""
+    seen = set()
+    out: List[str] = []
+    for cand in list(_ACTIVE_ORDERED) + [p for p in _CANDIDATE_FONTS if p]:
+        try:
+            if cand and cand not in seen:
+                seen.add(cand)
+                out.append(cand)
+        except Exception:
+            continue
+    return out[:16]
+
+
+def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.FreeTypeFont:
+    """单字符字体解析：主字体有字就用主字体；缺字则按链回退到首个有字的字体。
+
+    解决用户自定义装饰字体（如哥特体）缺 CJK/符号字形导致的满屏豆腐块：
+    拉丁字母仍用装饰字体渲染保持风格，中文与符号自动用链中字体补齐。
+    """
+    if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH:
+        return primary
+    try:
+        fp = getattr(primary, "path", None)
+        key = (fp if isinstance(fp, (str, bytes)) else id(primary), getattr(primary, "size", 0), ch)
+    except Exception:
+        return primary
+    hit = _RESOLVE_CACHE.get(key)
+    if hit is not None:
+        return hit
+    res = primary
+    try:
+        if not _font_covers(primary, ch):
+            size = getattr(primary, "size", 26) or 26
+            for cand in _fallback_font_paths():
+                try:
+                    f = _load_font_file(cand, size)
+                except Exception:
+                    continue
+                if f is not None and _font_covers(f, ch):
+                    res = f
+                    break
+    except Exception:
+        res = primary
+    if len(_RESOLVE_CACHE) > 8000:
+        _RESOLVE_CACHE.clear()
+    _RESOLVE_CACHE[key] = res
+    return res
+
+
+def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
+    """正文字符推进宽度（含缺字回退，与实际绘制字体一致）"""
+    try:
+        return _char_advance(_resolve_char_font(ch, font), ch)
+    except Exception:
+        return _char_advance(font, ch)
+
+
 # ==========================================
 # 高雅现代配色体系
 # ==========================================
@@ -1166,6 +1285,9 @@ def _take_cluster(text: str, i: int) -> Tuple[str, int]:
     parts = [ch]
     j = i + 1
     n = len(text)
+    # 国旗 Regional Indicator 必须成对（单个 RI 无图无字必丢）
+    if 0x1F1E6 <= ord(ch) <= 0x1F1FA and j < n and 0x1F1E6 <= ord(text[j]) <= 0x1F1FA:
+        return text[i:j + 1], j + 1
     while j < n:
         cp = ord(text[j])
         if cp == 0xFE0F or 0x1F3FB <= cp <= 0x1F3FF:
@@ -1458,20 +1580,30 @@ def _draw_mixed_text(
                         continue
 
         # 正文批量绘制（含无图无字 emoji 的单色回退）：_take_batch 必推进
+        # 同字体连续段合并绘制；主字体缺字（装饰字体无 CJK 等）自动按链回退，不再满屏豆腐块
         batch_chars = _take_batch()
         if not batch_chars:
             # 理论上到不了：强制单簇推进，杜绝死循环
             batch_chars = [cluster]
             i = ni
-        batch_str = "".join(batch_chars)
-        draw.text((cur_x, y), batch_str, font=font, fill=fill)
+        measured: List[Tuple[str, Any, float]] = []
         for bc in batch_chars:
             if len(bc) == 1:
-                w = _char_advance(font, bc)
+                bf = _resolve_char_font(bc, font)
+                measured.append((bc, bf, _char_advance(bf, bc)))
             else:
-                w = sum(_char_advance(font, c) for c in bc) or float(font_size)
-            char_positions.append((cur_x, w, y, bc))
-            cur_x += w
+                # 多字符簇不断开，整体跟随主字体（与旧逻辑一致）
+                measured.append((bc, font, sum(_char_advance(font, c) for c in bc) or float(font_size)))
+        k2 = 0
+        while k2 < len(measured):
+            j2 = k2 + 1
+            while j2 < len(measured) and measured[j2][1] is measured[k2][1]:
+                j2 += 1
+            draw.text((cur_x, y), "".join(m[0] for m in measured[k2:j2]), font=measured[k2][1], fill=fill)
+            for bc, _bf, w in measured[k2:j2]:
+                char_positions.append((cur_x, w, y, bc))
+                cur_x += w
+            k2 = j2
 
     return char_positions
 
@@ -1492,7 +1624,7 @@ def _wrap_text_line(text: str, font: ImageFont.FreeTypeFont, max_width: int, fon
             w = 0.0
             for c in cluster:
                 if c not in width_cache:
-                    width_cache[c] = _char_advance(font, c)
+                    width_cache[c] = _adv_text(font, c)
                 w += width_cache[c]
         units.append((cluster, w))
 
