@@ -916,6 +916,7 @@ body {
   padding: 2px 8px;
   border-radius: var(--m3-radius-pill);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .badge-active { background: var(--m3-status-green-bg); color: var(--m3-status-green); }

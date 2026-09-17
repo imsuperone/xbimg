@@ -898,7 +898,7 @@ async def render_text_to_image(text: str):
       showToast(`正在删除 ${name}…`);
       const res = await api.post("fonts/delete", { name });
       if (res && res.ok) {
-        showToast(`🗑️ 已删除 ${name}`);
+        showToast(res.fallback ? `🗑️ 已删除 ${name}，已自动切换为 ${res.fallback}` : `🗑️ 已删除 ${name}`);
       } else {
         showToast("删除提示: " + ((res && res.error) || "未知错误"));
       }
@@ -930,7 +930,8 @@ async def render_text_to_image(text: str):
         const total = Number(it.total || 0);
         const partial = !it.ready && installed > 0;
         row.className = `curated-font-row ${it.ready ? "ready" : ""}`;
-        const badge = it.ready ? "已下载" : (partial ? `部分下载 (${installed}/${total})` : "未下载");
+        const badge = it.ready ? "已下载" : (partial ? "部分下载" : "未下载");
+        const badgeTitle = it.ready ? "" : (partial ? ` title="已下载 ${installed}/${total} 个文件"` : "");
         const cls = it.ready ? "badge-ready" : (partial ? "badge-partial" : "badge-idle");
         const btnText = it.ready ? "重新下载" : (partial ? "补齐下载" : "下载");
         const btnCls = it.ready ? "secondary-btn" : "primary-btn";
@@ -941,8 +942,8 @@ async def render_text_to_image(text: str):
         row.innerHTML =
           `<div class="curated-info"><span class="curated-name">${escapeHtml(it.name)}</span>` +
           `<span class="curated-desc">${escapeHtml(it.desc)}</span></div>` +
-          `<span class="curated-badge ${cls}">${badge}</span>` +
-          `<div style="display:flex; align-items:center;">${btns}</div>`;
+          `<span class="curated-badge ${cls}"${badgeTitle}>${badge}</span>` +
+          `<div style="display:flex; align-items:center; flex-shrink:0;">${btns}</div>`;
         box.appendChild(row);
       });
     } catch (e) {
@@ -1661,7 +1662,7 @@ async def render_text_to_image(text: str):
               showToast("正在删除字体包…");
               const res = await api.post("fonts/curated_delete", { id: cid });
               if (res && res.ok) {
-                showToast("🗑️ 已删除字体包");
+                showToast(res.fallback ? `🗑️ 已删除字体包，已自动切换为 ${res.fallback}` : "🗑️ 已删除字体包");
               } else {
                 showToast("删除失败: " + ((res && res.error) || "未知"));
               }

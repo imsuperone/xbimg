@@ -1855,6 +1855,69 @@ class Msg2ImgPlugin(Star):
             pass
         return d
 
+    def _usable_data_fonts(self) -> List[str]:
+        """持久化目录可用字体文件名（排序，与 WebUI 列表同序），供删除后回退选用"""
+        try:
+            from core.renderer import _is_usable_font
+        except (ImportError, ValueError):
+            from .core.renderer import _is_usable_font
+        out: List[str] = []
+        try:
+            d = self._fonts_data_dir()
+            if d.is_dir():
+                for p in sorted(d.iterdir()):
+                    if p.is_file() and p.suffix.lower() in (".ttf", ".ttc", ".otf"):
+                        try:
+                            if bool(_is_usable_font(str(p))):
+                                out.append(p.name)
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        return out
+
+    def _fallback_font_after_delete(self) -> str:
+        """删除字体后回退：当前自定义字体失效时，仅剩 1 个可用则默认用它，
+        多个则用列表第一个；无可用则清空回自动。返回选中的文件名（无改动返回空串）。"""
+        try:
+            from core.renderer import _resolve_custom_font
+        except (ImportError, ValueError):
+            from .core.renderer import _resolve_custom_font
+        cfg = self.cfg_mgr.config
+        try:
+            src = str(cfg.get("font_source", "auto") or "auto").lower()
+            cur = str(cfg.get("custom_font_path", "") or "")
+            if (src != "custom" and not cur) or (cur and _resolve_custom_font(cur)):
+                return ""
+        except Exception:
+            pass
+        usable = self._usable_data_fonts()
+        if not usable:
+            try:
+                cfg["custom_font_path"] = ""
+                cfg["custom_bold_font_path"] = ""
+                if str(cfg.get("font_source", "")) == "custom":
+                    cfg["font_source"] = "auto"
+                self.cfg_mgr.save()
+                configure_fonts(cfg, self.cfg_mgr.data_dir)
+            except Exception:
+                pass
+            return ""
+        pick = usable[0]
+        try:
+            cfg["custom_font_path"] = pick
+            cfg["custom_bold_font_path"] = ""
+            cfg["font_source"] = "custom"
+            self.cfg_mgr.save({
+                "custom_font_path": pick,
+                "custom_bold_font_path": "",
+                "font_source": "custom",
+            })
+            configure_fonts(cfg, self.cfg_mgr.data_dir)
+        except Exception:
+            pass
+        return pick
+
     async def _api_fonts_files(self):
         """列出持久化目录中的字体文件（可删除的只有这些，随包/系统字体只读）"""
         try:
@@ -1919,19 +1982,15 @@ class Msg2ImgPlugin(Star):
             if not deleted_ok:
                 return error_response(f"文件正在被占用，删除失败", status_code=500)
 
-            # 若删除的是当前自定义字体，自动清空配置避免指向不存在的文件
+            # 删除后回退：直链引用顺手清理，群专属失效引用清空，当前字体失效则按剩余列表回退
             try:
                 cfg = self.cfg_mgr.config
                 need_save = False
-                for k in ("custom_font_path", "custom_bold_font_path", "custom_font_url"):
-                    v = str(cfg.get(k, "") or "")
-                    if v and (v == name or v.endswith("/" + name) or v.endswith("\\" + name)):
-                        cfg[k] = ""
-                        need_save = True
-                if cfg.get("font_source") == "custom" and not cfg.get("custom_font_path"):
-                    cfg["font_source"] = "auto"
+                v = str(cfg.get("custom_font_url", "") or "")
+                if v and (v == name or v.endswith("/" + name) or v.endswith("\\" + name)):
+                    cfg["custom_font_url"] = ""
                     need_save = True
-                # 同时清空群聊专属配置中引用该字体的项
+                # 同时清空群聊专属配置中引用该字体的项（回退跟随全局）
                 raw_grp = cfg.get("group_configs", {})
                 if isinstance(raw_grp, dict):
                     for _, gcfg in raw_grp.items():
@@ -1944,11 +2003,12 @@ class Msg2ImgPlugin(Star):
                     self.cfg_mgr.save()
             except Exception:
                 pass
+            picked = self._fallback_font_after_delete()
             try:
                 configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
                 pass
-            return json_response({"ok": True, "deleted": name, "fonts": get_font_status()})
+            return json_response({"ok": True, "deleted": name, "fallback": picked, "fonts": get_font_status()})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
 
@@ -1959,11 +2019,12 @@ class Msg2ImgPlugin(Star):
             if not cid:
                 return error_response("缺少字体 ID", status_code=400)
             res = await asyncio.to_thread(delete_curated_font, cid)
+            picked = self._fallback_font_after_delete()
             try:
                 configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
                 pass
-            return json_response({"ok": res.get("ok", False), **res, "fonts": get_font_status()})
+            return json_response({"ok": res.get("ok", False), **res, "fallback": picked, "fonts": get_font_status()})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
 

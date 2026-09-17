@@ -362,6 +362,125 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             elif cfg_file.exists():
                 cfg_file.unlink()
 
+    def test_font_fallback_after_delete(self):
+        """删除正在使用的字体后回退：剩 1 个默认用它，多个切列表第一个，无可用清空回自动"""
+        import shutil
+        import tempfile
+        import asyncio
+        import main as main_mod
+        from core import renderer as R
+        from main import Msg2ImgPlugin
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "fonts").mkdir(parents=True, exist_ok=True)
+        sim = Path("C:/Windows/Fonts/simhei.ttf").read_bytes()
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_req, orig_jr, orig_er = main_mod.request, main_mod.json_response, main_mod.error_response
+
+        class Req:
+            def __init__(self, p):
+                self.p = p
+
+            async def json(self, default=None):
+                return self.p
+
+        main_mod.json_response = lambda d: d
+        main_mod.error_response = lambda msg, status_code=500: {"ok": False, "error": msg}
+
+        async def call_delete(plugin, name):
+            main_mod.request = Req({"name": name})
+            return await plugin._api_fonts_delete()
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        # 备份 dev 配置（回退逻辑会落盘保存，避免污染其它用例）
+        dev_cfg = Path("data/plugin_data/astrbot_plugin_xbimg/config.json")
+        dev_bak = dev_cfg.read_bytes() if dev_cfg.exists() else None
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            plugin = Msg2ImgPlugin(context=None, config=None)
+            plugin.cfg_mgr.data_dir = tmp
+            fd = tmp / "fonts"
+
+            def plant(*names):
+                for n in list(fd.iterdir()):
+                    n.unlink()
+                for n in names:
+                    (fd / n).write_bytes(sim)
+                R.clear_font_cache()
+
+            # A. 仅剩 1 个：默认使用它
+            plant("aaa_one.ttf", "zzz_active.ttf")
+            plugin.cfg_mgr.config.update({
+                "font_source": "custom",
+                "custom_font_path": str(fd / "zzz_active.ttf"),
+                "custom_bold_font_path": "",
+            })
+            res = asyncio.run(call_delete(plugin, "zzz_active.ttf"))
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["fallback"], "aaa_one.ttf")
+            self.assertEqual(plugin.cfg_mgr.config["custom_font_path"], "aaa_one.ttf")
+            # B. 多个：切换到列表第一个
+            plant("aaa_one.ttf", "mmm_mid.ttf", "zzz_active.ttf")
+            plugin.cfg_mgr.config.update({
+                "font_source": "custom",
+                "custom_font_path": str(fd / "mmm_mid.ttf"),
+            })
+            res = asyncio.run(call_delete(plugin, "mmm_mid.ttf"))
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["fallback"], "aaa_one.ttf")
+            # C. 无可用：清空回自动
+            plant("solo.ttf")
+            plugin.cfg_mgr.config.update({
+                "font_source": "custom",
+                "custom_font_path": str(fd / "solo.ttf"),
+            })
+            res = asyncio.run(call_delete(plugin, "solo.ttf"))
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["fallback"], "")
+            self.assertEqual(plugin.cfg_mgr.config["custom_font_path"], "")
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            main_mod.request, main_mod.json_response, main_mod.error_response = orig_req, orig_jr, orig_er
+            if dev_bak is not None:
+                dev_cfg.write_bytes(dev_bak)
+            elif dev_cfg.exists():
+                dev_cfg.unlink()
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_ios_emoji_download_offline(self):
+        """无网络时 iOS 下载如实失败，不写 ready 标记，不虚标已下载"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_fetch = R._fetch_remote_emoji
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            R._fetch_remote_emoji = lambda code, dest: False
+            res = R.download_emoji_pack("ios")
+            self.assertFalse(res["ok"])
+            self.assertFalse((tmp / "emoji" / "ios_pack.ready").exists())
+            packs = {p["id"]: p for p in R.get_emoji_packs_status()}
+            self.assertFalse(packs["ios"]["installed"])
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._fetch_remote_emoji = orig_fetch
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -466,7 +466,8 @@ def get_emoji_packs_status() -> List[Dict[str, Any]]:
             d = _data_subdir("emoji")
             has = False
             if d and d.is_dir():
-                if (d / "ios_pack.ready").is_file() or any(d.glob("*.png")):
+                # 以实际 PNG 为准：空目录即使残留 ready 标记也不算已下载
+                if any(d.glob("*.png")):
                     has = True
             storage = get_emoji_storage_kb("ios")
             out.append({"id": sid, "name": pack["name"], "desc": pack["desc"], "installed": has, "storage_kb": storage, "need_font": need_font})
@@ -494,11 +495,20 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
             if not p.is_file():
                 if _fetch_remote_emoji(code, d):
                     dl_cnt += 1
+        have = sum(1 for code in base_emojis if (d / f"{code}.png").is_file())
+        if not have:
+            # 一个都没下来：不写 ready 标记，如实报错（否则会虚标“已下载”）
+            try:
+                (d / "ios_pack.ready").unlink(missing_ok=True)
+            except Exception:
+                pass
+            return {"ok": False, "error": "iOS Emoji 下载失败，请检查服务器网络后重试", "storage_kb": 0.0}
         try:
             (d / "ios_pack.ready").write_text("ok", encoding="utf-8")
         except Exception:
             pass
-        return {"ok": True, "downloaded": [f"iOS基础Emoji({dl_cnt}个)"], "storage_kb": get_emoji_storage_kb("ios")}
+        extra = "（已齐全）" if dl_cnt == 0 else ""
+        return {"ok": True, "downloaded": [f"iOS基础Emoji({dl_cnt}个){extra}"], "storage_kb": get_emoji_storage_kb("ios")}
 
     # android 或 windows
     fname = ANDROID_EMOJI_FILE if style == "android" else WINDOWS_EMOJI_FILE
