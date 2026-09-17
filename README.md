@@ -24,19 +24,6 @@
 - 📱 **WebUI 控制台**：AstrBot 后台单列全屏仪表盘，含状态统计、实时文本渲染测试台、字体 / Emoji / 词库管理，手机电脑自适应，修改即自动保存。
 - ⚡ **高优先级无损拦截**：`on_decorating_result(priority=99999)` + 适配器 `send_group_msg / call_action` 双钩子，保留 At / Reply / 图片音视频段，`xbbot` 等业务插件兼容。
 
-## 📚 内置词库（6 套）
-
-| ID | 名称 | 用途 |
-| :--- | :--- | :--- |
-| `default` | 标准涉敏与违禁词库（默认综合） | 涉毒 / 涉赌 / 涉黄 / 黑产 / 诈骗，默认全局生效 |
-| `anti_nsfw_ultra` | 强力综合违禁与色情库 | 日常 / AI 发情 / SM / 玩法 / 百合等强力色情 |
-| `anti_porn` | 严格涉黄与低俗色情库 | 单群严管色情时绑定 |
-| `anti_gambling` | 严格涉赌涉诈与黑产库 | 单群严管赌诈时绑定 |
-| `anti_drugs` | 严格涉毒与违禁品库 | 单群严管涉毒时绑定 |
-| `xbbot_game` | 互动娱乐 / 涉黑调教过滤库 | 互动娱乐玩法违规词过滤 |
-
-切换：`/xbimg kwset <方案ID>`（全局），`/xbimg group kw <方案ID> / default [群号]`（单群，可异地操作）。
-
 ---
 
 ## 🚀 安装
@@ -87,14 +74,6 @@
 | `/xbimg group test [群号]` | 单群专属效果测试图 |
 
 ---
-
-## 🖥️ WebUI
-
-AstrBot 后台 `消息转图` 页面提供：运行统计（累计渲染 / 违规拦截 / 打码数）、触发与视觉设置、链接与审查设置、群生效名单、精选字体与 Emoji 包管理、词库预览切换、实时文本渲染测试台（含普通 / 半遮蔽 / 链接三种示例）。
-
-## ⚙️ 主要配置项
-
-`_conf_schema.json` / WebUI 可调：`enable`、`style`、`theme_mode`、`star_background`、`star_density`、`min_length_threshold`、`render_trigger`、`link_mode`、`moderation_mode`、`enable_ai_moderation`（`ai_provider_mode: astrbot/custom`、`ai_api_base/key/model`、`custom_ai_prompt`）、`violation_action`、`mosaic_type`、`mosaic_half_pos`、`img_compress_level`、`font_scale`、`group_font_scales`、`group_configs`、`group_mode`、`group_list`、`font_source`、`custom_font_path/url`、`emoji_style`、`emoji_remote`。
 
 ## 📦 依赖与字体
 
