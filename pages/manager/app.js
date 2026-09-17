@@ -926,13 +926,16 @@ async def render_text_to_image(text: str):
       box.innerHTML = "";
       list.forEach((it) => {
         const row = document.createElement("div");
+        const installed = Number(it.installed || 0);
+        const total = Number(it.total || 0);
+        const partial = !it.ready && installed > 0;
         row.className = `curated-font-row ${it.ready ? "ready" : ""}`;
-        const badge = it.ready ? "已下载" : "未下载";
-        const cls = it.ready ? "badge-ready" : "badge-idle";
-        const btnText = it.ready ? "重新下载" : "下载";
+        const badge = it.ready ? "已下载" : (partial ? `部分下载 (${installed}/${total})` : "未下载");
+        const cls = it.ready ? "badge-ready" : (partial ? "badge-partial" : "badge-idle");
+        const btnText = it.ready ? "重新下载" : (partial ? "补齐下载" : "下载");
         const btnCls = it.ready ? "secondary-btn" : "primary-btn";
         let btns = `<button type="button" class="m3-btn ${btnCls} curated-install-btn" data-id="${escapeHtml(it.id)}">${btnText}</button>`;
-        if (it.ready) {
+        if (it.ready || partial) {
           btns = `<button type="button" class="font-file-del curated-delete-btn" data-cid="${escapeHtml(it.id)}" title="从持久化目录删除该字体包" style="margin-right:6px;">卸载</button>` + btns;
         }
         row.innerHTML =
@@ -1009,6 +1012,52 @@ async def render_text_to_image(text: str):
         sel.appendChild(opt);
       });
     });
+  }
+
+  // ==========================================
+  // 官方词库更新检测与覆盖提示
+  // ==========================================
+  async function fetchPresetUpdateStatus() {
+    const banner = document.getElementById("presetUpdateBanner");
+    if (!banner) return;
+    try {
+      const res = await api.get("presets/update_status");
+      if (!res || !res.ok || !res.update_available || !(res.changed || []).length) {
+        banner.style.display = "none";
+        banner.innerHTML = "";
+        return;
+      }
+      const changed = res.changed || [];
+      let html = `<div class="preset-update-title">🎨 检测到官方词库有更新（${changed.length} 个方案不一致），是否覆盖本地？</div>`;
+      html += `<div class="preset-update-list">`;
+      changed.forEach((c) => {
+        const sample = (c.added_sample || []).slice(0, 5).join("、");
+        html += `<div class="preset-update-row">` +
+          `<span class="preset-update-info"><b>${escapeHtml(c.id)}</b> · ${escapeHtml(c.name)}` +
+          `${c.missing ? "（本地缺失）" : ""}<br>` +
+          `<span class="preset-update-diff">官方新增 ${c.added_total} 词，本地独有 ${c.removed_total} 词` +
+          `${sample ? `（如：${escapeHtml(sample)}…）` : ""}</span></span>` +
+          `<button type="button" class="m3-btn secondary-btn" data-preset-apply="${escapeHtml(c.id)}" style="padding:4px 12px; font-size:12px; flex-shrink:0;">覆盖此方案</button>` +
+          `</div>`;
+      });
+      html += `</div>`;
+      html += `<div class="preset-update-actions">` +
+        `<button type="button" class="m3-btn primary-btn" data-preset-apply-all style="padding:6px 16px; font-size:12px;">全部覆盖更新</button>` +
+        `<button type="button" class="m3-btn secondary-btn" data-preset-dismiss style="padding:6px 16px; font-size:12px;">保留本地不再提示</button>` +
+        `</div>`;
+      banner.innerHTML = html;
+      banner.style.display = "block";
+    } catch (e) {
+      banner.style.display = "none";
+    }
+  }
+
+  async function refreshAfterPresetUpdate(msg) {
+    if (msg) showToast(msg);
+    await loadData();
+    populateKeywordPresets();
+    populateGroupKeywordSelects();
+    await fetchPresetUpdateStatus();
   }
 
   function renderSelectedGroupsFontList() {
@@ -1723,6 +1772,67 @@ async def render_text_to_image(text: str):
         return;
       }
 
+      // 0.75 官方词库更新：覆盖单个方案
+      const presetApply = e.target.closest("[data-preset-apply]");
+      if (presetApply) {
+        e.preventDefault();
+        const pid = presetApply.getAttribute("data-preset-apply");
+        if (!pid) return;
+        (async () => {
+          if (!(await uiConfirm(`用官方词库覆盖本地「${pid}」方案吗？本地独有词将被替换。`))) return;
+          try {
+            showToast("正在覆盖更新词库…");
+            const res = await api.post("presets/apply_update", { ids: [pid] });
+            if (res && res.ok) {
+              await refreshAfterPresetUpdate(`✅ 已覆盖更新 ${pid}`);
+            } else {
+              showToast("覆盖失败: " + ((res && res.error) || "未知"));
+            }
+          } catch (err) {
+            showToast("覆盖异常: " + err.message);
+          }
+        })();
+        return;
+      }
+
+      // 0.76 官方词库更新：全部覆盖
+      if (e.target.closest("[data-preset-apply-all]")) {
+        e.preventDefault();
+        (async () => {
+          if (!(await uiConfirm("用官方词库覆盖本地全部内置方案吗？本地独有词将被替换，自建方案不受影响。", "全部覆盖"))) return;
+          try {
+            showToast("正在覆盖更新词库…");
+            const res = await api.post("presets/apply_update", {});
+            if (res && res.ok) {
+              await refreshAfterPresetUpdate("✅ 官方词库已全部同步");
+            } else {
+              showToast("覆盖失败: " + ((res && res.error) || "未知"));
+            }
+          } catch (err) {
+            showToast("覆盖异常: " + err.message);
+          }
+        })();
+        return;
+      }
+
+      // 0.77 官方词库更新：保留本地不再提示
+      if (e.target.closest("[data-preset-dismiss]")) {
+        e.preventDefault();
+        (async () => {
+          try {
+            const res = await api.post("presets/dismiss_update", {});
+            if (res && res.ok) {
+              await refreshAfterPresetUpdate("✅ 已保留本地词库");
+            } else {
+              showToast("操作失败: " + ((res && res.error) || "未知"));
+            }
+          } catch (err) {
+            showToast("操作异常: " + err.message);
+          }
+        })();
+        return;
+      }
+
       // 1. 群聊勾选胶囊点击
       const groupChip = e.target.closest(".group-select-chip");
       if (groupChip) {
@@ -2023,6 +2133,7 @@ async def render_text_to_image(text: str):
     fetchCuratedFonts();
     fetchEmojiPacks();
     fetchAiProviders();
+    fetchPresetUpdateStatus();
 
     // 页面初次加载时，自动触发一次极速预览，让用户进页面立刻能看到效果
     setTimeout(() => {

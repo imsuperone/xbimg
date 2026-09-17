@@ -920,6 +920,7 @@ body {
 
 .badge-active { background: var(--m3-status-green-bg); color: var(--m3-status-green); }
 .badge-ready { background: var(--m3-status-cyan-bg); color: var(--m3-status-cyan); }
+.badge-partial { background: var(--m3-status-amber-bg); color: var(--m3-status-amber); }
 .badge-idle { background: var(--m3-sys-color-surface-container-highest); color: var(--m3-sys-color-outline); }
 
 .curated-install-btn {
@@ -1272,4 +1273,47 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* 官方词库更新提示横幅 */
+.preset-update-banner {
+  background: var(--m3-status-amber-bg);
+  border: 1px solid var(--m3-status-amber);
+  border-radius: var(--m3-radius-small);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.preset-update-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--m3-status-amber);
+  margin-bottom: 8px;
+}
+.preset-update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.preset-update-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--m3-sys-color-surface-container-high);
+  border: 1px solid var(--m3-sys-color-divider);
+  border-radius: var(--m3-radius-small);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.preset-update-info {
+  flex: 1;
+  line-height: 1.6;
+}
+.preset-update-diff {
+  color: var(--m3-sys-color-outline);
+}
+.preset-update-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }

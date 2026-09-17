@@ -56,6 +56,7 @@
 | `/xbimg mosaicpos bottom` / `top` / `random` | 半码遮下半 / 上半 / 随机 |
 | `/xbimg groupmode whitelist` / `all` / `blacklist` | 仅白名单 / 全部 / 黑名单排除 |
 | `/xbimg kwset <方案ID>` | 全局词库切换 |
+| `/xbimg kwupdate [apply\|keep]` | 官方词库更新检测与覆盖 |
 | `/xbimg size [群号] <50-500>` | 全局或指定群字体（`100` 恢复默认） |
 | `/xbimg test [文本]` | 生成测试效果图 |
 

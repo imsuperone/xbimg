@@ -313,6 +313,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertTrue(moderator.check_keywords("口塞皮鞭束缚，母狗跪下舔鞋，后庭开发肛塞", preset_name="anti_nsfw_ultra")[0])
         self.assertTrue(moderator.check_keywords("百合色色磨豆腐，双头龙对插磨穴", preset_name="anti_nsfw_ultra")[0])
         self.assertTrue(moderator.check_keywords("奴隶买卖私设刑房，赌场下注脚本刷币", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("今晚抢银行越狱，关进监狱调教奴隶", preset_name="anti_nsfw_ultra")[0])
 
         # xbbot 专属词库匹配
         self.assertTrue(moderator.check_keywords("强行买下奴隶并进行折磨奴隶", preset_name="xbbot_game")[0])
@@ -325,6 +326,41 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         c = plugin._get_group_custom_config("123456")
         self.assertEqual(c, {})
         self.assertEqual(plugin._get_group_font_scale("123456"), 100)
+
+    def test_presets_update_flow(self):
+        """内置词库更新检测：过期本地标记更新，覆盖/保留后恢复一致"""
+        import copy
+        from core.config import ConfigManager
+        mgr = ConfigManager()
+        # 新鲜态：无更新
+        self.assertFalse(mgr.get_presets_update_status()["update_available"])
+        # 模拟旧版本残留（去掉 ultra 新增词）
+        local = copy.deepcopy(mgr.config["keyword_presets"])
+        ultra_kw = local["anti_nsfw_ultra"]["keywords"]
+        trimmed = ultra_kw.replace(",抢银行,银行抢劫,银行劫案,银行,劫狱,越狱,监狱,奴隶", "")
+        self.assertNotEqual(trimmed, ultra_kw)
+        local["anti_nsfw_ultra"]["keywords"] = trimmed
+        # 备份真实 config.json（apply/dismiss 会落盘）
+        cfg_file = mgr.cfg_file
+        bak = cfg_file.read_bytes() if cfg_file.exists() else None
+        try:
+            stale = ConfigManager({"keyword_presets": local, "builtin_presets_hash": "0" * 16})
+            st2 = stale.get_presets_update_status()
+            self.assertTrue(st2["update_available"])
+            hit = [c for c in st2["changed"] if c["id"] == "anti_nsfw_ultra"]
+            self.assertTrue(hit and hit[0]["added_total"] >= 8)
+            st3 = stale.apply_builtin_presets(["anti_nsfw_ultra"])
+            self.assertFalse(st3["update_available"])
+            # dismiss 路径：保留本地同样消除提示（先清掉 apply 落盘的文件，还原过期现场）
+            if stale.cfg_file.exists():
+                stale.cfg_file.unlink()
+            stale2 = ConfigManager({"keyword_presets": local, "builtin_presets_hash": "0" * 16})
+            self.assertFalse(stale2.dismiss_builtin_presets_update()["update_available"])
+        finally:
+            if bak is not None:
+                cfg_file.write_bytes(bak)
+            elif cfg_file.exists():
+                cfg_file.unlink()
 
 
 if __name__ == "__main__":

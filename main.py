@@ -840,6 +840,8 @@ class Msg2ImgPlugin(Star):
                 "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
                 "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
                 "• /xbimg groupmode whitelist / all / blacklist - 群生效模式\n"
+                "• /xbimg kwset <方案ID> - 全局词库切换\n"
+                "• /xbimg kwupdate [apply|keep] - 官方词库更新检测与覆盖\n"
                 "• /xbimg size [群号] 50-500 - 字体百分比\n"
                 "• /xbimg group - 本群专属配置卡片\n"
                 "• /xbimg group set <50-500> [群号] - 单群字体大小\n"
@@ -1061,6 +1063,48 @@ class Msg2ImgPlugin(Star):
             else:
                 names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
                 yield event.plain_result("用法：/xbimg kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
+        elif sub in ("kwupdate", "词库更新"):
+            # /xbimg kwupdate [apply [方案ID]|keep]：检测官方词库更新并确认覆盖
+            parts = [p for p in re.split(r"[\s,]+", arg) if p]
+            action = parts[0].lower() if parts else ""
+            rest = parts[1:] if parts else []
+            if action in ("apply", "update", "覆盖", "更新"):
+                ids = [i for i in rest if i] or None
+                st = self.cfg_mgr.apply_builtin_presets(ids)
+                try:
+                    cfg = self.cfg_mgr.config
+                    active = str(cfg.get("active_keyword_preset", "default") or "default")
+                    presets2 = cfg.get("keyword_presets", {})
+                    if (not ids or active in ids) and active in presets2:
+                        item = presets2[active]
+                        cfg["custom_keywords"] = item.get("keywords", "") if isinstance(item, dict) else str(item)
+                        self.cfg_mgr.save()
+                    self.moderator = ContentModerator(cfg)
+                except Exception:
+                    pass
+                if st.get("update_available"):
+                    left = [f"• {c['id']} - {c['name']}" for c in st.get("changed", [])]
+                    yield event.plain_result("✅ 已覆盖更新指定方案，剩余差异：\n" + "\n".join(left))
+                else:
+                    yield event.plain_result("✅ 官方词库已是最新，本地已同步。")
+                return
+            if action in ("keep", "dismiss", "保留", "忽略"):
+                self.cfg_mgr.dismiss_builtin_presets_update()
+                yield event.plain_result("✅ 已保留本地词库，不再提示本次更新。")
+                return
+            st = self.cfg_mgr.get_presets_update_status()
+            if not st.get("update_available"):
+                yield event.plain_result("✅ 本地词库与官方一致，无需更新。")
+                return
+            lines = ["🎨【官方词库更新检测】以下方案与官方不一致："]
+            for c in st.get("changed", []):
+                flag = "（本地缺失）" if c.get("missing") else ""
+                lines.append(f"• {c['id']} - {c['name']}{flag}：官方新增 {c['added_total']} 词，本地独有 {c['removed_total']} 词")
+                if c.get("added_sample"):
+                    lines.append("  新增示例：" + "、".join(c["added_sample"][:5]))
+            lines.append("💡 /xbimg kwupdate apply [方案ID] - 覆盖更新（不填则全部）\n• /xbimg kwupdate keep - 保留本地不再提示")
+            yield event.plain_result("\n".join(lines))
+            return
         elif sub in ("fontsize", "groupfont", "gscale", "font", "size", "字号", "文字大小"):
             # /xbimg size <gid> <scale>  或  /xbimg size <scale>（当前群）
             parts = [p for p in re.split(r"[\s,]+", arg) if p]
@@ -1451,6 +1495,9 @@ class Msg2ImgPlugin(Star):
         reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
         reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
         reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
+        reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
+        reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
+        reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
         reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
 
     async def _api_get_config(self):
@@ -2003,6 +2050,50 @@ class Msg2ImgPlugin(Star):
             return json_response({"ok": res.get("ok", False), **res})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
+
+    async def _api_presets_update_status(self):
+        """查询内置官方词库相对本地是否有更新（只读）"""
+        try:
+            st = self.cfg_mgr.get_presets_update_status()
+            return json_response({"ok": True, **st})
+        except Exception as e:
+            return error_response(f"查询失败: {e}", status_code=500)
+
+    async def _api_presets_apply_update(self):
+        """用内置官方词库覆盖本地指定方案（ids 为空则全部覆盖），用户自建方案不受影响"""
+        try:
+            payload = await request.json(default={})
+            ids = payload.get("ids", "") if isinstance(payload, dict) else ""
+            if isinstance(ids, list):
+                pass
+            elif isinstance(ids, str):
+                ids = [i.strip() for i in re.split(r"[,;\s]+", ids) if i.strip()]
+            else:
+                ids = []
+            st = self.cfg_mgr.apply_builtin_presets(ids or None)
+            # 仅当覆盖了当前激活方案时，才同步 custom_keywords 并重建审查器
+            try:
+                cfg = self.cfg_mgr.config
+                active = str(cfg.get("active_keyword_preset", "default") or "default")
+                presets = cfg.get("keyword_presets", {})
+                if (not ids or active in ids) and active in presets:
+                    item = presets[active]
+                    cfg["custom_keywords"] = item.get("keywords", "") if isinstance(item, dict) else str(item)
+                    self.cfg_mgr.save()
+                    self.moderator = ContentModerator(cfg)
+            except Exception:
+                pass
+            return json_response({"ok": True, "applied": True, **st})
+        except Exception as e:
+            return error_response(f"覆盖更新失败: {e}", status_code=500)
+
+    async def _api_presets_dismiss_update(self):
+        """保留本地词库不再提示"""
+        try:
+            st = self.cfg_mgr.dismiss_builtin_presets_update()
+            return json_response({"ok": True, **st})
+        except Exception as e:
+            return error_response(f"操作失败: {e}", status_code=500)
 
     async def _api_ai_providers(self):
         try:

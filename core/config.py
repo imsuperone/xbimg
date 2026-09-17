@@ -3,11 +3,13 @@
 插件配置管理与持久化模块
 """
 
+import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 PLUGIN_NAME = "astrbot_plugin_xbimg"
 
@@ -30,7 +32,8 @@ DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
             "拘禁,关笼子,小黑屋拘禁,人体盛,私调,公调,绳师,重口调教,"
             "百合色色,磨豆腐,磨逼,磨穴,互相摩擦,指交,百合高潮,蕾丝边,拉拉色情,双头龙对插,互相舔穴,穿戴假阳具,百合捆绑,姐妹百合调教,"
             "奴隶买卖,折磨奴隶,买下奴隶,皮鞭调教,关小黑屋,逼良为娼,强行卖身,拐卖人口,抢劫金币,偷窃财产,赌场下注,赌庄出千,挂机刷币,脚本刷币,辅助刷钱,私下交易,"
-            "充值漏洞,破解脚本,绑架勒索,撕票,下毒暗算,强夺奴隶,奴隶市场,奴隶逃跑,烙印惩罚,私设刑房,奴隶契约"
+            "充值漏洞,破解脚本,绑架勒索,撕票,下毒暗算,强夺奴隶,奴隶市场,奴隶逃跑,烙印惩罚,私设刑房,奴隶契约,"
+            "抢银行,银行抢劫,银行劫案,银行,劫狱,越狱,监狱,奴隶"
         ),
     },
     "default": {
@@ -72,6 +75,43 @@ DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
     },
 }
 
+# 关键词切分（与 moderation 保持一致：逗号/分号/换行分隔）
+_SPLIT_KW_RE = re.compile(r"[,;，；\n]+")
+
+
+def _preset_keywords(entry: Any) -> str:
+    if isinstance(entry, dict):
+        return str(entry.get("keywords", "") or "")
+    return str(entry or "")
+
+
+def _split_kw_set(raw: str) -> set:
+    return {t for t in (x.strip() for x in _SPLIT_KW_RE.split(raw or "")) if t}
+
+
+def builtin_presets_hash() -> str:
+    """当前代码内置词库快照哈希（插件更新改了词库即变化）"""
+    try:
+        raw = json.dumps(DEFAULT_KEYWORD_PRESETS, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _presets_equal_builtin(local: Any) -> bool:
+    """本地词库与内置是否完全一致（词+方案名）"""
+    if not isinstance(local, dict):
+        return False
+    for pid, pentry in DEFAULT_KEYWORD_PRESETS.items():
+        if pid not in local:
+            return False
+        if _split_kw_set(_preset_keywords(local[pid])) != _split_kw_set(_preset_keywords(pentry)):
+            return False
+        lname = local[pid].get("name", "") if isinstance(local[pid], dict) else ""
+        if lname != pentry.get("name", ""):
+            return False
+    return True
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "enable": True,
     "style": "ios",
@@ -87,6 +127,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "mosaic_type": "pixel",
     "active_keyword_preset": "default",
     "keyword_presets": DEFAULT_KEYWORD_PRESETS,
+    "builtin_presets_hash": "",
     "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
     "img_compress_level": "medium",
     "custom_ai_prompt": "",
@@ -165,6 +206,14 @@ class ConfigManager:
             except Exception:
                 pass
         self._load()
+        # 内置词库更新检测：历史配置无哈希且本地与内置一致时直接对齐（内存态，下次保存落盘）；
+        # 不一致则保留本地内容，仅标记待确认，绝不自动覆盖用户词库
+        try:
+            if not self.config.get("builtin_presets_hash"):
+                if _presets_equal_builtin(self.config.get("keyword_presets", {})):
+                    self.config["builtin_presets_hash"] = builtin_presets_hash()
+        except Exception:
+            pass
 
     def _load(self):
         if self.cfg_file.exists():
@@ -205,6 +254,71 @@ class ConfigManager:
                     self.raw_cfg.save()
             except Exception:
                 pass
+
+    def get_presets_update_status(self) -> Dict[str, Any]:
+        """检测内置官方词库相对本地是否有更新，返回差异明细（只读，不改配置）"""
+        cur_hash = builtin_presets_hash()
+        stored = str(self.config.get("builtin_presets_hash", "") or "")
+        local = self.config.get("keyword_presets", {})
+        if not isinstance(local, dict):
+            local = {}
+        items: List[Dict[str, Any]] = []
+        for pid, pentry in DEFAULT_KEYWORD_PRESETS.items():
+            bset = _split_kw_set(_preset_keywords(pentry))
+            pname = pentry.get("name", pid)
+            if pid not in local or not isinstance(local[pid], (dict, str)):
+                items.append({
+                    "id": pid, "name": pname, "missing": True,
+                    "builtin_total": len(bset), "local_total": 0,
+                    "added_total": len(bset), "removed_total": 0,
+                    "added_sample": sorted(bset)[:8], "removed_sample": [],
+                })
+                continue
+            lset = _split_kw_set(_preset_keywords(local[pid]))
+            if bset != lset:
+                items.append({
+                    "id": pid, "name": pname, "missing": False,
+                    "builtin_total": len(bset), "local_total": len(lset),
+                    "added_total": len(bset - lset), "removed_total": len(lset - bset),
+                    "added_sample": sorted(bset - lset)[:8],
+                    "removed_sample": sorted(lset - bset)[:8],
+                })
+        if not items and stored != cur_hash:
+            # 词无差异（仅方案改名等）：内存态对齐哈希，下次保存落盘，不打扰用户
+            self.config["builtin_presets_hash"] = cur_hash
+            stored = cur_hash
+        # 仅当内置版本变化（哈希不一致）且词有差异时才提示；
+        # 用户点保留/覆盖后哈希对齐，当前版本不再打扰，下次内置变更再提示
+        return {
+            "update_available": bool(items) and stored != cur_hash,
+            "stored_hash": stored,
+            "current_hash": cur_hash,
+            "changed": items,
+        }
+
+    def apply_builtin_presets(self, ids: Any = None) -> Dict[str, Any]:
+        """用内置官方词库覆盖本地指定方案（ids 为空则覆盖全部内置方案），用户自建方案不受影响"""
+        if isinstance(ids, str):
+            ids = [i.strip() for i in re.split(r"[,;\s]+", ids) if i.strip()]
+        wanted = [i for i in (ids or []) if i in DEFAULT_KEYWORD_PRESETS] or list(DEFAULT_KEYWORD_PRESETS.keys())
+        local = self.config.get("keyword_presets", {})
+        if not isinstance(local, dict):
+            local = {}
+        else:
+            local = dict(local)
+        for pid in wanted:
+            src = DEFAULT_KEYWORD_PRESETS[pid]
+            local[pid] = {"name": src.get("name", pid), "keywords": src.get("keywords", "")}
+        self.config["keyword_presets"] = local
+        self.config["builtin_presets_hash"] = builtin_presets_hash()
+        self.save()
+        return self.get_presets_update_status()
+
+    def dismiss_builtin_presets_update(self) -> Dict[str, Any]:
+        """保留本地词库不再提示（记录当前内置哈希，下次内置变更时再提示）"""
+        self.config["builtin_presets_hash"] = builtin_presets_hash()
+        self.save()
+        return self.get_presets_update_status()
 
     def get_stats(self) -> Dict[str, Any]:
         if self._stats is not None:
