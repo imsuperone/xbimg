@@ -481,6 +481,96 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._fetch_remote_emoji = orig_fetch
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_curated_download_retries(self):
+        """精选字体单文件波动失败时重试并最终成功；持续失败则如实报错"""
+        import shutil
+        import tempfile
+        import time as _t
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "fonts").mkdir(parents=True, exist_ok=True)
+        sim = Path("C:/Windows/Fonts/simhei.ttf").read_bytes()
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_dl = R._download_file
+        orig_sleep = _t.sleep
+        calls = {"n": 0}
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        def flaky(url, dest):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return False, "波动"
+            dest.write_bytes(sim)
+            return True, ""
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            R._download_file = flaky
+            _t.sleep = lambda s: None
+            R.clear_font_cache()
+            res = R.download_curated_font("lxgw_wenkai")  # 单文件包
+            self.assertTrue(res["ok"])
+            self.assertEqual(calls["n"], 3)
+            self.assertTrue(res["downloaded"])
+            # 持续失败：如实报错
+            R._download_file = lambda url, dest: (False, "断网")
+            (tmp / "fonts" / "LXGWWenKai-Regular.ttf").unlink(missing_ok=True)
+            R.clear_font_cache()
+            res2 = R.download_curated_font("lxgw_wenkai")
+            self.assertFalse(res2["ok"])
+            self.assertIn("LXGWWenKai-Regular.ttf", res2["error"])
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._download_file = orig_dl
+            _t.sleep = orig_sleep
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_emoji_downloading_tmp_ignored(self):
+        """下载残留 tmp 不计入占用；失败不留残留文件"""
+        import shutil
+        import tempfile
+        import urllib.request
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_dead = R._EMOJI_REMOTE_DEAD_UNTIL
+        orig_urlopen = urllib.request.urlopen
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            ed = tmp / "emoji"
+            ed.mkdir(parents=True, exist_ok=True)
+            (ed / "2705.png").write_bytes(b"0" * 4096)
+            (ed / "2705.png.downloading").write_bytes(b"0" * 700)  # 模拟中断残留
+            self.assertEqual(R.get_emoji_storage_kb("ios"), round(4096 / 1024, 1))
+            # urlopen 直接抛错：不应留下新的 tmp
+            def boom(req, timeout=None):
+                raise urllib.request.URLError("down")
+            urllib.request.urlopen = boom
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
+            self.assertFalse(R._fetch_remote_emoji("1f600", ed))
+            leftovers = list(ed.glob("1f600.png.downloading"))
+            self.assertEqual(leftovers, [])
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0  # 退避后仍可工作由其它用例覆盖，此处仅复位
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._EMOJI_REMOTE_DEAD_UNTIL = orig_dead
+            urllib.request.urlopen = orig_urlopen
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

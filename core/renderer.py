@@ -428,6 +428,8 @@ def get_emoji_storage_kb(style: Optional[str] = None) -> float:
             if not p.is_file():
                 continue
             try:
+                if p.name.endswith(".downloading"):
+                    continue  # 下载中的临时残留不计入占用
                 if style == "ios" and p.suffix.lower() != ".png" and p.name != "ios_pack.ready":
                     continue
                 if style == "android" and p.name != ANDROID_EMOJI_FILE:
@@ -803,7 +805,17 @@ def download_curated_font(curated_id: str) -> Dict[str, Any]:
             if _is_usable_font(str(target)):
                 downloaded.append(fname)
                 continue
-            ok, err = _download_file(url, target)
+            # 大包直链易波动：单文件最多重试 3 次
+            ok, err = False, ""
+            for attempt in range(3):
+                ok, err = _download_file(url, target)
+                if ok and _is_usable_font(str(target)):
+                    break
+                ok = False
+                try:
+                    time.sleep(1.5 * (attempt + 1))
+                except Exception:
+                    pass
             if ok and _is_usable_font(str(target)):
                 downloaded.append(fname)
             else:
@@ -1218,10 +1230,18 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
                         f.write(chunk)
         except urllib.error.HTTPError as e:
             if e.code == 404:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
                 return False  # CDN 可达只是没这个文件，不退避
             raise
         except (urllib.error.URLError, TimeoutError, OSError):
             _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
             return False
         os.replace(tmp, dest_dir / f"{code}.png")
         return True

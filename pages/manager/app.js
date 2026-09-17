@@ -1263,7 +1263,12 @@ async def render_text_to_image(text: str):
       showToast("⬇️ 正在下载字体，请稍候…");
       const res = await api.post("fonts/curated_install", { id: cid });
       if (res && res.ok) {
-        showToast(`✅ ${cid} 已下载并切换生效`);
+        const dl = (res.downloaded || []).join("、");
+        if (res.error) {
+          showToast(`⚠️ ${cid} 部分成功（${dl || "无新增文件"}），失败：${res.error}`);
+        } else {
+          showToast(`✅ ${cid} 已下载并切换生效`);
+        }
       } else {
         showToast("下载提示: " + ((res && res.error) || "未知"));
       }
@@ -1472,7 +1477,10 @@ async def render_text_to_image(text: str):
   // 实时生成交互预览（使用轻量 Base64，彻底秒显不卡死）
   // ==========================================
   let _isPreviewing = false;
-  async function triggerPreview() {
+  // 预览图已独立成单独页：非生成页的自动刷新静默执行，不弹“已生成”提示；
+  // 仅用户在预览页手动点击生成时才播报成功
+  async function triggerPreview(opts = {}) {
+    const announce = !!(opts && opts.announce);
     if (_isPreviewing) return;
     _isPreviewing = true;
 
@@ -1532,7 +1540,7 @@ async def render_text_to_image(text: str):
         if (dimEl) dimEl.textContent = `${res.width} × ${res.height}`;
         if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${_activeMosaicMode !== "none" ? " (半马赛克)" : ""}`;
         if (latEl) latEl.textContent = `${elapsed}ms`;
-        showToast("✨ 预览图片生成成功");
+        if (announce) showToast("✨ 预览图片生成成功");
       } else {
         throw new Error((res && res.error) || "后端未返回图片数据");
       }
@@ -1923,7 +1931,7 @@ async def render_text_to_image(text: str):
       // 7. 生成预览按钮
       if (e.target.closest("#renderPreviewBtn")) {
         e.preventDefault();
-        triggerPreview();
+        triggerPreview({ announce: true });
         return;
       }
 
