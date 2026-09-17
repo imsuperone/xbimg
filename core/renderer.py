@@ -1344,8 +1344,16 @@ def _draw_mixed_text(
     text_len = len(text)
     char_positions: List[Tuple[float, float, float, str]] = []
 
-    # 精确计算 Emoji 垂直居中偏移量，与中文正文字形高度完美对齐
-    emo_offset_y = max(0, int(round(font_size * 0.08)))
+    # 基线对齐：文本与 Emoji 共用同一基线（彩色 Emoji 字体的 ascent 远大于正文字体，
+    # 若按同一 y 绘制会导致 Emoji 上浮；全彩图则底部坐到基线上，避免与文字不在一行）
+    try:
+        _text_asc, _text_desc = font.getmetrics()
+    except Exception:
+        _text_asc, _text_desc = (font_size, 0)
+    try:
+        _emo_asc, _emo_desc = emoji_font.getmetrics() if emoji_font is not None else (_text_asc, _text_desc)
+    except Exception:
+        _emo_asc, _emo_desc = (_text_asc, _text_desc)
 
     def _paste_image(cluster: str) -> bool:
         """全彩图绘制一簇，成功返回 True"""
@@ -1353,7 +1361,7 @@ def _draw_mixed_text(
         emo_img = _get_emoji_image(cluster, font_size, emoji_remote)
         if emo_img is None:
             return False
-        canvas.paste(emo_img, (int(cur_x), int(y + emo_offset_y)), emo_img)
+        canvas.paste(emo_img, (int(cur_x), int(round(y + _text_asc - emo_img.height))), emo_img)
         w = font_size + 2
         char_positions.append((cur_x, w, y, cluster))
         cur_x += w
@@ -1364,7 +1372,7 @@ def _draw_mixed_text(
         nonlocal cur_x
         if len(cluster) != 1 or not is_emoji_char(cluster) or emoji_font is None:
             return False
-        emo_font_y = y + max(0, int(round(font_size * 0.04)))
+        emo_font_y = y + (_text_asc - _emo_asc)
         try:
             draw.text((cur_x, emo_font_y), cluster, font=emoji_font, fill=fill,
                       embedded_color=emoji_is_color)

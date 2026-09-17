@@ -195,6 +195,91 @@ async def render_text_to_image(text: str):
     }, duration);
   }
 
+  // ---- 页内确认框 / 输入框（面板常跑在沙盒 iframe 中，原生 confirm/prompt 会被直接拦截导致按钮无响应） ----
+  function _buildConfirmOverlay(message, { okText = "确定", showInput = false, inputPlaceholder = "", inputValue = "" } = {}) {
+    const ov = document.createElement("div");
+    ov.className = "xb-confirm-overlay";
+    const card = document.createElement("div");
+    card.className = "xb-confirm-card";
+    const msg = document.createElement("div");
+    msg.className = "xb-confirm-msg";
+    msg.textContent = message;
+    card.appendChild(msg);
+    let input = null;
+    if (showInput) {
+      input = document.createElement("input");
+      input.type = "text";
+      input.className = "m3-input xb-confirm-input";
+      input.placeholder = inputPlaceholder;
+      input.value = inputValue;
+      card.appendChild(input);
+    }
+    const actions = document.createElement("div");
+    actions.className = "xb-confirm-actions";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "m3-btn secondary-btn";
+    cancelBtn.textContent = "取消";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "font-file-del";
+    okBtn.style.cssText = "padding:8px 22px;font-size:14px;";
+    okBtn.textContent = okText;
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    card.appendChild(actions);
+    ov.appendChild(card);
+    return { ov, okBtn, cancelBtn, input };
+  }
+  // 确认框：确定 resolve(true)，取消/点遮罩/Esc resolve(false)
+  function uiConfirm(message, okText = "确定删除") {
+    return new Promise((resolve) => {
+      const { ov, okBtn, cancelBtn } = _buildConfirmOverlay(message, { okText });
+      document.body.appendChild(ov);
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey, true);
+        ov.remove();
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") { ev.stopPropagation(); finish(false); }
+      };
+      document.addEventListener("keydown", onKey, true);
+      cancelBtn.addEventListener("click", () => finish(false));
+      okBtn.addEventListener("click", () => finish(true));
+      ov.addEventListener("mousedown", (ev) => { if (ev.target === ov) finish(false); });
+      setTimeout(() => cancelBtn.focus(), 0);
+    });
+  }
+  // 输入框：确定返回输入值（空视为取消返回 null），取消/点遮罩/Esc 返回 null
+  function uiPrompt(message, defaultValue = "", placeholder = "") {
+    return new Promise((resolve) => {
+      const { ov, okBtn, cancelBtn, input } = _buildConfirmOverlay(
+        message, { okText: "确定", showInput: true, inputPlaceholder: placeholder, inputValue: defaultValue });
+      document.body.appendChild(ov);
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey, true);
+        ov.remove();
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") { ev.stopPropagation(); finish(null); }
+        else if (ev.key === "Enter" && document.activeElement === input) { finish((input.value || "").trim() ? input.value.trim() : null); }
+      };
+      document.addEventListener("keydown", onKey, true);
+      cancelBtn.addEventListener("click", () => finish(null));
+      okBtn.addEventListener("click", () => finish((input.value || "").trim() ? input.value.trim() : null));
+      ov.addEventListener("mousedown", (ev) => { if (ev.target === ov) finish(null); });
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    });
+  }
+
   // ---- 主题切换 ----
   // 注意：页面自身深色/浅色切换与生成的图片配色基调完全独立！
   function applyThemeMode(theme) {
@@ -807,7 +892,7 @@ async def render_text_to_image(text: str):
   let _deletingFont = "";
   async function deleteFont(name) {
     if (!name || _deletingFont) return;
-    if (!window.confirm(`确定删除字体「${name}」吗？`)) return;
+    if (!(await uiConfirm(`确定删除字体「${name}」吗？`))) return;
     _deletingFont = name;
     try {
       showToast(`正在删除 ${name}…`);
@@ -1079,7 +1164,8 @@ async def render_text_to_image(text: str):
     }catch(e){ showToast("下载失败: "+e.message); }
   }
   async function deleteEmojiPack(style){
-    if(!confirm(`确定删除 Emoji 样式 ${style} 的下载缓存吗？`)) return;
+    if(!style) return;
+    if(!(await uiConfirm(`确定删除 Emoji 样式 ${style} 的下载缓存吗？`))) return;
     try{
       showToast("正在删除 Emoji 缓存…");
       const res=await api.post("emoji/delete", {style});
@@ -1513,14 +1599,15 @@ async def render_text_to_image(text: str):
         return;
       }
 
-      // 0.4 精选字体卸载/删除
-      const curDel = e.target.closest(".curated-delete-btn, [data-cid]");
+      // 0.4 精选字体卸载（仅卸载按钮本身命中，避免祖先元素属性误伤其它删除按钮）
+      const curDel = e.target.closest(".curated-delete-btn");
       if (curDel) {
         e.preventDefault();
         e.stopPropagation();
         const cid = curDel.getAttribute("data-cid");
-        if (cid && confirm(`确定删除该精选字体文件吗？`)) {
+        if (cid) {
           (async () => {
+            if (!(await uiConfirm(`确定删除该精选字体文件吗？`))) return;
             try {
               showToast("正在删除字体包…");
               const res = await api.post("fonts/curated_delete", { id: cid });
@@ -1570,8 +1657,8 @@ async def render_text_to_image(text: str):
       // 0.5 清空全部 Emoji 缓存
       if (e.target.closest("#clearAllEmojiBtn")) {
         e.preventDefault();
-        if (!confirm("确定清空全部 Emoji 资源与下载缓存吗？")) return;
         (async () => {
+          if (!(await uiConfirm("确定清空全部 Emoji 资源与下载缓存吗？", "确定清空"))) return;
           try {
             showToast("正在清空全部 Emoji 缓存…");
             const res = await api.post("emoji/delete", { style: "all" });
@@ -1595,18 +1682,20 @@ async def render_text_to_image(text: str):
       // 0.6 新增自定义词库
       if (e.target.closest("#addNewPresetBtn")) {
         e.preventDefault();
-        const name = prompt("请输入新词库方案名称：", "自定义敏感词库");
-        if (name && name.trim()) {
-          const presets = getKeywordPresets();
-          const pid = "custom_" + Date.now();
-          presets[pid] = { name: name.trim(), keywords: "" };
-          currentConfig.keyword_presets = presets;
-          currentConfig.active_keyword_preset = pid;
-          populateKeywordPresets();
-          renderSelectedGroupsFontList();
-          triggerAutoSave();
-          showToast(`✅ 已新建词库方案：${name}`);
-        }
+        (async () => {
+          const name = await uiPrompt("请输入新词库方案名称：", "自定义敏感词库", "词库方案名称");
+          if (name) {
+            const presets = getKeywordPresets();
+            const pid = "custom_" + Date.now();
+            presets[pid] = { name: name, keywords: "" };
+            currentConfig.keyword_presets = presets;
+            currentConfig.active_keyword_preset = pid;
+            populateKeywordPresets();
+            renderSelectedGroupsFontList();
+            triggerAutoSave();
+            showToast(`✅ 已新建词库方案：${name}`);
+          }
+        })();
         return;
       }
 
@@ -1619,16 +1708,18 @@ async def render_text_to_image(text: str):
           showToast("⚠️ 默认标准词库不可删除");
           return;
         }
-        if (confirm("确定删除当前自定义词库方案吗？")) {
-          const presets = getKeywordPresets();
-          delete presets[cur];
-          currentConfig.keyword_presets = presets;
-          currentConfig.active_keyword_preset = "default";
-          populateKeywordPresets();
-          renderSelectedGroupsFontList();
-          triggerAutoSave();
-          showToast("🗑️ 已删除该词库方案");
-        }
+        (async () => {
+          if (await uiConfirm("确定删除当前自定义词库方案吗？")) {
+            const presets = getKeywordPresets();
+            delete presets[cur];
+            currentConfig.keyword_presets = presets;
+            currentConfig.active_keyword_preset = "default";
+            populateKeywordPresets();
+            renderSelectedGroupsFontList();
+            triggerAutoSave();
+            showToast("🗑️ 已删除该词库方案");
+          }
+        })();
         return;
       }
 

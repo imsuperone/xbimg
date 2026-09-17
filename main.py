@@ -1982,7 +1982,7 @@ class Msg2ImgPlugin(Star):
         try:
             payload = await request.json(default={})
             style = str(payload.get("style", "") or payload.get("id", "") or "").strip().lower()
-            if style not in ("ios", "android", "windows"):
+            if style not in ("ios", "android", "windows", "all"):
                 return error_response("未知样式", status_code=400)
             res = await asyncio.to_thread(delete_emoji_pack, style)
             # 若删除的是当前样式则切回 none
