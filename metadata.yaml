@@ -1,8 +1,8 @@
 name: astrbot_plugin_xbimg
-display_name: 消息转图助手 (xbimg)
+display_name: 消息转图助手
 short_desc: 智能将机器人消息渲染为高颜值图片，支持iOS/Android16双风格、星空背景、链接直发控制、多套屏蔽词方案与AI审查。
 desc: |
-  🎨 AstrBot 高颜值消息文本转图片（xbimg）渲染插件：
+  🎨 AstrBot 高颜值消息文本转图片渲染插件：
   - ✨ 双主题视觉：精致透亮的 iOS 磨砂玻璃风格 & 现代活泼的 Android 16 (Material 3 Expressive) 胶囊卡片风格
   - 🌟 灵动星空背景：自动在背景四周散落随机生成的十字星、闪烁星芒与光晕微粒（无卡片内噪点）
   - 🔗 智能链接策略：可自由设定遇到 URL 链接时转图、保留纯文本或附带提取纯文本链接
@@ -12,7 +12,7 @@ desc: |
   - 📱 全新全屏 WebUI：交互式仪表盘，单列全屏优雅排版，支持独立实时文本渲染测试台
 version: 1.0.5
 author: Light
-repo: https://github.com/imsuperone/textimg
+repo: https://github.com/imsuperone/xbimg
 support_platforms:
   - aiocqhttp
 pages:

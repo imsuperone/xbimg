@@ -165,7 +165,7 @@ async def render_text_to_image(text: str):
 更多详细信息欢迎点击下方链接查看：
 - AstrBot 官方文档：https://astrbot.app
 - NapCat 核心仓库：https://github.com/NapCatQQ/NapCatQQ
-- 项目仓库主页：https://github.com/imsuperone/textimg
+- 项目仓库主页：https://github.com/imsuperone/xbimg
 
 可根据设置选择是转图还是保留可点击纯文本。`,
   };

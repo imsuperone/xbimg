@@ -1,8 +1,8 @@
-# astrbot_plugin_xbimg (消息转图助手 xbimg)
+# astrbot_plugin_xbimg (消息转图助手)
 
-🎨 一个精致美观、功能强大的 AstrBot 消息文本转图片（xbimg）渲染插件。
+🎨 一个精致美观、功能强大的 AstrBot 消息文本转图片渲染插件。
 
-- 📦 项目主页：https://github.com/imsuperone/textimg
+- 📦 项目主页：https://github.com/imsuperone/xbimg
 
 ---
 

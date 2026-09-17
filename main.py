@@ -808,7 +808,7 @@ class Msg2ImgPlugin(Star):
 
         if not sub or sub in ("help", "status", "菜单"):
             yield event.plain_result(
-                "🎨【xbimg 消息转图助手 · 控制台】\n"
+                "🎨【消息转图助手 · 控制台】\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 f"• 总开关状态：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'}\n"
                 f"• 触发时机：{'🔄 始终转图' if cfg.get('render_trigger') == 'always' else '🛡️ 仅违规时转图'}\n"
