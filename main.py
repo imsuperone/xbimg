@@ -841,6 +841,15 @@ class Msg2ImgPlugin(Star):
                 "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
                 "• /xbimg groupmode whitelist / all / blacklist - 群生效模式\n"
                 "• /xbimg size [群号] 50-500 - 字体百分比\n"
+                "• /xbimg group - 本群专属配置卡片\n"
+                "• /xbimg group set <50-500> [群号] - 单群字体大小\n"
+                "• /xbimg group style ios / android16 / default [群号] - 单群风格\n"
+                "• /xbimg group theme light / dark / default [群号] - 单群主题\n"
+                "• /xbimg group kw <方案ID> / default [群号] - 单群词库\n"
+                "• /xbimg group ttf <字体id> [群号] - 单群精选字体\n"
+                "• /xbimg group list - 字体与词库列表\n"
+                "• /xbimg group reset [群号] - 单群恢复跟随全局\n"
+                "• /xbimg group test [群号] - 单群效果测试图\n"
                 "• /xbimg test [文本] - 立即生成测试效果图"
             )
             return
@@ -1098,6 +1107,263 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save({"group_font_scales": raw})
                 yield event.plain_result(f"✅ 群 {target_gid} 字体已设为 {scale}%（100% 为默认，自动移除）")
             return
+        elif sub in ("group", "群组", "群"):
+            # /xbimg group 单群专属配置（原 /text、/style、/theme 已合并至此）
+            # 用法：/xbimg group [info|set|style|theme|kw|ttf|list|reset|test] [值] [群号]
+            parts = [p for p in re.split(r"[\s,]+", arg) if p]
+            cur_gid = self._extract_group_id(event)
+            action = parts[0].lower() if parts else ""
+            rest = parts[1:] if parts else []
+
+            def _target_gid(tokens):
+                for tok in tokens:
+                    d = re.sub(r"\D", "", tok)
+                    if d and len(d) >= 5:
+                        return d
+                return cur_gid
+
+            def _gname(gid):
+                if gid == cur_gid:
+                    return self._get_group_display_name(event, gid)
+                try:
+                    hist = self._seen_groups.get(gid, {}).get("group_name", "")
+                    if hist:
+                        return hist
+                except Exception:
+                    pass
+                return f"群 {gid}" if gid else "全局"
+
+            if action in ("", "info", "show", "status", "card", "查看", "状态"):
+                target = cur_gid
+                if rest:
+                    d = re.sub(r"\D", "", rest[0])
+                    if d:
+                        target = d
+                if not target:
+                    yield event.plain_result("当前不在群聊中，请附带群号查看，例如：/xbimg group 123456")
+                    return
+                cur_scale = self._get_group_font_scale(target)
+                grp_c = self._get_group_custom_config(target)
+                cur_style = grp_c.get("style", cfg.get("style", "ios"))
+                cur_theme = grp_c.get("theme_mode", cfg.get("theme_mode", "light"))
+                cur_kw = grp_c.get("keyword_preset", "")
+                kw_name = "跟随全局默认" if not cur_kw else cur_kw
+                yield event.plain_result(
+                    f"🎨【{_gname(target)} · 转图专属设置】\n"
+                    "--------------------\n"
+                    f"当前字体大小：{cur_scale}%\n"
+                    f"当前视觉风格：{str(cur_style).upper()}\n"
+                    f"当前配色主题：{'浅色' if cur_theme == 'light' else '深色'}\n"
+                    f"绑定词库方案：{kw_name}\n"
+                    "--------------------\n"
+                    "💡 单群指令（均可追加工号操作异地群）：\n"
+                    "• /xbimg group set <50-500> [群号] - 单群字体\n"
+                    "• /xbimg group style ios / android16 / default [群号]\n"
+                    "• /xbimg group theme light / dark / default [群号]\n"
+                    "• /xbimg group kw <词库ID> / default [群号]\n"
+                    "• /xbimg group ttf <字体id> [群号]\n"
+                    "• /xbimg group list - 字体与词库列表\n"
+                    "• /xbimg group reset [群号] - 恢复跟随全局\n"
+                    "• /xbimg group test [群号] - 单群效果测试图"
+                )
+                return
+            if action in ("list", "列表"):
+                try:
+                    from core.renderer import CURATED_FONTS as _CF
+                except Exception:
+                    try:
+                        from .core.renderer import CURATED_FONTS as _CF
+                    except Exception:
+                        _CF = []
+                presets = cfg.get("keyword_presets", {})
+                if not isinstance(presets, dict):
+                    presets = {}
+                lines = [f"🔤【可用字体列表】（共 {len(_CF)} 款）:"]
+                for idx, item in enumerate(_CF, 1):
+                    lines.append(f"{idx}. {item['name']} - id: {item['id']}")
+                lines.append("\n🛡️【可用敏感词库方案】:")
+                for pk, pv in presets.items():
+                    pname = pv.get("name", pk) if isinstance(pv, dict) else pk
+                    lines.append(f"• {pk} - {pname}")
+                lines.append("\n💡 切换指令：\n• /xbimg group ttf <字体id> [群号]\n• /xbimg group kw <词库id> [群号]")
+                yield event.plain_result("\n".join(lines))
+                return
+            if action in ("set", "size", "font", "fontsize", "字号"):
+                ints = []
+                for tok in rest:
+                    d = re.sub(r"\D", "", tok)
+                    if d:
+                        try:
+                            ints.append(int(d))
+                        except Exception:
+                            pass
+                scale = next((n for n in ints if 50 <= n <= 500), None)
+                gid_tok = next((str(n) for n in ints if len(str(n)) >= 5 and n != scale), "")
+                target = gid_tok or cur_gid
+                if scale is None:
+                    cur = self._get_group_font_scale(target) if target else int(cfg.get("font_scale", 100) or 100)
+                    yield event.plain_result(f"用法：/xbimg group set <50-500> [群号]\n当前{('群 ' + target) if target else '全局'}字体：{cur}%\n示例：/xbimg group set 120")
+                    return
+                if not target:
+                    cfg["font_scale"] = scale
+                    self.cfg_mgr.save({"font_scale": scale})
+                    yield event.plain_result(f"✅ 全局字体已设为 {scale}%")
+                else:
+                    self._update_group_custom(target, {"font_scale": scale})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的字体大小设置为 {scale}%")
+                return
+            if action in ("style", "风格"):
+                value = (rest[0].lower() if rest else "")
+                target = _target_gid(rest[1:])
+                if value in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group style default 123456")
+                        return
+                    self._update_group_custom(target, {"style": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的视觉风格恢复为跟随全局默认。")
+                    return
+                if value in ("ios", "android16", "android"):
+                    st = "android16" if "android" in value else "ios"
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"style": st})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的视觉风格设置为：{st.upper()}")
+                else:
+                    yield event.plain_result("用法：/xbimg group style ios / android16 / default [群号]")
+                return
+            if action in ("theme", "配色"):
+                value = (rest[0].lower() if rest else "")
+                target = _target_gid(rest[1:])
+                if value in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group theme default 123456")
+                        return
+                    self._update_group_custom(target, {"theme_mode": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的配色主题恢复为跟随全局默认。")
+                    return
+                if value in ("light", "dark", "浅色", "深色"):
+                    tm = "dark" if value in ("dark", "深色") else "light"
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"theme_mode": tm})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的配色主题设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
+                else:
+                    yield event.plain_result("用法：/xbimg group theme light / dark / default [群号]")
+                return
+            if action in ("kw", "preset", "词库"):
+                value = (rest[0] if rest else "").strip()
+                target = _target_gid(rest[1:])
+                presets = cfg.get("keyword_presets", {})
+                if not isinstance(presets, dict):
+                    presets = {}
+                if value.lower() in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"keyword_preset": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】绑定的敏感词库恢复为：跟随全局默认。")
+                    return
+                if value in presets:
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"keyword_preset": value})
+                    pname = presets[value].get("name", value) if isinstance(presets[value], dict) else value
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】绑定的敏感词库切换为：{pname}")
+                else:
+                    names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
+                    yield event.plain_result("用法：/xbimg group kw <词库方案ID> / default [群号]\n当前可用词库：\n" + "\n".join(names))
+                return
+            if action == "ttf":
+                fid = (rest[0] if rest else "").strip()
+                target = _target_gid(rest[1:])
+                if not fid:
+                    yield event.plain_result("用法：/xbimg group ttf <字体id> [群号]\n可发送 /xbimg group list 查看可用 id。")
+                    return
+                try:
+                    from core.renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
+                except Exception:
+                    try:
+                        from .core.renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
+                    except Exception:
+                        _CF2 = []
+                        _dl2 = None
+                hit = next((x for x in _CF2 if x["id"].lower() == fid.lower()), None)
+                if not hit:
+                    yield event.plain_result(f"❌ 未找到字体 id「{fid}」，请发送 /xbimg group list 查看支持的列表。")
+                    return
+                yield event.plain_result(f"⏳ 正在检查【{hit['name']}】字体包…")
+                res = await asyncio.to_thread(_dl2, hit["id"])
+                if not res.get("ok"):
+                    yield event.plain_result(f"❌ 字体准备失败: {res.get('error', '网络异常')}")
+                    return
+                fname = res.get("downloaded", [""])[0] or hit["files"][0][0]
+                if target:
+                    self._update_group_custom(target, {"custom_font_path": fname})
+                    yield event.plain_result(f"✅ 成功将【{_gname(target)}】的字体切换为：{hit['name']}")
+                else:
+                    self.cfg_mgr.save({"font_source": "custom", "custom_font_path": fname})
+                    yield event.plain_result(f"✅ 全局字体已切换为：{hit['name']}")
+                return
+            if action in ("reset", "default", "恢复默认", "重置"):
+                target = _target_gid(rest) or cur_gid
+                if not target:
+                    yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group reset 123456")
+                    return
+                raw = cfg.get("group_configs", {})
+                if isinstance(raw, dict) and (str(target) in raw or target in raw):
+                    raw.pop(str(target), None)
+                    raw.pop(target, None)
+                    self.cfg_mgr.save({"group_configs": raw})
+                raw_sc = cfg.get("group_font_scales", {})
+                if isinstance(raw_sc, dict) and (str(target) in raw_sc or target in raw_sc):
+                    raw_sc.pop(str(target), None)
+                    raw_sc.pop(target, None)
+                    self.cfg_mgr.save({"group_font_scales": raw_sc})
+                yield event.plain_result(f"✅ 已恢复【{_gname(target)}】的所有专属设置，完全跟随全局默认。")
+                return
+            if action == "test":
+                target = _target_gid(rest) or cur_gid
+                eff_scale = self._get_group_font_scale(target) if target else int(cfg.get("font_scale", 100) or 100)
+                grp_c = self._get_group_custom_config(target) if target else {}
+                style_eff = grp_c.get("style", cfg.get("style", "ios"))
+                theme_eff = grp_c.get("theme_mode", cfg.get("theme_mode", "light"))
+                tname = _gname(target) if target else "全局"
+                test_content = (
+                    f"# 🎨【{tname}】专属渲染效果测试\n"
+                    "这是一段用于测试消息转图排版与美观度的标准文本。\n\n"
+                    "- 链接测试：https://astrbot.app 欢迎访问官方网站\n"
+                    "- 模拟打码：本行包含测试词展示半马赛克精美效果\n"
+                    "- 代码展示：\n"
+                    "```python\n"
+                    "def hello_world():\n"
+                    "    print('Msg2Img by xbimg - Test Passed!')\n"
+                    "```"
+                )
+                img = await asyncio.to_thread(
+                    MessageImageRenderer.render,
+                    text=test_content,
+                    style=style_eff,
+                    theme_mode=theme_eff,
+                    star_background=bool(cfg.get("star_background", True)),
+                    star_density=str(cfg.get("star_density", "medium")),
+                    mosaic_mode="half",
+                    mosaic_type=str(cfg.get("mosaic_type", "pixel")),
+                    violation_words=["测试词"],
+                    emoji_remote=True,
+                    mosaic_half_pos=str(cfg.get("mosaic_half_pos", "bottom")),
+                    font_scale=eff_scale,
+                )
+                img_filename = f"test_{int(time.time()*1000)}.png"
+                img_path = self.cache_dir / img_filename
+                await asyncio.to_thread(img.save, str(img_path), "PNG")
+                self._schedule_delete(img_path, 45)
+                yield event.chain_result([AstrImage.fromFileSystem(str(img_path))])
+                return
+            yield event.plain_result("未知 group 子指令，请输入 /xbimg group 查看单群菜单。")
+            return
         elif sub == "test":
             test_content = arg or "这是一条来自 AstrBot 消息转图助手的测试消息！✨\n祝您使用愉快~"
             img = await asyncio.to_thread(
@@ -1117,272 +1383,7 @@ class Msg2ImgPlugin(Star):
         else:
             yield event.plain_result("未知子指令，请输入 /xbimg 查看指令菜单。")
 
-    @filter.command("text")
-    async def cmd_text(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
-        """群专属快捷配置指令：/text set | /text ttf | /text list | /text test"""
-        sub = sub.strip().lower()
-        arg = arg.strip()
-        gid = self._extract_group_id(event)
-        gname = self._get_group_display_name(event, gid)
-
-        if not sub:
-            cur_scale = self._get_group_font_scale(gid)
-            grp_c = self._get_group_custom_config(gid)
-            cur_style = grp_c.get("style", self.cfg_mgr.config.get("style", "ios"))
-            cur_theme = grp_c.get("theme_mode", self.cfg_mgr.config.get("theme_mode", "light"))
-            cur_kw = grp_c.get("keyword_preset", "")
-            kw_name = "跟随全局默认" if not cur_kw else cur_kw
-            yield event.plain_result(
-                f"🎨【{gname} · 转图专属设置】\n"
-                "--------------------\n"
-                f"当前字体大小：{cur_scale}%\n"
-                f"当前视觉风格：{cur_style.upper()}\n"
-                f"当前配色主题：{'浅色' if cur_theme == 'light' else '深色'}\n"
-                f"绑定词库方案：{kw_name}\n"
-                "--------------------\n"
-                "💡 专属群指令：\n"
-                "• /text set <50-500> - 设置当前群字体大小\n"
-                "• /text style ios / android16 / default - 单群风格\n"
-                "• /text theme light / dark / default - 单群配色\n"
-                "• /text kw <词库方案ID> - 单群绑定指定词库\n"
-                "• /text ttf <id> - 切换当前群精选字体\n"
-                "• /text list - 查看可用字体与词库列表\n"
-                "• /text reset - 恢复该群所有设置跟随全局\n"
-                "• /text test - 发送当前群专属测试图"
-            )
-            return
-
-        if not self._is_admin_event(event):
-            yield event.plain_result("⛔ 仅管理员可配置转图设置。")
-            return
-
-        if sub == "set":
-            # 调整字体大小
-            try:
-                val = int(arg)
-            except Exception:
-                val = None
-            if val is None or not (50 <= val <= 500):
-                yield event.plain_result(f"用法：/text set <50-500>\n示例：/text set 120 （将【{gname}】字体调为 120%）")
-                return
-            if not gid:
-                self.cfg_mgr.config["font_scale"] = val
-                self.cfg_mgr.save({"font_scale": val})
-                yield event.plain_result(f"✅ 全局字体已设为 {val}%")
-            else:
-                self._update_group_custom(gid, {"font_scale": val})
-                yield event.plain_result(f"✅ 已将【{gname}】的字体大小设置为 {val}%")
-
-        elif sub == "list":
-            # 查看字体列表与词库列表
-            try:
-                from core.renderer import CURATED_FONTS as _CF
-            except Exception:
-                _CF = []
-            presets = self.cfg_mgr.config.get("keyword_presets", {})
-            if not isinstance(presets, dict):
-                presets = {}
-            lines = [f"🔤【可用字体列表】（共 {len(_CF)} 款）:"]
-            for idx, item in enumerate(_CF, 1):
-                lines.append(f"{idx}. {item['name']} - id: {item['id']}")
-            lines.append("\n🛡️【可用敏感词库方案】:")
-            for pk, pv in presets.items():
-                pname = pv.get("name", pk) if isinstance(pv, dict) else pk
-                lines.append(f"• {pk} - {pname}")
-            lines.append("\n💡 切换指令：\n• /text ttf <字体id>\n• /text kw <词库id>\n• /text reset (恢复全部默认)")
-            yield event.plain_result("\n".join(lines))
-
-        elif sub in ("kw", "preset", "词库"):
-            presets = self.cfg_mgr.config.get("keyword_presets", {})
-            if not isinstance(presets, dict):
-                presets = {}
-            if arg in ("default", "reset", "跟随", "默认", ""):
-                if gid:
-                    self._update_group_custom(gid, {"keyword_preset": ""})
-                    yield event.plain_result(f"✅ 已将【{gname}】绑定的敏感词库恢复为：跟随全局默认。")
-                return
-            if arg in presets:
-                if gid:
-                    self._update_group_custom(gid, {"keyword_preset": arg})
-                    pname = presets[arg].get("name", arg) if isinstance(presets[arg], dict) else arg
-                    yield event.plain_result(f"✅ 已将【{gname}】绑定的敏感词库切换为：{pname}")
-            else:
-                names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
-                yield event.plain_result(f"用法：/text kw <词库方案ID>  或  /text kw default(恢复跟随全局)\n当前可用词库：\n" + "\n".join(names))
-
-        elif sub in ("style", "风格"):
-            if arg in ("default", "reset", "跟随", "默认", ""):
-                if gid:
-                    self._update_group_custom(gid, {"style": ""})
-                    yield event.plain_result(f"✅ 已将【{gname}】的视觉风格恢复为跟随全局默认。")
-                return
-            if arg in ("ios", "android16", "android"):
-                st = "android16" if "android" in arg else "ios"
-                if gid:
-                    self._update_group_custom(gid, {"style": st})
-                    yield event.plain_result(f"✅ 已将【{gname}】的视觉风格设置为：{st.upper()}")
-            else:
-                yield event.plain_result("用法：/text style ios 或 /text style android16 或 /text style default")
-
-        elif sub in ("theme", "配色"):
-            if arg in ("default", "reset", "跟随", "默认", ""):
-                if gid:
-                    self._update_group_custom(gid, {"theme_mode": ""})
-                    yield event.plain_result(f"✅ 已将【{gname}】的配色主题恢复为跟随全局默认。")
-                return
-            if arg in ("light", "dark", "浅色", "深色"):
-                tm = "dark" if arg in ("dark", "深色") else "light"
-                if gid:
-                    self._update_group_custom(gid, {"theme_mode": tm})
-                    yield event.plain_result(f"✅ 已将【{gname}】的配色主题设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
-            else:
-                yield event.plain_result("用法：/text theme light 或 /text theme dark 或 /text theme default")
-
-        elif sub == "ttf":
-            # 切换当前群字体
-            if not arg:
-                yield event.plain_result(f"用法：/text ttf <字体id>\n可发送 /text list 查看可用 id。")
-                return
-            try:
-                from core.renderer import CURATED_FONTS as _CF, download_curated_font
-            except Exception:
-                _CF = []
-            hit = next((x for x in _CF if x["id"].lower() == arg.lower()), None)
-            if not hit:
-                yield event.plain_result(f"❌ 未找到字体 id「{arg}」，请发送 /text list 查看支持的列表。")
-                return
-            # 确保下载
-            yield event.plain_result(f"⏳ 正在检查【{hit['name']}】字体包…")
-            res = await asyncio.to_thread(download_curated_font, hit["id"])
-            if not res.get("ok"):
-                yield event.plain_result(f"❌ 字体准备失败: {res.get('error', '网络异常')}")
-                return
-            # 绑定到当前群专属配置
-            fname = res.get("downloaded", [""])[0] or hit["files"][0][0]
-            if gid:
-                self._update_group_custom(gid, {"custom_font_path": fname})
-                yield event.plain_result(f"✅ 成功将【{gname}】的字体切换为：{hit['name']}")
-            else:
-                self.cfg_mgr.save({"font_source": "custom", "custom_font_path": fname})
-                yield event.plain_result(f"✅ 全局字体已切换为：{hit['name']}")
-
-        elif sub in ("reset", "default", "恢复默认", "重置"):
-            if gid:
-                raw = self.cfg_mgr.config.get("group_configs", {})
-                if isinstance(raw, dict) and (str(gid) in raw or gid in raw):
-                    raw.pop(str(gid), None)
-                    raw.pop(gid, None)
-                    self.cfg_mgr.save({"group_configs": raw})
-                raw_sc = self.cfg_mgr.config.get("group_font_scales", {})
-                if isinstance(raw_sc, dict) and (str(gid) in raw_sc or gid in raw_sc):
-                    raw_sc.pop(str(gid), None)
-                    raw_sc.pop(gid, None)
-                    self.cfg_mgr.save({"group_font_scales": raw_sc})
-                yield event.plain_result(f"✅ 已恢复【{gname}】的所有专属设置，完全跟随全局默认。")
-            else:
-                yield event.plain_result("当前不在群聊中。")
-
-        elif sub == "test":
-            # 发送测试图：包含链接、代码、假装违规词（无害日常词伪装）
-            eff_scale = self._get_group_font_scale(gid)
-            grp_c = self._get_group_custom_config(gid)
-            style_eff = grp_c.get("style", self.cfg_mgr.config.get("style", "ios"))
-            theme_eff = grp_c.get("theme_mode", self.cfg_mgr.config.get("theme_mode", "light"))
-            # 构造测试文本：假装"测试词"是违规词
-            test_content = (
-                f"# 🎨【{gname}】专属渲染效果测试\n"
-                "这是一段用于测试消息转图排版与美观度的标准文本。\n\n"
-                "- 链接测试：https://astrbot.app 欢迎访问官方网站\n"
-                "- 模拟打码：本行包含测试词展示半马赛克精美效果\n"
-                "- 代码展示：\n"
-                "```python\n"
-                "def hello_world():\n"
-                "    print('Msg2Img by xbimg - Test Passed!')\n"
-                "```"
-            )
-            img = await asyncio.to_thread(
-                MessageImageRenderer.render,
-                text=test_content,
-                style=style_eff,
-                theme_mode=theme_eff,
-                star_background=bool(self.cfg_mgr.config.get("star_background", True)),
-                star_density=str(self.cfg_mgr.config.get("star_density", "medium")),
-                mosaic_mode="half",
-                mosaic_type=str(self.cfg_mgr.config.get("mosaic_type", "pixel")),
-                violation_words=["测试词"],
-                emoji_remote=True,
-                mosaic_half_pos=str(self.cfg_mgr.config.get("mosaic_half_pos", "bottom")),
-                font_scale=eff_scale,
-            )
-            img_filename = f"test_{int(time.time()*1000)}.png"
-            img_path = self.cache_dir / img_filename
-            await asyncio.to_thread(img.save, str(img_path), "PNG")
-            self._schedule_delete(img_path, 45)
-            yield event.chain_result([AstrImage.fromFileSystem(str(img_path))])
-        else:
-            yield event.plain_result(f"未知子指令，请输入 /text 查看【{gname}】指令菜单。")
-
-    @filter.command("style")
-    async def cmd_group_style(self, event: AstrMessageEvent, style_name: str = ""):
-        """切换当前群的专属风格：/style ios 或 /style android16 或 /style default(跟随全局)"""
-        gid = self._extract_group_id(event)
-        gname = self._get_group_display_name(event, gid)
-        style_name = style_name.strip().lower()
-        if style_name in ("default", "reset", "跟随", "默认", "auto"):
-            if not self._is_admin_event(event):
-                yield event.plain_result("⛔ 仅管理员可配置转图样式。")
-                return
-            if gid:
-                self._update_group_custom(gid, {"style": ""})
-                yield event.plain_result(f"✅ 已将【{gname}】的视觉风格恢复为跟随全局默认。")
-            else:
-                yield event.plain_result("当前不在群聊中。")
-            return
-
-        if style_name not in ("ios", "android16", "android"):
-            yield event.plain_result(f"用法：/style ios  或  /style android16  或  /style default(恢复跟随全局)\n仅对【{gname}】单独生效。")
-            return
-        if not self._is_admin_event(event):
-            yield event.plain_result("⛔ 仅管理员可配置转图样式。")
-            return
-        st = "android16" if "android" in style_name else "ios"
-        if gid:
-            self._update_group_custom(gid, {"style": st})
-            yield event.plain_result(f"✅ 已将【{gname}】的视觉风格设置为：{st.upper()}")
-        else:
-            self.cfg_mgr.save({"style": st})
-            yield event.plain_result(f"✅ 全局风格已设置为：{st.upper()}")
-
-    @filter.command("theme")
-    async def cmd_group_theme(self, event: AstrMessageEvent, theme_name: str = ""):
-        """切换当前群的专属配色主题：/theme light 或 /theme dark 或 /theme default(跟随全局)"""
-        gid = self._extract_group_id(event)
-        gname = self._get_group_display_name(event, gid)
-        theme_name = theme_name.strip().lower()
-        if theme_name in ("default", "reset", "跟随", "默认", "auto"):
-            if not self._is_admin_event(event):
-                yield event.plain_result("⛔ 仅管理员可配置转图主题。")
-                return
-            if gid:
-                self._update_group_custom(gid, {"theme_mode": ""})
-                yield event.plain_result(f"✅ 已将【{gname}】的配色主题恢复为跟随全局默认。")
-            else:
-                yield event.plain_result("当前不在群聊中。")
-            return
-
-        if theme_name not in ("light", "dark", "浅色", "深色"):
-            yield event.plain_result(f"用法：/theme light  或  /theme dark  或  /theme default(恢复跟随全局)\n仅对【{gname}】单独生效。")
-            return
-        if not self._is_admin_event(event):
-            yield event.plain_result("⛔ 仅管理员可配置转图主题。")
-            return
-        tm = "dark" if theme_name in ("dark", "深色") else "light"
-        if gid:
-            self._update_group_custom(gid, {"theme_mode": tm})
-            yield event.plain_result(f"✅ 已将【{gname}】的配色主题设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
-        else:
-            self.cfg_mgr.save({"theme_mode": tm})
-            yield event.plain_result(f"✅ 全局主题已设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
+    # /text、/style、/theme 已合并至 /xbimg group（见 cmd_xbimg），此处不再保留重复指令
 
     def _update_group_custom(self, gid: str, patch: Dict[str, Any]):
         """辅助方法：合并更新指定群专属配置并持久化保存"""
