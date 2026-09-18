@@ -1137,6 +1137,34 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         imgs = asyncio.run(_go())
         self.assertTrue(imgs)
 
+    def test_extra_font_dirs_discovery(self):
+        """挂载目录发现：有特征文件名直收，无特征文件名走 cmap 内容校验"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        src = R._FONT_REGULAR_PATH
+        if not src or not R._is_usable_font(src):
+            self.skipTest("无可用系统字体，跳过")
+        tmp = Path(tempfile.mkdtemp())
+        orig_env = os.environ.get("XBIMG_FONT_DIRS")
+        orig_sys = R._SYSTEM_CANDIDATES
+        try:
+            shutil.copy(src, tmp / "mytest-noto-fake.ttf")  # 有特征名
+            shutil.copy(src, tmp / "zzcustom123.ttf")  # 无特征名，走 cmap
+            os.environ["XBIMG_FONT_DIRS"] = str(tmp)
+            R._SYSTEM_CANDIDATES = None
+            found = R._scan_extra_font_dirs()
+            names = [Path(p).name for p in found]
+            self.assertIn("mytest-noto-fake.ttf", names)
+            self.assertIn("zzcustom123.ttf", names)
+        finally:
+            if orig_env is None:
+                os.environ.pop("XBIMG_FONT_DIRS", None)
+            else:
+                os.environ["XBIMG_FONT_DIRS"] = orig_env
+            R._SYSTEM_CANDIDATES = orig_sys
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

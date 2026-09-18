@@ -52,13 +52,19 @@ _RE_DIVIDER = re.compile(r"^[-*_]{3,}$")
 _RE_BULLET = re.compile(r"^(\*|-|\d+\.)\s+")
 
 # CJK 字体文件名特征（用于 Linux/mac 全盘扫描时识别）
+# 注意：仅做快速初筛；挂载目录 additionally 用 cmap 内容校验，不依赖文件名
 _CJK_FILE_HINTS = (
     "wqy", "noto", "cjk", "yahei", "pingfang", "sourcehan", "hiragino",
     "simsun", "simhei", "simkai", "fandol", "uming", "ukai",
     "droidsansfallback", "fzsong", "fzhei", "stheiti", "heiti",
     "songti", "kaiti", "lantinghei", "arial unicode",
+    "han", "wenquanyi", "lxgw", "zcool", "mashan", "sarasa",
 )
 _FONT_EXTS = (".ttf", ".ttc", ".otf", ".dfont")
+# Docker 常见字体挂载点（用户 -v 挂进来的字库一般在这里；另支持环境变量追加）
+_MOUNT_FONT_BASES = ("/fonts", "/app/fonts", "/AstrBot/fonts", "/data/fonts")
+# cmap 内容校验抽查点（常用汉字，命中任一即视为含 CJK）
+_CJK_PROBE_POINTS = (0x4E2D, 0x6587, 0x963F, 0x4E00, 0x9FFF)
 # Pillow/FreeType 下渲染半残（笔画缺失）的坏字体，直接拉黑，宁可降级用常规字重
 _BROKEN_FONT_FILES = {"msyhbd.ttc", "msyhhv.ttc"}
 
@@ -130,8 +136,76 @@ def _query_fontconfig_cjk() -> List[str]:
         return []
 
 
+def _has_cjk_cmap(path: str) -> bool:
+    """内容校验：cmap 是否含常用 CJK 码位（文件名无特征的挂载字体靠它认出）"""
+    try:
+        _fc = globals().get("_file_cmap")
+        if not callable(_fc):
+            return False  # import 期 _file_cmap 尚未定义，降级为文件名判定
+        cmap = _fc(path)
+        if not cmap:
+            return False
+        return any(cp in cmap for cp in _CJK_PROBE_POINTS)
+    except Exception:
+        return False
+
+
+def _extra_font_dirs() -> List[str]:
+    """用户挂载目录：环境变量 XBIMG_FONT_DIRS（os.pathsep 分隔）+ 常见挂载点"""
+    dirs: List[str] = []
+    try:
+        raw = os.environ.get("XBIMG_FONT_DIRS", "") or ""
+        for part in raw.split(os.pathsep):
+            part = part.strip()
+            if part and part not in dirs:
+                dirs.append(part)
+    except Exception:
+        pass
+    for base in _MOUNT_FONT_BASES:
+        if base not in dirs:
+            dirs.append(base)
+    return dirs
+
+
+def _scan_extra_font_dirs() -> List[str]:
+    """扫描挂载目录：文件名命中直接收录，无特征文件名用 cmap 内容校验（各有上限防慢启动）"""
+    found: List[str] = []
+    checked = 0
+    for base in _extra_font_dirs():
+        try:
+            root = Path(base)
+            if not root.is_dir():
+                continue
+            try:
+                files = sorted(p for p in root.rglob("*") if p.suffix.lower() in _FONT_EXTS)
+            except Exception:
+                continue
+            for p in files[:300]:
+                try:
+                    if not p.is_file():
+                        continue
+                except Exception:
+                    continue
+                name_l = p.name.lower()
+                if any(h in name_l for h in _CJK_FILE_HINTS):
+                    found.append(str(p))
+                elif checked < 30:
+                    # 无特征文件名：cmap 校验（fontTools 解析，有上限）
+                    checked += 1
+                    try:
+                        if _has_cjk_cmap(str(p)):
+                            found.append(str(p))
+                    except Exception:
+                        pass
+                if len(found) >= 40:
+                    return found
+        except Exception:
+            continue
+    return found
+
+
 def _collect_font_candidates(extra_first: Optional[List[str]] = None) -> List[str]:
-    """收集全来源有序字体候选：额外优先 → Windows 精选 → 自带 → Linux/mac 精确 → fc-list → 全盘扫描"""
+    """收集全来源有序字体候选：额外优先 → Windows 精选 → 自带 → 用户挂载 → Linux/mac 精确 → fc-list → 全盘扫描"""
     ordered: List[str] = []
 
     def _add(p: str):
@@ -167,6 +241,10 @@ def _collect_font_candidates(extra_first: Optional[List[str]] = None) -> List[st
                     _add(str(p))
     except Exception:
         pass
+
+    # 用户挂载目录（Docker -v /宿主字体:/fonts 等 + XBIMG_FONT_DIRS），意图明确优先于系统兜底
+    for p in _scan_extra_font_dirs():
+        _add(p)
 
     # Linux / macOS 精确路径
     for p in [
@@ -232,14 +310,19 @@ def _split_reg_bold(ordered: List[str]) -> Tuple[str, str]:
 
 
 def _find_fonts() -> Tuple[str, str]:
-    """查找系统可用的中文字体，返回 (regular, bold)。找不到则返回空并打日志。"""
+    """查找系统可用的中文字体，返回 (regular, bold)。
+
+    注意：import 期只做候选收集、不报“缺字体”警告——数据目录/用户挂载在
+    configure_fonts 之后才完整，真正的缺字判定在 _rebuild_active_fonts 里做，
+    避免用户明明挂了字体却被误报。
+    """
     ordered = _system_font_candidates()
     reg, bold = _split_reg_bold(ordered)
 
-    if not reg:
-        logger.warning("[msg2img] 未找到任何中文字体！中文将显示为方框。请安装 fonts-noto-cjk / wqy-microhei，或把字体放入 assets/fonts/。")
-    else:
+    if reg:
         logger.info(f"[msg2img] 中文字体 regular={reg} bold={bold}")
+    else:
+        logger.debug("[msg2img] 系统目录未发现中文字体，等待数据目录/挂载目录生效")
     return reg, bold
 
 
@@ -379,6 +462,10 @@ def _resolve_custom_font(raw: str) -> str:
     return ""
 
 
+# 缺字体警告进程内只打一次（见 _rebuild_active_fonts）
+_WARNED_NO_CJK = False
+
+
 def _rebuild_active_fonts():
     """按当前配置重建生效候选集（附带清空字体缓存，避免下载/删除后用旧字）"""
     global _ACTIVE_ORDERED, _ACTIVE_REGULAR, _ACTIVE_BOLD
@@ -419,6 +506,23 @@ def _rebuild_active_fonts():
 
     _ACTIVE_ORDERED = ordered
     _ACTIVE_REGULAR, _ACTIVE_BOLD = _split_reg_bold(ordered)
+    # 缺字判定只在这里做一次（进程内）：此时数据目录/挂载目录/自定义已全部就位，
+    # 结论准确；字体出现后复位标记，下次再缺才提醒
+    global _WARNED_NO_CJK
+    try:
+        if _ACTIVE_REGULAR and _is_usable_font(_ACTIVE_REGULAR):
+            if _WARNED_NO_CJK:
+                logger.info(f"[msg2img] 中文字体已就绪：{_ACTIVE_REGULAR}")
+            _WARNED_NO_CJK = False
+        elif not _WARNED_NO_CJK:
+            _WARNED_NO_CJK = True
+            logger.warning(
+                "[msg2img] 未找到可用中文字体，中文将显示为方框。请按需处理："
+                "① WebUI 精选字体一键下载；② Docker 用 -v 挂字体目录到 /fonts 并重启；"
+                "③ 设置环境变量 XBIMG_FONT_DIRS 指向字体目录；④ 安装 fonts-noto-cjk / wqy-microhei。"
+            )
+    except Exception:
+        pass
     # 候选集变化后，覆盖判定缓存必须失效：旧字体对象地址会被新对象复用(id 一致)，
     # 否则换字体后仍命中过期结论导致 tofu
     try:
