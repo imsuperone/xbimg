@@ -73,11 +73,42 @@ class HandlersMixin:
 
 
 
+    @staticmethod
+    def _is_bot_patched(bot_inst: Any) -> bool:
+        """是否已挂载补丁。注意：aiocqhttp 的 Api.__getattr__ 会给任意属性名返回
+        truthy 的 partial Phantom，getattr 判定永远为真，必须查实例 __dict__
+        （或 `is True` 精确比对）才能得到真实结论。"""
+        try:
+            return vars(bot_inst).get("_msg2img_patched", False) is True
+        except TypeError:
+            return getattr(bot_inst, "_msg2img_patched", False) is True
+
+    @staticmethod
+    def _take_bot_orig(bot_inst: Any, name: str) -> Any:
+        """取出并移除存档的原函数（仅在确认已挂载后调用）"""
+        try:
+            return vars(bot_inst).pop(name, None)
+        except (TypeError, AttributeError):
+            return getattr(bot_inst, name, None)
+
+    @staticmethod
+    def _is_bind_error(exc: BaseException) -> bool:
+        """是否为参数绑定期 TypeError（网络 I/O 之前抛出，重试不会导致重复发送）"""
+        try:
+            msg = str(exc)
+        except Exception:
+            return False
+        return ("takes " in msg and "positional argument" in msg) or (
+            "unexpected keyword argument" in msg
+        ) or ("missing " in msg and "required positional argument" in msg)
+
     def _patch_bot_send(self, bot_inst: Any):
         """为 OneBot/aiocqhttp 等适配器实例挂载无损转图补丁。
 
         包装器必须签名透明 (*args/**kwargs 原样转发)：CQHttp 系客户端内部多为
         `self.call_action(action, params)` 位置参数调用，写死签名会直接炸掉全量发送。
+        首次原样转发若抛参数绑定型 TypeError（I/O 之前失败，不会重复发送），
+        则归一化为关键字形式重试一次，适配各种历史客户端签名。
         """
         import functools as _ft
 
@@ -87,7 +118,7 @@ class HandlersMixin:
             except Exception:
                 return lambda fn: fn
 
-        if getattr(bot_inst, "_msg2img_patched", False):
+        if self._is_bot_patched(bot_inst):
             return
 
         # 1. 拦截 bot.send_group_msg（存原函数，重载时可还原）
@@ -110,7 +141,27 @@ class HandlersMixin:
                             kwargs["message"] = _new
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
-                return await orig_send_group(*args, **kwargs)
+                try:
+                    return await orig_send_group(*args, **kwargs)
+                except TypeError as e:
+                    if not self._is_bind_error(e):
+                        raise
+                    # 归一化重试：位置参数按 OneBot 顺序具名化（group_id, message, auto_escape）
+                    try:
+                        _rk = dict(kwargs)
+                        if "group_id" not in _rk and len(args) > 0:
+                            _rk["group_id"] = args[0]
+                        if "message" not in _rk and len(args) > 1:
+                            _rk["message"] = args[1]
+                        if len(args) > 2 and "auto_escape" not in _rk and isinstance(args[2], bool):
+                            _rk["auto_escape"] = args[2]
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
+                            f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
+                        )
+                        return await orig_send_group(**_rk)
+                    except TypeError:
+                        raise
 
             bot_inst.send_group_msg = patched_send_group
             try:
@@ -145,7 +196,30 @@ class HandlersMixin:
                                 kwargs["message"] = _new
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
-                return await orig_call_action(action, *args, **kwargs)
+                try:
+                    return await orig_call_action(action, *args, **kwargs)
+                except TypeError as e:
+                    if not self._is_bind_error(e):
+                        raise
+                    # 归一化重试：位置 params 字典并入关键字（调用方关键字优先）；
+                    # 无可归一化的位置参数时直接抛原错，避免静默丢参数
+                    try:
+                        _rk = dict(kwargs)
+                        _merged = False
+                        for _a in args:
+                            if isinstance(_a, dict):
+                                for _k, _v in _a.items():
+                                    _rk.setdefault(_k, _v)
+                                _merged = True
+                        if _merged:
+                            logger.warning(
+                                f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
+                                f"已归一化为关键字重试 keys={sorted(_rk)}"
+                            )
+                            return await orig_call_action(action, **_rk)
+                    except TypeError:
+                        pass
+                    raise
 
             bot_inst.call_action = patched_call_action
             try:
@@ -162,23 +236,26 @@ class HandlersMixin:
     def _unpatch_bot_send(bot_inst: Any) -> None:
         """还原单个适配器实例的补丁（热重载时让新实例能重新挂载）"""
         try:
-            if not getattr(bot_inst, "_msg2img_patched", False):
+            if not HandlersMixin._is_bot_patched(bot_inst):
                 return
-            orig_send = getattr(bot_inst, "_msg2img_orig_send_group_msg", None)
+            orig_send = HandlersMixin._take_bot_orig(bot_inst, "_msg2img_orig_send_group_msg")
             if callable(orig_send):
                 try:
                     bot_inst.send_group_msg = orig_send
                 except Exception:
                     pass
-            orig_call = getattr(bot_inst, "_msg2img_orig_call_action", None)
+            orig_call = HandlersMixin._take_bot_orig(bot_inst, "_msg2img_orig_call_action")
             if callable(orig_call):
                 try:
                     bot_inst.call_action = orig_call
                 except Exception:
                     pass
-            for attr in ("_msg2img_patched", "_msg2img_orig_send_group_msg", "_msg2img_orig_call_action"):
+            try:
+                vars(bot_inst).pop("_msg2img_patched", None)
+            except (TypeError, AttributeError):
                 try:
-                    delattr(bot_inst, attr)
+                    if getattr(bot_inst, "_msg2img_patched", False) is True:
+                        delattr(bot_inst, "_msg2img_patched")
                 except Exception:
                     pass
         except Exception:
