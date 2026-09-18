@@ -12,6 +12,7 @@
 
 import hashlib
 import io
+import json
 import math
 import os
 import random
@@ -1261,8 +1262,41 @@ def _draw_char_and_font(ch: str, primary: ImageFont.FreeTypeFont) -> Tuple[str, 
         return ch, primary
 
 
+_CMAP_DISK: Optional[Dict] = None
+
+
+def _cmap_disk_load() -> Dict:
+    """cmap 磁盘缓存（data 目录 cmap_cache.json），TTFont 全量解析只付一次"""
+    global _CMAP_DISK
+    if _CMAP_DISK is not None:
+        return _CMAP_DISK
+    _CMAP_DISK = {}
+    try:
+        base = _FONT_DATA_DIR
+        if base is not None:
+            p = Path(base) / "cmap_cache.json"
+            if p.is_file() and p.stat().st_size < 8 * 1024 * 1024:
+                _CMAP_DISK = json.loads(p.read_text(encoding="utf-8")).get("fonts", {}) or {}
+    except Exception:
+        _CMAP_DISK = {}
+    return _CMAP_DISK
+
+
+def _cmap_disk_save():
+    try:
+        base = _FONT_DATA_DIR
+        if base is None:
+            return
+        p = Path(base) / "cmap_cache.json"
+        p.write_text(json.dumps({"fonts": _CMAP_DISK}, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _file_cmap(path: str) -> Optional[frozenset]:
-    """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。"""
+    """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。
+    磁盘缓存命中时免 TTFont 全量解析（msyh 级别约省 1 秒冷启动）。
+    """
     try:
         hit = _CMAP_CACHE.get(path)
     except Exception:
@@ -1270,6 +1304,20 @@ def _file_cmap(path: str) -> Optional[frozenset]:
     if hit is not None:
         return hit
     res = None
+    try:
+        if path and os.path.isfile(path):
+            st = os.stat(path)
+            disk = _cmap_disk_load()
+            entry = disk.get(path) if isinstance(disk, dict) else None
+            if (isinstance(entry, dict) and entry.get("mtime") == st.st_mtime
+                    and entry.get("size") == st.st_size
+                    and isinstance(entry.get("codes"), list)):
+                res = frozenset(entry["codes"])
+    except Exception:
+        res = None
+    if res is not None:
+        _cache_put(_CMAP_CACHE, path, res, 64)
+        return res
     try:
         if _TTFONT is not None and path and os.path.isfile(path):
             try:
@@ -1301,6 +1349,16 @@ def _file_cmap(path: str) -> Optional[frozenset]:
     except Exception:
         res = None
     _cache_put(_CMAP_CACHE, path, res, 64)
+    if res is not None:
+        try:
+            st = os.stat(path)
+            disk = _cmap_disk_load()
+            if isinstance(disk, dict):
+                disk[path] = {"mtime": st.st_mtime, "size": st.st_size,
+                              "codes": sorted(res)}
+                _cmap_disk_save()
+        except Exception:
+            pass
     return res
 
 
@@ -1333,19 +1391,18 @@ def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
 
 
 def _text_advance(font: ImageFont.FreeTypeFont, s: str) -> float:
-    """整串推进宽度：无缺字时走整串测量（与旧逻辑逐字节一致，含字距），
-    含缺字时逐字回退计量，与混排绘制一致"""
+    """整串推进宽度：逐字缓存 advance 求和（PIL 整串 getbbox/getlength 在长串上极慢），
+    缺字时逐字回退计量，与混排绘制一致"""
     try:
-        need_fallback = False
+        total = 0.0
         for c in s:
             if c.isspace() or ord(c) < 0x20 or c in _BLANK_PASSTHROUGH:
+                total += _char_advance(font, c)
                 continue
             if not _font_covers(font, c):
-                need_fallback = True
-                break
-        if not need_fallback:
-            return _text_size(font, s)[0]
-        return float(sum(_adv_text(font, c) for c in s))
+                return float(sum(_adv_text(font, c) for c in s))
+            total += _char_advance(font, c)
+        return total
     except Exception:
         try:
             return _text_size(font, s)[0]
