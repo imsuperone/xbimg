@@ -314,6 +314,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertTrue(moderator.check_keywords("百合色色磨豆腐，双头龙对插磨穴", preset_name="anti_nsfw_ultra")[0])
         self.assertTrue(moderator.check_keywords("奴隶买卖私设刑房，赌场下注脚本刷币", preset_name="anti_nsfw_ultra")[0])
         self.assertTrue(moderator.check_keywords("今晚抢银行越狱，关进监狱调教奴隶", preset_name="anti_nsfw_ultra")[0])
+        self.assertTrue(moderator.check_keywords("网络赌博平台百家乐轮盘赌上头了", preset_name="anti_nsfw_ultra")[0])
 
         # xbbot 专属词库匹配
         self.assertTrue(moderator.check_keywords("强行买下奴隶并进行折磨奴隶", preset_name="xbbot_game")[0])
