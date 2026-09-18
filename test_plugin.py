@@ -1137,6 +1137,57 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         imgs = asyncio.run(_go())
         self.assertTrue(imgs)
 
+    def test_android_singles_skip_network_when_font_ready(self):
+        """android 本地彩字已装时单字零网络：fetch 直接抛错也必须出图且零调用"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_fetch = R._fetch_remote_emoji
+        calls = {"n": 0}
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        def boom(code, dest):
+            calls["n"] += 1
+            return False  # 如实模拟下载失败（真实函数从不抛异常）
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            (tmp / "emoji").mkdir(parents=True, exist_ok=True)
+            # 占位彩字（仅体积达标即可，绘制走系统回退不断网）
+            (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(b"0" * (2 * 1024 * 1024))
+            R._fetch_remote_emoji = boom
+            R._EMOJI_IMG_CACHE.clear()
+            self.assertTrue(R._singles_via_local_font("android"))
+            self.assertFalse(R._singles_via_local_font("ios"))
+            self.assertFalse(R._singles_via_local_font("none"))
+            img = R.MessageImageRenderer.render(
+                "单字零网络测试💰好", style="ios", theme_mode="light",
+                star_background=False, emoji_remote=True, emoji_style="android",
+            )
+            self.assertIsNotNone(img)
+            self.assertEqual(calls["n"], 0)
+            # 复杂簇仍允许按需补全（正确性优先）：只验证不抛异常
+            calls["n"] = 0
+            R._EMOJI_IMG_CACHE.clear()
+            img2 = R.MessageImageRenderer.render(
+                "簇测试👨‍👩‍👧好", style="ios", theme_mode="light",
+                star_background=False, emoji_remote=True, emoji_style="android",
+            )
+            self.assertIsNotNone(img2)
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._fetch_remote_emoji = orig_fetch
+            R._EMOJI_IMG_CACHE.clear()
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_extra_font_dirs_discovery(self):
         """挂载目录发现：有特征文件名直收，无特征文件名走 cmap 内容校验"""
         import shutil

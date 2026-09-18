@@ -614,6 +614,22 @@ def _style_font_path(style: str) -> str:
     return ""
 
 
+def _singles_via_local_font(emoji_style: str) -> bool:
+    """单字 emoji 是否可走本地彩字零网络绘制。
+
+    仅 android：Noto CBDT 全彩字经 PIL embedded_color 绘制可靠；且 get_emoji_font
+    本来就优先该文件。windows 彩字在 PIL 下未必真彩，仍走 PNG 优先保画质；
+    ios 无字体文件，只能 PNG。复杂簇（ZWJ/键帽）不受影响，仍走全彩图。
+    """
+    try:
+        if str(emoji_style or "").lower() != "android":
+            return False
+        return bool(_style_font_path("android"))
+    except Exception:
+        return False
+
+
+
 def get_emoji_packs_status() -> List[Dict[str, Any]]:
     """返回 Emoji 三样式状态（是否已下载、占用）"""
     out = []
@@ -646,7 +662,23 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         return {"ok": False, "error": "持久化目录不可用"}
 
     if style == "ios":
-        base_emojis = ["1f600", "1f602", "2764", "1f44d", "2728", "1f389", "1f525", "1f4b0", "1f4ac", "2705"]
+        # 常用基础包（首屏/高频表情，一次下好；包外表情仍按需自动补全并缓存）
+        base_emojis = [
+            # 笑脸
+            "1f600", "1f602", "1f603", "1f604", "1f605", "1f609", "1f60d",
+            "1f618", "1f61c", "1f622", "1f62d", "1f630", "1f62e", "1f60e",
+            "1f610", "1f914", "1f917",
+            # 手势
+            "1f44d", "1f44e", "1f44f", "1f450", "1f446", "1f447", "270a",
+            "270c", "1f44c", "1f4aa", "1f485",
+            # 心与符号
+            "2764", "1f495", "1f494", "1f49b", "2728", "2b50", "1f31f",
+            "274c", "2705", "26a0",
+            # 物件（含游戏/资产高频：钱袋货币骰子）
+            "1f389", "1f38a", "1f525", "1f4b0", "1f4b5", "1f4b8", "1f4a1",
+            "1f4a9", "1f4ac", "1f4f7", "23e9", "1f552", "1f6a7", "1f52e",
+            "1f3af", "1f3b0", "1f3b2", "1f3b3",
+        ]
         dl_cnt = 0
         for code in base_emojis:
             p = d / f"{code}.png"
@@ -666,7 +698,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         except Exception:
             pass
         extra = "（已齐全）" if dl_cnt == 0 else ""
-        return {"ok": True, "downloaded": [f"iOS基础Emoji({dl_cnt}个){extra}"], "storage_kb": get_emoji_storage_kb("ios")}
+        return {"ok": True, "downloaded": [f"iOS基础Emoji({have}/{len(base_emojis)}个常用{extra}，其余按需自动补全)"], "storage_kb": get_emoji_storage_kb("ios")}
 
     # android 或 windows（多直链容错，依次尝试；下载后校验体积，残包换源重试）
     fname = ANDROID_EMOJI_FILE if style == "android" else WINDOWS_EMOJI_FILE
@@ -1950,11 +1982,13 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
     return {"ok": False, "downloaded": [], "error": f"{ANDROID_EMOJI_FILE} 下载失败: {err or '未知错误'}"}
 
 
-def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64) -> int:
+def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64,
+                           skip_singles: bool = False) -> int:
     """批量预取文本中缺失的全彩 emoji 图（并行 IO）。
 
     绘制时缺图会逐个串行等待网络（最慢 8s 超时/个），预取后绘制零等待。
     多字符簇必走图片通道；单个 emoji 仅在无系统字体直绘时才需图片。已缓存/已落盘跳过。
+    skip_singles 为 True 时单字直接跳过（android 本地彩字已装，绘制零网络）。
     返回本次新下载成功数。
     """
     if not text:
@@ -1976,7 +2010,7 @@ def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64)
             cluster, i = _take_cluster(text, i)
             if not _is_emoji_cluster(cluster):
                 continue
-            if len(cluster) < 2 and _ef is not None:
+            if len(cluster) < 2 and (skip_singles or _ef is not None):
                 continue
             for code in _cluster_codes(cluster):
                 if code in seen:
@@ -2095,6 +2129,10 @@ def _draw_mixed_text(
     返回每个字符的 (x_start, char_width, y, char) 列表，供打码定位使用。
     """
     emoji_font, emoji_is_color = get_emoji_font(font_size)
+    try:
+        _font_first = _singles_via_local_font(emoji_style)
+    except Exception:
+        _font_first = False
     cur_x = x
     i = 0
     text_len = len(text)
@@ -2178,8 +2216,21 @@ def _draw_mixed_text(
                     i = ni
                     continue
             else:
-                # 单个 emoji：按风格决定优先
-                if emoji_style == "ios":
+                # 单个 emoji：android 且本地彩字已装 → 先字体直绘（零网络），
+                # 字体缺该字形再回退全彩图；ios/其余情况沿用全彩图优先
+                if _font_first and emoji_font is not None:
+                    try:
+                        _covered = _font_covers(emoji_font, cluster)
+                    except Exception:
+                        _covered = False
+                    if _covered:
+                        if _draw_with_font(cluster):
+                            i = ni
+                            continue
+                    if _paste_image(cluster):
+                        i = ni
+                        continue
+                elif emoji_style == "ios":
                     if _paste_image(cluster):
                         i = ni
                         continue
@@ -2187,7 +2238,7 @@ def _draw_mixed_text(
                         i = ni
                         continue
                 else:
-                    # 非 iOS（含 android）：全彩图优先。NotoColorEmoji 系单尺寸位图，
+                    # 非 iOS（含 android 未装包 / windows）：全彩图优先。NotoColorEmoji 系单尺寸位图，
                     # PIL 无法按任意字号加载，全彩图是唯一可靠的彩色来源；无图再降级字体
                     if _paste_image(cluster):
                         i = ni
@@ -2728,12 +2779,16 @@ class MessageImageRenderer:
             perf_out["mosaic_ms"] = 0.0
         try:
             if ctx["emoji_remote_eff"]:
+                try:
+                    _skip_1 = _singles_via_local_font(ctx["emoji_style"])
+                except Exception:
+                    _skip_1 = False
                 if perf_out is not None:
                     _t_pf = time.perf_counter()
-                    _prefetch_emoji_images(ctx["text"])
+                    _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
                     perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
                 else:
-                    _prefetch_emoji_images(ctx["text"])
+                    _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
         except Exception:
             pass
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])

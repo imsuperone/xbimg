@@ -1163,6 +1163,8 @@ async def render_text_to_image(text: str):
         }
       }
       else showToast("删除提示: "+((res&&res.error)||"未知"));
+      // 以服务端为准全量同步一次：删除可能附带切回 none，内存与开关不能靠猜
+      try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
     }catch(e){ showToast("删除失败: "+e.message); }
@@ -1661,6 +1663,7 @@ async def render_text_to_image(text: str):
             } else {
               showToast("清空提示: " + ((res && res.error) || "未知"));
             }
+            try { await loadData(); } catch(err) {}
             await fetchEmojiPacks();
             await fetchFontStatus(true);
           } catch(err) {
