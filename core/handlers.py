@@ -347,7 +347,15 @@ class HandlersMixin:
                 pass
 
         setattr(bot_inst, "_msg2img_patched", True)
-        logger.info(f"[{PLUGIN_NAME}] 成功挂载适配器群消息转图拦截钩子 (send_group_msg & call_action)")
+        try:
+            logger.info(
+                f"[{PLUGIN_NAME}] 成功挂载适配器群消息转图拦截钩子 "
+                f"({type(bot_inst).__name__}@{type(bot_inst).__module__} "
+                f"orig_send={self._describe_callable(getattr(bot_inst, '_msg2img_orig_send_group_msg', None))} "
+                f"orig_call={self._describe_callable(getattr(bot_inst, '_msg2img_orig_call_action', None))})"
+            )
+        except Exception:
+            logger.info(f"[{PLUGIN_NAME}] 成功挂载适配器群消息转图拦截钩子 (send_group_msg & call_action)")
 
 
 
