@@ -25,6 +25,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 try:
+    import numpy as _np
+except Exception:
+    _np = None
+
+try:
+    from fontTools.ttLib import TTFont as _TTFONT
+except Exception:
+    _TTFONT = None
+
+try:
     from astrbot.api import logger
 except Exception:
     import logging
@@ -648,6 +658,10 @@ def clear_font_cache():
     except Exception:
         pass
     try:
+        _ADV_CACHE.clear()
+    except Exception:
+        pass
+    try:
         import gc
         gc.collect()
     except Exception:
@@ -1009,16 +1023,30 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _char_advance(font: ImageFont.FreeTypeFont, char: str) -> float:
-    """获取单个字符的推进宽度（advance width），使用 getlength 而非 getbbox"""
+    """获取单个字符的推进宽度（advance width），使用 getlength 而非 getbbox；结果按字体缓存"""
     try:
-        return font.getlength(char)
+        key = (_font_key(font), getattr(font, "size", 0), char)
+    except Exception:
+        key = None
+    if key is not None:
+        try:
+            hit = _ADV_CACHE.get(key)
+            if hit is not None:
+                return hit
+        except Exception:
+            pass
+    try:
+        w = float(font.getlength(char))
     except Exception:
         # 极旧 Pillow 回退
         try:
             bbox = font.getbbox(char)
-            return float(bbox[2] - bbox[0]) if bbox else 14.0
+            w = float(bbox[2] - bbox[0]) if bbox else 14.0
         except Exception:
-            return 14.0
+            w = 14.0
+    if key is not None:
+        _cache_put(_ADV_CACHE, key, w, 20000)
+    return w
 
 
 # 无墨字符（空格/控制符/连接符等）永远跟随主字体，不参与回退
@@ -1027,6 +1055,20 @@ _COVER_CACHE: Dict[Tuple, bool] = {}
 _RESOLVE_CACHE: Dict[Tuple, Any] = {}
 _CMAP_CACHE: Dict[str, Optional[frozenset]] = {}
 _UNCOVERED_LOG_AT: Dict[str, float] = {}
+_ADV_CACHE: Dict[Tuple, float] = {}
+
+
+def _cache_put(cache: Dict, key, value, limit: int):
+    """有界缓存写入：超限淘汰最早插入项（dict 保序），避免全清导致的缓存踩踏与突发回暖"""
+    try:
+        if key in cache:
+            cache[key] = value
+            return
+        if len(cache) >= limit:
+            cache.pop(next(iter(cache)))
+        cache[key] = value
+    except Exception:
+        pass
 
 
 def _font_key(font):
@@ -1096,9 +1138,7 @@ def _font_covers(font: ImageFont.FreeTypeFont, ch: str) -> bool:
                 pass
     except Exception:
         ok = True
-    if len(_COVER_CACHE) > 6000:
-        _COVER_CACHE.clear()
-    _COVER_CACHE[key] = ok
+    _cache_put(_COVER_CACHE, key, ok, 6000)
     return ok
 
 
@@ -1145,9 +1185,7 @@ def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.Fr
                     break
     except Exception:
         res = primary
-    if len(_RESOLVE_CACHE) > 8000:
-        _RESOLVE_CACHE.clear()
-    _RESOLVE_CACHE[key] = res
+    _cache_put(_RESOLVE_CACHE, key, res, 8000)
     return res
 
 
@@ -1187,12 +1225,7 @@ def _nfc_fallback_char(ch: str, primary: ImageFont.FreeTypeFont) -> Optional[str
                         break
     except Exception:
         res = None
-    try:
-        if len(_NFKC_CACHE) > 2000:
-            _NFKC_CACHE.clear()
-        _NFKC_CACHE[ch] = res
-    except Exception:
-        pass
+    _cache_put(_NFKC_CACHE, ch, res, 2000)
     return res
 
 
@@ -1220,10 +1253,6 @@ def _draw_char_and_font(ch: str, primary: ImageFont.FreeTypeFont) -> Tuple[str, 
         return ch, primary
 
 
-_TTFONT = None
-_TTFONT_TRIED = False
-
-
 def _file_cmap(path: str) -> Optional[frozenset]:
     """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。"""
     try:
@@ -1234,14 +1263,6 @@ def _file_cmap(path: str) -> Optional[frozenset]:
         return hit
     res = None
     try:
-        global _TTFONT, _TTFONT_TRIED
-        if not _TTFONT_TRIED:
-            _TTFONT_TRIED = True
-            try:
-                from fontTools.ttLib import TTFont as _TT
-                _TTFONT = _TT
-            except Exception:
-                _TTFONT = None
         if _TTFONT is not None and path and os.path.isfile(path):
             try:
                 with open(path, "rb") as fp:
@@ -1249,12 +1270,11 @@ def _file_cmap(path: str) -> Optional[frozenset]:
             except Exception:
                 data = b""
             if data:
-                import io as _io
                 codes: set = set()
                 ok_faces = 0
                 for i in range(4):
                     try:
-                        ff = _TTFONT(_io.BytesIO(data), fontNumber=i, lazy=True)
+                        ff = _TTFONT(io.BytesIO(data), fontNumber=i, lazy=True)
                     except Exception:
                         break
                     try:
@@ -1272,12 +1292,7 @@ def _file_cmap(path: str) -> Optional[frozenset]:
                     res = frozenset(codes)
     except Exception:
         res = None
-    try:
-        if len(_CMAP_CACHE) > 64:
-            _CMAP_CACHE.clear()
-        _CMAP_CACHE[path] = res
-    except Exception:
-        pass
+    _cache_put(_CMAP_CACHE, path, res, 64)
     return res
 
 
@@ -2010,13 +2025,20 @@ def _fast_linear_gradient(
     end_color: Tuple[int, int, int],
 ) -> Image.Image:
     """极速生成平滑双向渐变底图（1D 生成后水平拉伸，< 4ms）"""
-    import numpy as np
-    start = np.array(start_color, dtype=np.float32)
-    end = np.array(end_color, dtype=np.float32)
-    alpha = np.linspace(0, 1, height, dtype=np.float32)[:, None]
-    col = (start * (1 - alpha) + end * alpha).astype(np.uint8)
-    col_img = Image.fromarray(col.reshape(height, 1, 3), "RGB")
-    return col_img.resize((width, height), Image.NEAREST).convert("RGBA")
+    if _np is not None:
+        start = _np.array(start_color, dtype=_np.float32)
+        end = _np.array(end_color, dtype=_np.float32)
+        alpha = _np.linspace(0, 1, height, dtype=_np.float32)[:, None]
+        col = (start * (1 - alpha) + end * alpha).astype(_np.uint8)
+        col_img = Image.fromarray(col.reshape(height, 1, 3), "RGB")
+        return col_img.resize((width, height), Image.NEAREST).convert("RGBA")
+    # 无 numpy 兜底：逐行填充（慢，仅极简环境）
+    img = Image.new("RGB", (1, height))
+    px = img.load()
+    for y in range(height):
+        t = y / max(1, height - 1)
+        px[0, y] = tuple(int(round(s + (e - s) * t)) for s, e in zip(start_color, end_color))
+    return img.resize((width, height), Image.NEAREST).convert("RGBA")
 
 
 # ==========================================
