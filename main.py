@@ -89,6 +89,15 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             except Exception as e:
                 logger.warning(f"[{PLUGIN_NAME}] 注册 Web API 异常: {e}")
 
+        # 开关确认行：perf_log 开启时打一行，关着则零日志（用户可据此确认开关是否真正生效）
+        try:
+            _pv = self.cfg_mgr.config.get("perf_log", False)
+            _on = _pv is True or _pv == 1 or str(_pv).strip().lower() == "true"
+        except Exception:
+            _on = False
+        if _on:
+            logger.info("[xbimg] [性能] 性能日志已开启，每张图片一行分段计时（grep [性能] 捞取）")
+
 
 
     def _ensure_bg_tasks(self):

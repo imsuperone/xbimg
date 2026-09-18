@@ -391,11 +391,17 @@ class HandlersMixin:
 
 
     def _perf_enabled(self) -> bool:
-        """性能日志开关（关闭时调用方不计时，零开销）"""
+        """性能日志开关（关闭时调用方不计时，零开销）。
+
+        兼容原生配置侧可能落下的字符串/数字形态（"true"/"1"/1 等）。
+        """
         try:
-            return bool(self.cfg_mgr.config.get("perf_log", False))
+            v = self.cfg_mgr.config.get("perf_log", False)
         except Exception:
             return False
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+        return bool(v)
 
     def _emit_perf_log(
         self,

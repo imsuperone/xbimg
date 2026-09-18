@@ -243,22 +243,13 @@ class ConfigManager:
 
         # 深拷贝默认配置：嵌套词库 dict 与模块常量隔离，避免原地修改污染全局默认
         self.config = copy.deepcopy(DEFAULT_CONFIG)
-        if raw_cfg:
-            try:
-                if isinstance(raw_cfg, dict):
-                    self.config.update(raw_cfg)
-                else:
-                    # AstrBot 原生配置对象：按 key 逐个读取
-                    for k in DEFAULT_CONFIG:
-                        try:
-                            v = raw_cfg[k]
-                            if v is not None:
-                                self.config[k] = v
-                        except Exception:
-                            continue
-            except Exception:
-                pass
         self._load()
+        # 存活配置（AstrBot 原生侧）最后覆盖：原生面板的修改必须赢过陈旧落盘文件，
+        # 否则原生侧开的开关（如 perf_log）会被旧 config.json 静默吃掉
+        try:
+            self._apply_live_config()
+        except Exception:
+            pass
         # 原生配置/AstrBot 侧带来的旧键同样迁移（无 config.json 冷启动也生效）
         try:
             self._migrate_legacy_scales()
@@ -270,6 +261,37 @@ class ConfigManager:
             if not self.config.get("builtin_presets_hash"):
                 if _presets_equal_builtin(self.config.get("keyword_presets", {})):
                     self.config["builtin_presets_hash"] = builtin_presets_hash()
+        except Exception:
+            pass
+
+    def _apply_live_config(self) -> None:
+        """把存活配置（AstrBot 原生侧 raw_cfg）覆盖到内存配置上。
+
+        只覆盖 raw 侧明确携带的键（dict 看 key 存在性，原生对象按 DEFAULT_CONFIG
+        逐个读取、None 跳过）：原生面板是 live 真源，config.json 只是持久化镜像。
+        纯文件侧私有键（keyword_presets 大词库等原生 schema 没有的）不受影响。
+        """
+        raw_cfg = getattr(self, "raw_cfg", None)
+        if not raw_cfg:
+            return
+        try:
+            if isinstance(raw_cfg, dict):
+                for k in DEFAULT_CONFIG:
+                    if k in raw_cfg and raw_cfg[k] is not None:
+                        self.config[k] = raw_cfg[k]
+                # 兼容历史行为：dict 侧的非默认键同样透传（旧逻辑是全量 update）
+                for k, v in raw_cfg.items():
+                    if k not in DEFAULT_CONFIG and v is not None:
+                        self.config[k] = v
+            else:
+                # AstrBot 原生配置对象：按 key 逐个读取
+                for k in DEFAULT_CONFIG:
+                    try:
+                        v = raw_cfg[k]
+                        if v is not None:
+                            self.config[k] = v
+                    except Exception:
+                        continue
         except Exception:
             pass
 

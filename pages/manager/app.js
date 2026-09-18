@@ -380,6 +380,13 @@ async def render_text_to_image(text: str):
     setSegmentedValue("segMosaicType", cfg.mosaic_type || "pixel");
     setSegmentedValue("segMosaicHalfPos", cfg.mosaic_half_pos || "bottom");
 
+    // 性能日志开关（兼容后端可能落下的字符串形态）
+    const perfSwitch = document.getElementById("cfgPerfLog");
+    if (perfSwitch) {
+      const pv = cfg.perf_log;
+      perfSwitch.checked = pv === true || pv === 1 || String(pv).toLowerCase() === "true";
+    }
+
     // 独立 AI 审查开关
     const aiModSwitch = document.getElementById("cfgEnableAiModeration");
     const aiConfigWrap = document.getElementById("aiConfigWrap");
@@ -600,6 +607,7 @@ async def render_text_to_image(text: str):
         return m;
       })(),
       emoji_style: getSegmentedValue("segEmojiStyle", "none"),
+      perf_log: Boolean(document.getElementById("cfgPerfLog")?.checked),
       // group_font_scales 旧键只读不写（后端已迁移至 group_configs[].font_scale，读回退保留）
     };
   }
@@ -1929,6 +1937,10 @@ async def render_text_to_image(text: str):
           statusBadge.textContent = e.target.checked ? "运行中" : "已暂停";
           statusBadge.className = `widget-badge ${e.target.checked ? "pill-green" : "pill-amber"}`;
         }
+        triggerAutoSave();
+      }
+      if (e.target && e.target.id === "cfgPerfLog") {
+        currentConfig.perf_log = e.target.checked;
         triggerAutoSave();
       }
       if (e.target && e.target.id === "keywordPresetSelect") {

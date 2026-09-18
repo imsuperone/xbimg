@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.31" />
+  <link rel="stylesheet" href="./style.css?v=1.0.32" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.0.31</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.0.32</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -113,6 +113,20 @@
             </div>
             <label class="m3-switch">
               <input type="checkbox" id="cfgEnable" checked />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Card: Trigger Mode & Threshold -->
+        <div class="m3-card">
+          <div class="card-row-split">
+            <div>
+              <h2 class="card-title">📈 性能日志</h2>
+              <p class="card-desc">开启后每张图片打一行 [性能] 日志（总耗时/安全审查/打码/下载分段计时），日志里 grep [性能] 即可捞出；关闭时零开销。</p>
+            </div>
+            <label class="m3-switch">
+              <input type="checkbox" id="cfgPerfLog" />
               <span class="switch-slider"></span>
             </label>
           </div>
@@ -642,6 +656,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.0.31"></script>
+  <script src="./app.js?v=1.0.32"></script>
 </body>
 </html>
