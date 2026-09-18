@@ -54,6 +54,33 @@
     return await res.json();
   }
 
+  // 后端 API 前缀：新 ID 优先；旧 astrbot_plugin_msg2img 仅做兜底探测（兼容旧版容器）
+  const API_PREFIXES = [
+    `/${PLUGIN_ID}/`,
+    `/api/plugins/${PLUGIN_ID}/`,
+    `/astrbot_plugin_msg2img/`,
+    `/api/plugins/astrbot_plugin_msg2img/`,
+    `api/`,
+    `./api/`,
+    `./`,
+  ];
+
+  async function fetchWithPrefixFallback(urlSuffix, options) {
+    if (_detectedPrefix) {
+      try {
+        return await tryFetchJson(`${_detectedPrefix}${urlSuffix}`, options || {});
+      } catch (e) {}
+    }
+    for (const p of API_PREFIXES) {
+      try {
+        const res = await tryFetchJson(`${p}${urlSuffix}`, options || {});
+        _detectedPrefix = p;
+        return res;
+      } catch (e) {}
+    }
+    throw new Error(`无法连接至插件后端 API (${urlSuffix})`);
+  }
+
   const api = {
     async get(endpoint, params = {}) {
       const b = getBridge();
@@ -66,30 +93,7 @@
       }
       const qs = new URLSearchParams(params).toString();
       const queryStr = qs ? `?${qs}` : "";
-
-      if (_detectedPrefix) {
-        try {
-          return await tryFetchJson(`${_detectedPrefix}${endpoint}${queryStr}`);
-        } catch (e) {}
-      }
-
-      const prefixes = [
-        `/${PLUGIN_ID}/`,
-        `/astrbot_plugin_msg2img/`,
-        `/api/plugins/${PLUGIN_ID}/`,
-        `/api/plugins/astrbot_plugin_msg2img/`,
-        `api/`,
-        `./api/`,
-        `./`,
-      ];
-      for (const p of prefixes) {
-        try {
-          const res = await tryFetchJson(`${p}${endpoint}${queryStr}`);
-          _detectedPrefix = p;
-          return res;
-        } catch (e) {}
-      }
-      throw new Error(`无法连接至插件后端 API (${endpoint})`);
+      return fetchWithPrefixFallback(`${endpoint}${queryStr}`);
     },
 
     async post(endpoint, data = {}) {
@@ -101,33 +105,11 @@
           console.warn(`[xbimg] bridge.apiPost(${endpoint}) 失败，回退 fetch:`, e);
         }
       }
-      const options = {
+      return fetchWithPrefixFallback(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-      };
-      if (_detectedPrefix) {
-        try {
-          return await tryFetchJson(`${_detectedPrefix}${endpoint}`, options);
-        } catch (e) {}
-      }
-      const prefixes = [
-        `/${PLUGIN_ID}/`,
-        `/astrbot_plugin_msg2img/`,
-        `/api/plugins/${PLUGIN_ID}/`,
-        `/api/plugins/astrbot_plugin_msg2img/`,
-        `api/`,
-        `./api/`,
-        `./`,
-      ];
-      for (const p of prefixes) {
-        try {
-          const res = await tryFetchJson(`${p}${endpoint}`, options);
-          _detectedPrefix = p;
-          return res;
-        } catch (e) {}
-      }
-      throw new Error(`请求后端失败 (${endpoint})`);
+      });
     }
   };
 
@@ -355,13 +337,20 @@ async def render_text_to_image(text: str):
     }
   }
 
+  function formatMs(ms) {
+    const v = Number(ms) || 0;
+    if (v <= 0) return "—";
+    if (v < 1000) return `${v}ms`;
+    return `${(v / 1000).toFixed(1)}s`;
+  }
+
   function renderStats(stats) {
-    const totalEl = document.getElementById("statTotal");
-    const vioEl = document.getElementById("statViolations");
-    const mosEl = document.getElementById("statMosaic");
-    if (totalEl) totalEl.textContent = stats.total_rendered || 0;
-    if (vioEl) vioEl.textContent = stats.violations_blocked || 0;
-    if (mosEl) mosEl.textContent = stats.mosaic_applied || 0;
+    const todayEl = document.getElementById("statToday");
+    const slowEl = document.getElementById("statSlowest");
+    const avgEl = document.getElementById("statAvg");
+    if (todayEl) todayEl.textContent = (stats.today_count ?? stats.total_rendered) || 0;
+    if (slowEl) slowEl.textContent = formatMs(stats.slowest_render_ms);
+    if (avgEl) avgEl.textContent = formatMs(stats.avg_render_ms);
   }
 
   function renderConfigToUI(cfg) {
@@ -415,6 +404,9 @@ async def render_text_to_image(text: str):
     }
 
     setSegmentedValue("segImgCompress", cfg.img_compress_level || "balanced");
+
+    const imgMaxKbEl = document.getElementById("cfgImgMaxKb");
+    if (imgMaxKbEl) imgMaxKbEl.value = (cfg.img_max_kb ?? 800);
 
     const pageMaxHEl = document.getElementById("cfgPageMaxHeight");
     if (pageMaxHEl) pageMaxHEl.value = cfg.page_max_height || 3000;
@@ -562,6 +554,7 @@ async def render_text_to_image(text: str):
       custom_font_url: cfUrlEl ? cfUrlEl.value.trim() : "",
       font_scale: fontScaleEl ? parseInt(fontScaleEl.value,10) || 100 : 100,
       img_compress_level: getSegmentedValue("segImgCompress", "balanced"),
+      img_max_kb: (()=>{ const el = document.getElementById("cfgImgMaxKb"); if (!el || el.value === "") return 800; const v = parseInt(el.value,10); return isNaN(v) ? 800 : Math.min(5120, Math.max(0, v)); })(),
       page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 3000; return Math.min(3800, Math.max(800, v || 3000)); })(),
       img_max_width: (()=>{ const el = document.getElementById("cfgImgMaxWidth"); if (!el || el.value === "") return 1080; const v = parseInt(el.value,10); return isNaN(v) ? 1080 : Math.min(3000, Math.max(0, v)); })(),
       card_max_width: (()=>{ const el = document.getElementById("cfgCardMaxWidth"); const v = el ? parseInt(el.value,10) : 640; return Math.min(1200, Math.max(480, v || 640)); })(),
@@ -607,8 +600,7 @@ async def render_text_to_image(text: str):
         return m;
       })(),
       emoji_style: getSegmentedValue("segEmojiStyle", "none"),
-      group_font_scales: (()=>{ const m={}; document.querySelectorAll("#selectedGroupsFontList .sg-slider").forEach(s=>{ const gid=s.getAttribute("data-gid"); const v=parseInt(s.value,10)||100; if(v!==100) m[gid]=v; });
-        return m; })(),
+      // group_font_scales 旧键只读不写（后端已迁移至 group_configs[].font_scale，读回退保留）
     };
   }
 
@@ -1473,7 +1465,12 @@ async def render_text_to_image(text: str):
         if (metaBox) metaBox.style.display = "flex";
         if (dimEl) dimEl.textContent = `${res.width} × ${res.height}`;
         if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${_activeMosaicMode !== "none" ? " (半马赛克)" : ""}`;
-        if (latEl) latEl.textContent = `${elapsed}ms`;
+        if (latEl) latEl.textContent = res.render_ms != null ? formatMs(res.render_ms) : `${elapsed}ms`;
+        // 预览不计入业务统计（耗时看 render_ms），仅刷新卡片显示
+        try {
+          const sres = await api.get("config");
+          if (sres && sres.stats) renderStats(sres.stats);
+        } catch (e) {}
         if (announce) showToast("✨ 预览图片生成成功");
       } else {
         throw new Error((res && res.error) || "后端未返回图片数据");

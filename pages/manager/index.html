@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.19" />
+  <link rel="stylesheet" href="./style.css?v=1.0.26" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.0.19</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.0.26</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -40,29 +40,29 @@
     <div class="hero-widgets-grid">
       <div class="m3-widget-card">
         <div class="widget-header">
-          <span class="widget-badge pill-cyan">已生成图</span>
+          <span class="widget-badge pill-cyan">今日生图</span>
           <span class="widget-icon">🖼️</span>
         </div>
-        <div class="widget-value" id="statTotal">0</div>
-        <div class="widget-caption">累计将文本渲染为图片</div>
+        <div class="widget-value" id="statToday">0</div>
+        <div class="widget-caption">今日累计生成图片数量</div>
       </div>
 
       <div class="m3-widget-card">
         <div class="widget-header">
-          <span class="widget-badge pill-amber">安全拦截/打码</span>
-          <span class="widget-icon">🛡️</span>
+          <span class="widget-badge pill-amber">最慢生图</span>
+          <span class="widget-icon">🐢</span>
         </div>
-        <div class="widget-value" id="statViolations">0</div>
-        <div class="widget-caption">半马赛克打码及敏感词拦截</div>
+        <div class="widget-value" id="statSlowest">—</div>
+        <div class="widget-caption">历史最慢单次渲染耗时</div>
       </div>
 
       <div class="m3-widget-card">
         <div class="widget-header">
-          <span class="widget-badge pill-purple">打码处置率</span>
-          <span class="widget-icon">🎭</span>
+          <span class="widget-badge pill-purple">平均生图</span>
+          <span class="widget-icon">⏱️</span>
         </div>
-        <div class="widget-value" id="statMosaic">0</div>
-        <div class="widget-caption">创意半马赛克执行记录</div>
+        <div class="widget-value" id="statAvg">—</div>
+        <div class="widget-caption">全部图片平均渲染耗时</div>
       </div>
 
       <div class="m3-widget-card">
@@ -207,10 +207,16 @@
             <label class="form-label">文件存储大小优化策略</label>
             <div class="m3-segmented-control" id="segImgCompress">
               <button type="button" class="seg-item" data-val="lossless">💎 原画无损 (PNG · 文件较大)</button>
-              <button type="button" class="seg-item active" data-val="balanced">⚖️ 均衡适中 (JPEG 92% · 推荐)</button>
-              <button type="button" class="seg-item" data-val="compact">⚡ 极小文件 (JPEG 82% · 极省流量)</button>
+              <button type="button" class="seg-item active" data-val="balanced">⚖️ 均衡适中 (JPEG 94% · 推荐)</button>
+              <button type="button" class="seg-item" data-val="compact">⚡ 极小文件 (JPEG 86% · 极省流量)</button>
             </div>
             <span class="field-hint">⚠️ <strong>提示</strong>：此项仅优化图片文件占用的存储字节大小（KB/MB），绝不影响文字阅读清晰度，也不会改变图片的画布像素长宽与排版。</span>
+          </div>
+
+          <div class="form-group" style="margin-top: 14px;">
+            <label class="form-label">单张图片体积上限（KB，0 为关闭）</label>
+            <input type="number" id="cfgImgMaxKb" class="m3-input" min="0" max="5120" step="50" value="800" />
+            <span class="field-hint">超出上限自动降质重编码压到上限内（无损PNG档只告警不转格式）；调小可缩短上传时间，减少 QQ 端发送超时。默认 800。</span>
           </div>
         </div>
 
@@ -636,6 +642,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.0.19"></script>
+  <script src="./app.js?v=1.0.26"></script>
 </body>
 </html>

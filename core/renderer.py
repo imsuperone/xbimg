@@ -3,7 +3,7 @@
 高颜值消息转图片渲染引擎 (Text-to-Image Renderer) - V3 精准修复版
 - 彻底修复中文/Emoji 乱码：统一 font.getlength() 推进宽度、批量文本段绘制
 - 统一字体优先级：SourceHanSans → msyh 回退，杜绝宽度计算不一致
-- Footer 署名水平居中
+- Footer 署名左下角
 - 字级精准半打码：仅对违规关键词的后半部分施加马赛克
 - 全量 Numpy 矩阵加速渐变背景渲染（<5ms）
 - 字体管理器：自定义字体 / 缺字自动下载到持久化目录 / Emoji 全自动管线
@@ -11,12 +11,14 @@
 """
 
 import hashlib
+import contextvars
 import io
 import json
 import math
 import os
 import random
 import re
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -912,6 +914,23 @@ def download_curated_font(curated_id: str) -> Dict[str, Any]:
 _FONT_CACHE: Dict[Tuple, Any] = {}
 _EMOJI_FONT_CACHE: Dict[int, Tuple[Optional[ImageFont.FreeTypeFont], bool]] = {}
 _FONT_BYTES_CACHE: Dict[str, bytes] = {}
+# 打码去混淆规则：与 core/moderation._CONDENSE_RE 同构（审查命中、绘制定位双边对齐）
+_MOSAIC_CONDENSE_RE = re.compile(r"[\s\-_~`!@#$%^&*()+=|\\\[\]{};:'\",.<>?/]+")
+# 单群字体覆盖：(常规路径, 粗体路径)，按次渲染设置，线程/协程安全（ContextVar）。
+# 为空/None 时走全局生效集；缺字仍由 _resolve_char_font 逐字回退补齐。
+_GROUP_FONT_OVERRIDE: contextvars.ContextVar = contextvars.ContextVar(
+    "xbimg_group_font_override", default=None
+)
+
+
+def resolve_group_font_override(custom_font_path: str = "", custom_bold_font_path: str = "") -> Tuple[str, str]:
+    """解析单群字体覆盖：校验可用性，返回 (常规, 粗体) 绝对路径；不可用返回 ("", "")。"""
+    try:
+        reg = _resolve_custom_font(custom_font_path or "")
+        bold = _resolve_custom_font(custom_bold_font_path or "") or reg
+        return reg, bold
+    except Exception:
+        return "", ""
 _EMOJI_IMG_CACHE: Dict[Tuple, Optional[Image.Image]] = {}
 # emoji 图片缓存上限（防止超长刷屏消息撑爆内存）
 _EMOJI_IMG_CACHE_LIMIT = 400
@@ -1009,7 +1028,27 @@ def _load_font_file(path: str, size: int) -> Optional[ImageFont.FreeTypeFont]:
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """获取 CJK 字体。优先级：配置生效集（自定义/下载/系统）→ import 时探测结果。"""
+    """获取 CJK 字体。优先级：单群覆盖（ContextVar）→ 配置生效集（自定义/下载/系统）→ import 时探测结果。"""
+    try:
+        _ov = _GROUP_FONT_OVERRIDE.get()
+    except Exception:
+        _ov = None
+    if _ov:
+        _ov_reg, _ov_bold = _ov
+        _ov_path = _ov_bold if bold else _ov_reg
+        if _ov_path:
+            try:
+                _ov_key = (size, bold, _ov_path)
+                hit = _FONT_CACHE.get(_ov_key)
+                if hit is not None:
+                    return hit
+                f = _load_font_file(_ov_path, size)
+                if f is not None and _font_covers(f, "永"):
+                    _FONT_CACHE[_ov_key] = f
+                    return f
+            except Exception:
+                pass
+        # 覆盖字体不可用/缺 CJK：回退全局链（缺字仍由 _resolve_char_font 逐字回退）
     cache_key = (size, bold)
     if cache_key in _FONT_CACHE:
         return _FONT_CACHE[cache_key]
@@ -1612,7 +1651,7 @@ ANDROID_EMOJI_URL = ANDROID_EMOJI_URLS[0]
 WINDOWS_EMOJI_FILE = "EmojiOneColor.otf"
 WINDOWS_EMOJI_URL = "https://raw.githubusercontent.com/adobe-fonts/emojione-color/master/EmojiOneColor.otf"
 _EMOJI_MIN_FONT_BYTES = 1 * 1024 * 1024
-# 历史遗留别名（检测/补齐函数引用）
+# 历史遗留别名（外部可能仍在 import，保留只读兼容）
 NOTO_EMOJI_FILE = ANDROID_EMOJI_FILE
 NOTO_EMOJI_URL = ANDROID_EMOJI_URL
 _NOTO_EMOJI_MIN_BYTES = _EMOJI_MIN_FONT_BYTES
@@ -1707,6 +1746,7 @@ def _load_emoji_png(path: Path, size: int) -> Optional[Image.Image]:
 def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
     """从 Twemoji CDN 按需下载单个 emoji，成功返回 True；网络不可达时全局退避"""
     global _EMOJI_REMOTE_DEAD_UNTIL
+    tmp = None
     try:
         import time as _time
         import urllib.error
@@ -1715,7 +1755,12 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
             return False
         url = f"{_TWEMOJI_BASE}/{code}.png"
         req = urllib.request.Request(url, headers={"User-Agent": "astrbot-msg2img/1.3"})
-        tmp = dest_dir / f"{code}.png.downloading"
+        # tmp 唯一命名：同 emoji 并发预取互不覆盖，失败只删自己的
+        try:
+            _uniq = f"{os.getpid()}_{threading.get_ident()}"
+        except Exception:
+            _uniq = str(os.getpid())
+        tmp = dest_dir / f"{code}.{_uniq}.png.downloading"
         total = 0
         try:
             with urllib.request.urlopen(req, timeout=_EMOJI_DL_TIMEOUT) as resp:
@@ -1747,7 +1792,8 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
         return True
     except Exception:
         try:
-            (dest_dir / f"{code}.png.downloading").unlink(missing_ok=True)
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
         except Exception:
             pass
         return False
@@ -1758,8 +1804,8 @@ def _color_emoji_font_path() -> str:
     try:
         d = _data_subdir("emoji")
         if d is not None:
-            p = d / NOTO_EMOJI_FILE
-            if p.is_file() and p.stat().st_size > _NOTO_EMOJI_MIN_BYTES:
+            p = d / ANDROID_EMOJI_FILE
+            if p.is_file() and p.stat().st_size > _EMOJI_MIN_FONT_BYTES:
                 return str(p)
     except Exception:
         pass
@@ -1769,7 +1815,7 @@ def _color_emoji_font_path() -> str:
         "C:/Windows/Fonts/NotoColorEmoji.ttf",
     ):
         try:
-            if os.path.isfile(cand) and os.path.getsize(cand) > _NOTO_EMOJI_MIN_BYTES:
+            if os.path.isfile(cand) and os.path.getsize(cand) > _EMOJI_MIN_FONT_BYTES:
                 return cand
         except Exception:
             continue
@@ -1785,8 +1831,8 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
         return {"ok": False, "downloaded": [], "error": "持久化目录不可用"}
     if _color_emoji_font_path():
         return {"ok": True, "downloaded": [], "error": ""}
-    target = data_dir / NOTO_EMOJI_FILE
-    ok, err = _download_file(NOTO_EMOJI_URL, target)
+    target = data_dir / ANDROID_EMOJI_FILE
+    ok, err = _download_file(ANDROID_EMOJI_URL, target)
     if ok:
         try:
             if not _color_emoji_font_path():
@@ -1796,8 +1842,8 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
             ok = False
     if ok:
         _EMOJI_FONT_CACHE.clear()
-        return {"ok": True, "downloaded": [NOTO_EMOJI_FILE], "error": ""}
-    return {"ok": False, "downloaded": [], "error": f"{NOTO_EMOJI_FILE} 下载失败: {err or '未知错误'}"}
+        return {"ok": True, "downloaded": [ANDROID_EMOJI_FILE], "error": ""}
+    return {"ok": False, "downloaded": [], "error": f"{ANDROID_EMOJI_FILE} 下载失败: {err or '未知错误'}"}
 
 
 def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64) -> int:
@@ -2243,7 +2289,8 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
                       star_density: str, mosaic_mode: str, mosaic_type: str,
                       mosaic_half_pos: str, violation_words, font_scale: int,
                       emoji_style: str, page_max_h: int = 3000,
-                      card_max_width: int = 680) -> tuple:
+                      card_max_width: int = 680,
+                      group_font: Tuple[str, str] = ("", "")) -> tuple:
     """渲染缓存键：文本哈希 + 全套渲染参数 + 当前分钟（顶栏时间参与输出）+ 字体代际"""
     try:
         h = hashlib.md5(str(text or "").encode("utf-8", "ignore")).hexdigest()
@@ -2271,7 +2318,8 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
         cmw = 640
     return (h, style, theme_mode, bool(star_background), str(star_density),
             mosaic_mode, mosaic_type, mosaic_half_pos, vw,
-            int(font_scale or 100), str(emoji_style), minute, epoch, pmh, cmw)
+            int(font_scale or 100), str(emoji_style), minute, epoch, pmh, cmw,
+            str((group_font or ("", ""))[0]), str((group_font or ("", ""))[1]))
 
 
 def _continuation_line(idx: int, total: int, font_scale: int = 100):
@@ -2342,6 +2390,9 @@ class MessageImageRenderer:
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
         page_max_h: int = 3000,  # 单页总高度上限（点开看长图长度不限）
         card_max_width: int = 640,  # 卡片宽度基线（聊天气泡完整显示）
+        custom_font_path: str = "",  # 单群专属常规字体（文件名/绝对路径），空则跟随全局
+        custom_bold_font_path: str = "",  # 单群专属粗体，空则复用常规
+        perf_out: Optional[Dict[str, float]] = None,  # 性能回填（仅 perf_log 开启时传入；None 则零开销）
     ) -> Image.Image:
         """渲染单图（长内容取第一页；完整多页请用 render_pages）"""
         pages = cls.render_pages(
@@ -2352,6 +2403,9 @@ class MessageImageRenderer:
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_style=emoji_style, page_max_h=page_max_h,
             card_max_width=card_max_width,
+            custom_font_path=custom_font_path,
+            custom_bold_font_path=custom_bold_font_path,
+            perf_out=perf_out,
         )
         return pages[0]
 
@@ -2493,11 +2547,54 @@ class MessageImageRenderer:
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
         card_max_width: int = 640,
+        custom_font_path: str = "",
+        custom_bold_font_path: str = "",
+        perf_out: Optional[Dict[str, float]] = None,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表。
 
         相同输入短时间内直接复用结果（主链路与适配器钩子常对同一文本各渲染一次）。
+        perf_out 非 None 时回填 mosaic_ms / prefetch_ms（毫秒）；为 None 则不计时，零开销。
         """
+        group_font = resolve_group_font_override(custom_font_path, custom_bold_font_path)
+        _tok = _GROUP_FONT_OVERRIDE.set(group_font if any(group_font) else None)
+        try:
+            return cls._render_pages_inner(
+                text=text, style=style, theme_mode=theme_mode,
+                star_background=star_background, star_density=star_density,
+                mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
+                violation_words=violation_words, emoji_remote=emoji_remote,
+                mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
+                emoji_style=emoji_style, page_max_h=page_max_h,
+                card_max_width=card_max_width, group_font=group_font,
+                perf_out=perf_out,
+            )
+        finally:
+            try:
+                _GROUP_FONT_OVERRIDE.reset(_tok)
+            except Exception:
+                pass
+
+    @classmethod
+    def _render_pages_inner(
+        cls,
+        text: str = "",
+        style: str = "ios",
+        theme_mode: str = "light",
+        star_background: bool = True,
+        star_density: str = "medium",
+        mosaic_mode: str = "none",
+        mosaic_type: str = "pixel",
+        violation_words: Optional[List[str]] = None,
+        emoji_remote: bool = True,
+        mosaic_half_pos: str = "bottom",
+        font_scale: int = 100,
+        emoji_style: Optional[str] = None,
+        page_max_h: int = 3000,
+        card_max_width: int = 640,
+        group_font: Tuple[str, str] = ("", ""),
+        perf_out: Optional[Dict[str, float]] = None,
+    ) -> List[Image.Image]:
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
@@ -2510,6 +2607,7 @@ class MessageImageRenderer:
                 mosaic_mode, mosaic_type, ctx["mosaic_half_pos"], violation_words,
                 ctx["font_scale"], ctx["emoji_style"],
                 page_max_h=page_max_h, card_max_width=card_max_width,
+                group_font=group_font,
             )
         except Exception:
             cache_key = None
@@ -2521,9 +2619,17 @@ class MessageImageRenderer:
             except Exception:
                 pass
         # emoji 缺图并行预取（绘制时不再逐个串行等网络）
+        if perf_out is not None:
+            perf_out["prefetch_ms"] = 0.0
+            perf_out["mosaic_ms"] = 0.0
         try:
             if ctx["emoji_remote_eff"]:
-                _prefetch_emoji_images(ctx["text"])
+                if perf_out is not None:
+                    _t_pf = time.perf_counter()
+                    _prefetch_emoji_images(ctx["text"])
+                    perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
+                else:
+                    _prefetch_emoji_images(ctx["text"])
         except Exception:
             pass
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
@@ -2537,6 +2643,7 @@ class MessageImageRenderer:
                 violation_words=violation_words,
                 emoji_remote_eff=ctx["emoji_remote_eff"],
                 emoji_style=ctx["emoji_style"],
+                perf_out=perf_out,
             )
             for idx, pg in enumerate(pages)
         ]
@@ -2565,6 +2672,7 @@ class MessageImageRenderer:
         violation_words: Optional[List[str]] = None,
         emoji_remote_eff: bool = True,
         emoji_style: str = "none",
+        perf_out: Optional[Dict[str, float]] = None,
     ) -> Image.Image:
         """绘制单页卡片（render_pages 与 render 多页首屏使用）"""
         style = ctx["style"]
@@ -2728,17 +2836,35 @@ class MessageImageRenderer:
 
         # 11. 处理违规马赛克（字级精准半打码：支持上/下/随机）
         if mosaic_mode in ("half", "full") and all_char_positions:
-            cls._apply_word_level_mosaic(
-                card_surface=card_surface,
-                all_char_positions=all_char_positions,
-                text=text,
-                violation_words=violation_words or [],
-                mosaic_mode=mosaic_mode,
-                mosaic_type=mosaic_type,
-                theme=theme,
-                card_w=card_w,
-                mosaic_half_pos=mosaic_half_pos,
-            )
+            if perf_out is not None:
+                _t_mo = time.perf_counter()
+                cls._apply_word_level_mosaic(
+                    card_surface=card_surface,
+                    all_char_positions=all_char_positions,
+                    text=text,
+                    violation_words=violation_words or [],
+                    mosaic_mode=mosaic_mode,
+                    mosaic_type=mosaic_type,
+                    theme=theme,
+                    card_w=card_w,
+                    mosaic_half_pos=mosaic_half_pos,
+                )
+                try:
+                    perf_out["mosaic_ms"] = float(perf_out.get("mosaic_ms", 0.0)) + (time.perf_counter() - _t_mo) * 1000.0
+                except Exception:
+                    pass
+            else:
+                cls._apply_word_level_mosaic(
+                    card_surface=card_surface,
+                    all_char_positions=all_char_positions,
+                    text=text,
+                    violation_words=violation_words or [],
+                    mosaic_mode=mosaic_mode,
+                    mosaic_type=mosaic_type,
+                    theme=theme,
+                    card_w=card_w,
+                    mosaic_half_pos=mosaic_half_pos,
+                )
 
         # 12. 将卡片合成到画布上
         canvas.paste(card_surface, (margin_x, margin_y), card_surface)
@@ -2775,18 +2901,57 @@ class MessageImageRenderer:
         # 收集所有违规字符的索引（去重）
         violation_char_indices: set = set()
 
+        # 去混淆映射：与 moderation 侧 _CONDENSE_RE 同规则压缩后定位，
+        # 使“赌-博/违 禁 词”类混淆命中也能打到正确字，而非退化整区遮挡
+        _condensed_cache: dict = {}
+
+        def _condensed_with_map(s: str):
+            hit = _condensed_cache.get(s)
+            if hit is not None:
+                return hit
+            chars: list = []
+            idx_map: list = []
+            for i, ch in enumerate(s):
+                if not _MOSAIC_CONDENSE_RE.match(ch):
+                    chars.append(ch)
+                    idx_map.append(i)
+            res = ("".join(chars), idx_map)
+            _condensed_cache[s] = res
+            return res
+
         for kw in violation_words:
             kw_lower = kw.strip().lower()
             if not kw_lower:
                 continue
+            spans: list = []
             start = 0
             while True:
                 idx = chars_lower.find(kw_lower, start)
                 if idx < 0:
                     break
-                for ci in range(idx, min(idx + len(kw_lower), len(all_char_positions))):
-                    violation_char_indices.add(ci)
+                spans.append((idx, idx + len(kw_lower)))
                 start = idx + 1
+            if not spans:
+                # 直接找不到时走去混淆定位（原文与关键词双边压缩）
+                condensed_chars, idx_map = _condensed_with_map(chars_lower)
+                if condensed_chars and idx_map:
+                    for cand_kw in {kw_lower, _MOSAIC_CONDENSE_RE.sub("", kw_lower)}:
+                        if not cand_kw:
+                            continue
+                        cstart = 0
+                        while True:
+                            cidx = condensed_chars.find(cand_kw, cstart)
+                            if cidx < 0:
+                                break
+                            cend = min(cidx + len(cand_kw), len(idx_map))
+                            if cend > cidx:
+                                spans.append((idx_map[cidx], idx_map[cend - 1] + 1))
+                            cstart = cidx + 1
+                        if spans:
+                            break
+            for s, e in spans:
+                for ci in range(max(0, s), min(e, len(all_char_positions))):
+                    violation_char_indices.add(ci)
 
         if not violation_char_indices:
             cls._fallback_area_mosaic(card_surface, all_char_positions, mosaic_mode, mosaic_type, theme, card_w, mosaic_half_pos)

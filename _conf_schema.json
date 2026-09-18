@@ -125,10 +125,16 @@
   },
   "img_compress_level": {
     "description": "输出图片文件存储大小优化",
-    "hint": "lossless: 原画无损 (PNG · 文件较大); balanced: 均衡适中 (JPEG 92% · 推荐); compact: 极小文件 (JPEG 82% · 极省流量)。仅优化文件存储字节体积（KB/MB），绝不改变长宽分辨率与排版清晰度。",
+    "hint": "lossless: 原画无损 (PNG · 文件较大); balanced: 均衡适中 (JPEG 94% · 推荐); compact: 极小文件 (JPEG 86% · 极省流量)。仅优化文件存储字节体积（KB/MB），绝不改变长宽分辨率与排版清晰度。",
     "type": "string",
     "options": ["lossless", "balanced", "compact"],
     "default": "balanced"
+  },
+  "img_max_kb": {
+    "description": "单张图片体积上限（KB）",
+    "hint": "超出则自动降质重编码压到上限内（无损PNG档只告警不转格式），0 为关闭；调小可缩短上传时间，减少 QQ 端发送超时。默认 800",
+    "type": "int",
+    "default": 800
   },
   "page_max_height": {
     "description": "单页图片最大高度（像素）",
@@ -234,5 +240,11 @@
     "hint": "缺失的 emoji 自动从云端下载全彩图并缓存，关闭则只用本地图库与系统字体",
     "type": "bool",
     "default": true
+  },
+  "perf_log": {
+    "description": "性能日志",
+    "hint": "开启后每处理完一张图片打一行 [性能] 日志（总耗时/安全审查/打码/下载分段计时），用于定位回复慢在哪一段；关闭时零开销",
+    "type": "bool",
+    "default": false
   }
 }

@@ -6,10 +6,17 @@
 import copy
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from astrbot.api import logger
+except Exception:
+    import logging
+    logger = logging.getLogger("msg2img")
 
 PLUGIN_NAME = "astrbot_plugin_xbimg"
 
@@ -132,6 +139,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "builtin_presets_hash": "",
     "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
     "img_compress_level": "balanced",
+    "img_max_kb": 800,
     "page_max_height": 3000,
     "img_max_width": 1080,
     "card_max_width": 640,
@@ -154,6 +162,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "custom_bold_font_path": "",
     "custom_font_url": "",
     "emoji_remote": True,
+    "perf_log": False,
 }
 
 
@@ -163,6 +172,7 @@ def resolve_data_dir() -> Path:
         from astrbot.core.utils.astrbot_path import get_astrbot_data_path
         p = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
         p.mkdir(parents=True, exist_ok=True)
+        _migrate_legacy_data_dir(p)
         return p
     except Exception:
         pass
@@ -173,10 +183,47 @@ def resolve_data_dir() -> Path:
     ]:
         try:
             cand.mkdir(parents=True, exist_ok=True)
+            _migrate_legacy_data_dir(cand.resolve())
             return cand.resolve()
         except Exception:
             continue
     return Path.cwd()
+
+
+LEGACY_PLUGIN_ID = "astrbot_plugin_msg2img"
+
+
+def _migrate_legacy_data_dir(new_dir: Path) -> None:
+    """只读迁移：老 ID 数据目录存在而新目录缺配置时，复制 config/stats/字体/emoji（不删旧目录）"""
+    try:
+        old_dir = new_dir.parent / LEGACY_PLUGIN_ID
+        if not old_dir.is_dir() or old_dir.resolve() == new_dir.resolve():
+            return
+        if (new_dir / "config.json").exists() and (new_dir / "stats.json").exists():
+            return
+        import shutil
+        for name in ("config.json", "stats.json"):
+            src = old_dir / name
+            dst = new_dir / name
+            if src.is_file() and not dst.exists():
+                try:
+                    shutil.copy2(str(src), str(dst))
+                except Exception:
+                    pass
+        for sub in ("fonts", "emoji"):
+            src_d = old_dir / sub
+            dst_d = new_dir / sub
+            if src_d.is_dir() and not dst_d.exists():
+                try:
+                    shutil.copytree(str(src_d), str(dst_d))
+                except Exception:
+                    pass
+        try:
+            logger.info(f"[msg2img] 已从旧数据目录迁移配置: {old_dir}")
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 class ConfigManager:
@@ -212,6 +259,11 @@ class ConfigManager:
             except Exception:
                 pass
         self._load()
+        # 原生配置/AstrBot 侧带来的旧键同样迁移（无 config.json 冷启动也生效）
+        try:
+            self._migrate_legacy_scales()
+        except Exception:
+            pass
         # 内置词库更新检测：历史配置无哈希且本地与内置一致时直接对齐（内存态，下次保存落盘）；
         # 不一致则保留本地内容，仅标记待确认，绝不自动覆盖用户词库
         try:
@@ -235,6 +287,59 @@ class ConfigManager:
                             merged.update(old_presets)
                             saved["keyword_presets"] = merged
                         self.config.update(saved)
+                        # 一次性迁移：旧 group_font_scales → group_configs[].font_scale
+                        # （仅新位置缺失时搬，旧键保留做读兼容，不再写入）
+                        try:
+                            self._migrate_legacy_scales()
+                        except Exception:
+                            pass
+            except Exception as e:
+                # 配置损坏：改名保留现场再用默认，避免下次 save 覆盖丢失用户词库
+                try:
+                    bak = self.cfg_file.with_name(
+                        f"config.json.corrupt.{int(time.time())}"
+                    )
+                    os.replace(str(self.cfg_file), str(bak))
+                    logger.warning(f"[msg2img] config.json 已损坏，已备份为 {bak.name} 并使用默认配置")
+                except Exception:
+                    logger.warning(f"[msg2img] config.json 已损坏且备份失败({e})，使用默认配置")
+
+    def _migrate_legacy_scales(self) -> None:
+        """旧 group_font_scales 字典并入 group_configs[].font_scale（新位置已有则不覆盖）"""
+        raw_sc = self.config.get("group_font_scales", {})
+        if isinstance(raw_sc, str):
+            try:
+                raw_sc = json.loads(raw_sc) if raw_sc.strip() else {}
+            except Exception:
+                raw_sc = {}
+        if not isinstance(raw_sc, dict) or not raw_sc:
+            return
+        raw_gc = self.config.get("group_configs", {})
+        if isinstance(raw_gc, str):
+            try:
+                raw_gc = json.loads(raw_gc) if raw_gc.strip() else {}
+            except Exception:
+                raw_gc = {}
+        if not isinstance(raw_gc, dict):
+            raw_gc = {}
+        moved = False
+        for k, v in raw_sc.items():
+            try:
+                sc = max(50, min(500, int(v)))
+            except Exception:
+                continue
+            ks = str(k)
+            cur = raw_gc.get(ks)
+            if not isinstance(cur, dict):
+                cur = {}
+                raw_gc[ks] = cur
+            if "font_scale" not in cur:
+                cur["font_scale"] = sc
+                moved = True
+        if moved:
+            self.config["group_configs"] = raw_gc
+            try:
+                logger.info("[msg2img] 已迁移旧群字体配置 group_font_scales → group_configs")
             except Exception:
                 pass
 
@@ -242,8 +347,11 @@ class ConfigManager:
         if new_cfg:
             self.config.update(new_cfg)
         try:
-            with open(self.cfg_file, "w", encoding="utf-8") as f:
+            # 原子落盘：先写 tmp 再替换，避免写一半断电损坏配置
+            tmp = self.cfg_file.with_name(f"config.json.tmp.{os.getpid()}")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
+            os.replace(str(tmp), str(self.cfg_file))
         except Exception:
             pass
         # save 时顺带把节流中的统计落盘，避免进程退出丢数
@@ -254,6 +362,18 @@ class ConfigManager:
             try:
                 for k, v in self.config.items():
                     if hasattr(self.raw_cfg, "__setitem__"):
+                        # schema 声明 group_configs/group_font_scales 为 string：
+                        # 原生侧已是 str 则回写 dumps，否则保持 dict（纯 dict 测试替身不受影响）
+                        if k in ("group_configs", "group_font_scales") and isinstance(v, dict):
+                            try:
+                                _cur = self.raw_cfg[k]
+                            except Exception:
+                                _cur = None
+                            if isinstance(_cur, str):
+                                try:
+                                    v = json.dumps(v, ensure_ascii=False)
+                                except Exception:
+                                    pass
                         self.raw_cfg[k] = v
                 if hasattr(self.raw_cfg, "save") and callable(self.raw_cfg.save):
                     self.raw_cfg.save()
@@ -327,12 +447,28 @@ class ConfigManager:
 
     def get_stats(self) -> Dict[str, Any]:
         if self._stats is not None:
+            # 版本升级兼容：老内存/老文件缺耗时字段时补默认值
+            for _k, _v in (("fastest_render_ms", 0), ("total_render_ms", 0),
+                            ("timed_renders", 0), ("avg_render_ms", 0),
+                            ("slowest_render_ms", 0),
+                            ("today_date", ""), ("today_count", 0)):
+                if _k not in self._stats:
+                    self._stats[_k] = _v
             return dict(self._stats)
         stats = {
             "total_rendered": 0,
             "violations_blocked": 0,
             "mosaic_applied": 0,
             "last_active": 0,
+            # 耗时统计：最快/最慢单次渲染耗时(ms)、累计渲染耗时(ms)、已计时渲染次数
+            "fastest_render_ms": 0,
+            "slowest_render_ms": 0,
+            "total_render_ms": 0,
+            "timed_renders": 0,
+            "avg_render_ms": 0,
+            # 今日生图：日期滚动清零，只统计真实出图（count_total=True）
+            "today_date": "",
+            "today_count": 0,
         }
         if self.stats_file.exists():
             try:
@@ -341,7 +477,14 @@ class ConfigManager:
                     if isinstance(data, dict):
                         stats.update(data)
             except Exception:
-                pass
+                # 统计损坏：改名保留，下次落盘重建归零
+                try:
+                    bak = self.stats_file.with_name(
+                        f"stats.json.corrupt.{int(time.time())}"
+                    )
+                    os.replace(str(self.stats_file), str(bak))
+                except Exception:
+                    pass
         self._stats = stats
         return dict(stats)
 
@@ -349,20 +492,53 @@ class ConfigManager:
         if self._stats is None:
             return
         try:
-            with open(self.stats_file, "w", encoding="utf-8") as f:
+            tmp = self.stats_file.with_name(f"stats.json.tmp.{os.getpid()}")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._stats, f, ensure_ascii=False, indent=2)
+            os.replace(str(tmp), str(self.stats_file))
             self._stats_last_flush = time.time()
         except Exception:
             pass
 
-    def record_render(self, is_violated: bool = False, is_mosaic: bool = False):
+    def record_render(self, is_violated: bool = False, is_mosaic: bool = False,
+                      elapsed_ms: Optional[int] = None, count_total: bool = True):
         stats = self.get_stats()
-        stats["total_rendered"] = int(stats.get("total_rendered", 0)) + 1
-        stats["last_active"] = int(time.time())
+        # 违规/打码计数永远累加（blocked 拦截也要留痕）；count_total 只 gate 总数
         if is_violated:
             stats["violations_blocked"] = int(stats.get("violations_blocked", 0)) + 1
         if is_mosaic:
             stats["mosaic_applied"] = int(stats.get("mosaic_applied", 0)) + 1
+        if count_total:
+            stats["total_rendered"] = int(stats.get("total_rendered", 0)) + 1
+            stats["last_active"] = int(time.time())
+            # 今日生图：跨天滚动清零
+            try:
+                _today = time.strftime("%Y-%m-%d")
+            except Exception:
+                _today = ""
+            if _today:
+                if stats.get("today_date") != _today:
+                    stats["today_date"] = _today
+                    stats["today_count"] = 0
+                stats["today_count"] = int(stats.get("today_count", 0)) + 1
+        # 耗时统计：仅当真实生成出图片时调用方才传入 elapsed_ms；
+        # 被拦截(blocked)/无图时传 None，不计入最慢/最快与平均，避免误导
+        try:
+            if elapsed_ms is not None:
+                ms = int(elapsed_ms)
+                if ms >= 0:
+                    stats["timed_renders"] = int(stats.get("timed_renders", 0)) + 1
+                    stats["total_render_ms"] = int(stats.get("total_render_ms", 0)) + ms
+                    prev_fast = int(stats.get("fastest_render_ms", 0) or 0)
+                    if prev_fast <= 0 or ms < prev_fast:
+                        stats["fastest_render_ms"] = ms
+                    prev_slow = int(stats.get("slowest_render_ms", 0) or 0)
+                    if ms > prev_slow:
+                        stats["slowest_render_ms"] = ms
+                    timed = int(stats.get("timed_renders", 0)) or 1
+                    stats["avg_render_ms"] = int(round(int(stats.get("total_render_ms", 0)) / timed))
+        except Exception:
+            pass
         self._stats = stats
         # 违规立即落盘保证不丢，普通渲染节流落盘
         if is_violated or (time.time() - self._stats_last_flush) >= self.STATS_FLUSH_INTERVAL:
