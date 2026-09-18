@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.18" />
+  <link rel="stylesheet" href="./style.css?v=1.0.19" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.0.18</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.0.19</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -234,7 +234,7 @@
           <div class="form-group">
             <label class="form-label">卡片宽度基线（像素）</label>
             <input type="number" id="cfgCardMaxWidth" class="m3-input" min="480" max="1200" step="20" value="640" />
-            <span class="field-hint">超长单行按此折行，保证缩略图右边不被裁；默认 680。</span>
+            <span class="field-hint">卡片绝对上限，超长单行折行显示，保证缩略图右边不被裁；默认 640。</span>
           </div>
         </div>
 
@@ -636,6 +636,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.0.18"></script>
+  <script src="./app.js?v=1.0.19"></script>
 </body>
 </html>

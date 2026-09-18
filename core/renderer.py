@@ -2420,7 +2420,8 @@ class MessageImageRenderer:
                 max_natural_w = w
 
         # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔；
-        # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）
+        # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）；
+        # 最后一步绝对上限：任何字号下卡片都不超过该宽度
         scale_ratio = font_scale / 100.0
         try:
             _cw_base = max(480, min(1200, int(card_max_width or 640)))
@@ -2430,7 +2431,8 @@ class MessageImageRenderer:
         min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
         max_w = max(min_w + 120, int(round(_cw_base * min(2.8, max(0.75, scale_ratio)))))
         card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
-        content_w = card_w - inner_pad_x * 2
+        card_w = min(card_w, _cw_base)
+        content_w = max(200, card_w - inner_pad_x * 2)
 
         rendered_lines: List[Tuple[str, LineBlock, int]] = []
         for b in blocks:
@@ -2577,8 +2579,8 @@ class MessageImageRenderer:
         inner_pad_x = ctx["inner_pad_x"]
         content_h = sum(lh for _, _, lh in page_lines)
         card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
-        margin_x = 36
-        margin_y = 36
+        margin_x = 30
+        margin_y = 30
         canvas_w = card_w + margin_x * 2
         canvas_h = card_h + margin_y * 2
 

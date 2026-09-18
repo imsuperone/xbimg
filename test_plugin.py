@@ -755,7 +755,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             line, style="ios", theme_mode="light",
             star_background=False, emoji_remote=False,
         )
-        self.assertLessEqual(img.width, 820)
+        self.assertLessEqual(img.width, 712)
 
     def test_save_image_width_clamp(self):
         """超宽图落盘限宽（默认 1080，手机缩略图不被裁）"""
