@@ -474,6 +474,36 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertEqual(ni, 2)
         self.assertEqual(_cluster_codes(cl), ["1f1e8-1f1f3"])
 
+    def test_decorative_font_whole_render(self):
+        """装饰字体做主字体但文本需要中文时，整图改用普通字体输出"""
+        from core import renderer as R
+        orig_conf = dict(R._FONT_CONF)
+        try:
+            R.configure_fonts({
+                "font_source": "custom",
+                "custom_font_path": "C:/Windows/Fonts/arial.ttf",
+                "custom_bold_font_path": "",
+                "custom_font_url": "",
+                "emoji_style": "none",
+            }, None)
+            self.assertTrue(R._should_force_normal("中文测试"))
+            self.assertFalse(R._should_force_normal("Hello only"))
+            img = R.MessageImageRenderer.render(
+                "中文测试ABC", style="ios", theme_mode="light",
+                star_background=False, emoji_remote=False,
+            )
+            self.assertIsNotNone(img)
+            self.assertGreater(img.width, 500)
+            # 强制期间 get_font 返回含中文的普通字体
+            R._TLS.force_normal = True
+            try:
+                f = R.get_font(32)
+                self.assertTrue(R._font_covers(f, "永"))
+            finally:
+                R._TLS.force_normal = False
+        finally:
+            R.configure_fonts(orig_conf, None)
+
     def test_ios_emoji_download_offline(self):
         """无网络时 iOS 下载如实失败，不写 ready 标记，不虚标已下载"""
         import shutil

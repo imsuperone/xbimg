@@ -16,6 +16,7 @@ import math
 import os
 import random
 import re
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -598,6 +599,14 @@ def clear_font_cache():
     except Exception:
         pass
     try:
+        _INK_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _NORMAL_CACHE.clear()
+    except Exception:
+        pass
+    try:
         import gc
         gc.collect()
     except Exception:
@@ -925,8 +934,63 @@ def _load_font_file(path: str, size: int) -> Optional[ImageFont.FreeTypeFont]:
         return None
 
 
+# 整图普通字体回退开关（线程隔离：render 走 asyncio.to_thread，每个渲染线程独立）
+_TLS = threading.local()
+# 文本含这些文种即需要中文字体
+_CJK_NEEDED_RE = re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]")
+_NORMAL_CACHE: Dict[Tuple, Any] = {}
+
+
+def _should_force_normal(text: str) -> bool:
+    """文本需要中文但当前主字体缺中文（如哥特装饰体）时，整图改用普通字体输出"""
+    try:
+        if not text or not _CJK_NEEDED_RE.search(text):
+            return False
+        probe = get_font(30)
+        return not _font_covers(probe, "永")
+    except Exception:
+        return False
+
+
+def _normal_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    """普通中文字体：链中首个含中文的字体（自动跳过装饰字体），粗体优先粗字重"""
+    key = (size, bool(bold))
+    hit = _NORMAL_CACHE.get(key)
+    if hit is not None:
+        return hit
+    cands = _fallback_font_paths()
+    if bold:
+        cands = sorted(cands, key=lambda p: (not _is_bold_font_name(os.path.basename(p or ""))))
+    for cand in cands:
+        try:
+            f = _load_font_file(cand, size)
+        except Exception:
+            continue
+        if f is not None:
+            try:
+                if _font_covers(f, "永"):
+                    if len(_NORMAL_CACHE) > 64:
+                        _NORMAL_CACHE.clear()
+                    _NORMAL_CACHE[key] = f
+                    return f
+            except Exception:
+                continue
+    f = ImageFont.load_default()
+    _NORMAL_CACHE[key] = f
+    return f
+
+
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """获取 CJK 字体。优先级：配置生效集（自定义/下载/系统）→ import 时探测结果。"""
+    """获取 CJK 字体。优先级：配置生效集（自定义/下载/系统）→ import 时探测结果。
+
+    整图普通字体回退生效期间（_TLS.force_normal），直接返回普通中文字体，
+    避免装饰字体导致整图风格割裂与排版错位。
+    """
+    if getattr(_TLS, "force_normal", False):
+        try:
+            return _normal_font(size, bold)
+        except Exception:
+            pass
     cache_key = (size, bold)
     if cache_key in _FONT_CACHE:
         return _FONT_CACHE[cache_key]
@@ -1070,6 +1134,36 @@ def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
         return _char_advance(_resolve_char_font(ch, font), ch)
     except Exception:
         return _char_advance(font, ch)
+
+
+_INK_CACHE: Dict[Tuple, float] = {}
+
+
+def _cjk_ink_center_y(font: ImageFont.FreeTypeFont) -> Optional[float]:
+    """CJK 代表字墨迹垂直中心（相对行顶 y），全彩 emoji 以此为中心对齐正文。
+
+    用实际绘制中文的字体（经缺字回退解析）量取，装饰字体做主字体时依然对得准。
+    """
+    try:
+        base = _resolve_char_font("永", font)
+        fp = getattr(base, "path", None)
+        key = (fp if isinstance(fp, (str, bytes)) else id(base), getattr(base, "size", 0))
+    except Exception:
+        return None
+    hit = _INK_CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        bbox = base.getbbox("永")
+        if not bbox:
+            return None
+        c = (bbox[1] + bbox[3]) / 2.0
+    except Exception:
+        return None
+    if len(_INK_CACHE) > 200:
+        _INK_CACHE.clear()
+    _INK_CACHE[key] = c
+    return c
 
 
 # ==========================================
@@ -1513,7 +1607,14 @@ def _draw_mixed_text(
         emo_img = _get_emoji_image(cluster, font_size, emoji_remote)
         if emo_img is None:
             return False
-        canvas.paste(emo_img, (int(cur_x), int(round(y + _text_asc - emo_img.height))), emo_img)
+        # 对齐到正文 CJK 墨迹垂直中心（底部坐基线会整体偏高约半个字距差）
+        _h_img = emo_img.height or font_size
+        _ink_c = _cjk_ink_center_y(font)
+        if _ink_c is None:
+            _py = y + _text_asc - _h_img
+        else:
+            _py = y + _ink_c - _h_img / 2.0
+        canvas.paste(emo_img, (int(cur_x), int(round(_py))), emo_img)
         w = font_size + 2
         char_positions.append((cur_x, w, y, cluster))
         cur_x += w
@@ -1762,6 +1863,40 @@ def _text_size(font: ImageFont.FreeTypeFont, s: str) -> Tuple[float, float]:
 class MessageImageRenderer:
     @classmethod
     def render(
+        cls,
+        text: str,
+        style: str = "ios",
+        theme_mode: str = "light",
+        star_background: bool = True,
+        star_density: str = "medium",
+        mosaic_mode: str = "none",  # "none", "half", "full"
+        mosaic_type: str = "pixel",  # "pixel", "blur"
+        violation_words: Optional[List[str]] = None,
+        emoji_remote: bool = True,  # 缺失 emoji 是否云端自动补全
+        mosaic_half_pos: str = "bottom",  # half 模式打码位置: bottom/top/random
+        font_scale: int = 100,  # 字体百分比 70-150
+        emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
+    ) -> Image.Image:
+        """渲染入口：用户配了装饰字体（如哥特体）但文本需要中文时，
+        整图改用普通字体输出，保证风格统一与排版宽度一致。"""
+        force = _should_force_normal(text)
+        if force:
+            _TLS.force_normal = True
+        try:
+            return cls._render_impl(
+                text=text, style=style, theme_mode=theme_mode,
+                star_background=star_background, star_density=star_density,
+                mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
+                violation_words=violation_words, emoji_remote=emoji_remote,
+                mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
+                emoji_style=emoji_style,
+            )
+        finally:
+            if force:
+                _TLS.force_normal = False
+
+    @classmethod
+    def _render_impl(
         cls,
         text: str,
         style: str = "ios",
