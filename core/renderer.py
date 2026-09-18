@@ -1907,11 +1907,13 @@ class MessageImageRenderer:
         mosaic_half_pos: str = "bottom",  # half 模式打码位置: bottom/top/random
         font_scale: int = 100,  # 字体百分比 70-150
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
+        page_max_h: int = 2200,  # 单页总高度上限（手机一屏看完为宜）
     ) -> Image.Image:
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
+            page_max_h=page_max_h,
         )
         # 解包单页直绘所需局部量（与旧逻辑一致，保证单页输出逐字节不变）
         text = ctx["text"]
@@ -2115,6 +2117,7 @@ class MessageImageRenderer:
         font_scale: int = 100,
         emoji_remote: bool = True,
         emoji_style: Optional[str] = None,
+        page_max_h: int = 2200,
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
@@ -2200,7 +2203,12 @@ class MessageImageRenderer:
         foot_fh = max(12, int(foot_fh) or 12)
         footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
         card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
-        max_content = 3800 - (card_inner_pad_y*2 + header_h + footer_gap + footer_block)
+        # 单页总高度上限（默认 2200，手机一屏能看完；超限分页输出，不再丢弃截断）
+        try:
+            page_max_h = max(800, min(3800, int(page_max_h or 2200)))
+        except Exception:
+            page_max_h = 2200
+        max_content = max(400, page_max_h - (card_inner_pad_y*2 + header_h + footer_gap + footer_block))
         return {
             "text": text, "style": style, "theme": theme, "theme_mode": theme_mode,
             "mosaic_half_pos": mosaic_half_pos, "font_scale": font_scale,
@@ -2227,12 +2235,14 @@ class MessageImageRenderer:
         mosaic_half_pos: str = "bottom",
         font_scale: int = 100,
         emoji_style: Optional[str] = None,
+        page_max_h: int = 2200,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表"""
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
+            page_max_h=page_max_h,
         )
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)
@@ -2265,7 +2275,7 @@ class MessageImageRenderer:
         emoji_remote_eff: bool = True,
         emoji_style: str = "none",
     ) -> Image.Image:
-        """绘制单页卡片（render 单页直绘与 render_pages 共用，逻辑一致）"""
+        """绘制单页卡片（render_pages 与 render 多页首屏使用）"""
         style = ctx["style"]
         theme = ctx["theme"]
         theme_mode = ctx["theme_mode"]

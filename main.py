@@ -306,6 +306,10 @@ class Msg2ImgPlugin(Star):
                 _es = "android" if bool(cfg.get("emoji_remote", True)) else "none"
                 if _es == "android" and not str(cfg.get("emoji_style", "")):
                     _es = "none"
+            try:
+                page_max_h = int(cfg.get("page_max_height", 2200) or 2200)
+            except Exception:
+                page_max_h = 2200
             imgs = await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
                 text=full_text,
@@ -320,6 +324,7 @@ class Msg2ImgPlugin(Star):
                 mosaic_half_pos=str(cfg.get("mosaic_half_pos", "bottom")),
                 font_scale=font_scale,
                 emoji_style=_es,
+                page_max_h=page_max_h,
             )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 渲染失败: {e}")
@@ -330,6 +335,17 @@ class Msg2ImgPlugin(Star):
         """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：45 秒后自动清理）"""
         cfg = self.cfg_mgr.config
         lvl = str(cfg.get("img_compress_level", "medium") or "medium").lower()
+        # 手机屏适配：超宽图等比限宽（默认 1080，小米 13 这类 1080p 手机缩略图不再被裁）
+        try:
+            max_w = int(cfg.get("img_max_width", 1080) or 0)
+        except Exception:
+            max_w = 1080
+        try:
+            if max_w > 0 and getattr(img, "width", 0) > max_w:
+                ratio = max_w / float(img.width)
+                img = img.resize((max_w, max(1, int(round(img.height * ratio)))), Image.LANCZOS)
+        except Exception:
+            pass
 
         # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡，4:4:4 无色度抽样噪点，极速编码）
         if lvl == "high":

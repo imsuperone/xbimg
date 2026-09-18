@@ -512,7 +512,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R.configure_fonts(orig_conf, None)
 
     def test_long_text_pagination(self):
-        """超长内容分页输出多图，不再丢弃截断；短内容仍单图"""
+        """超长内容分页输出多图，不再丢弃截断；短内容仍单图；单页高度适配手机屏"""
         from core.renderer import MessageImageRenderer
         long_text = ("这是很长的一段测试文本，用来验证超长内容分页功能是否正常工作。" * 4 + "\n") * 60
         pages = MessageImageRenderer.render_pages(
@@ -521,7 +521,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         )
         self.assertGreater(len(pages), 1)
         for p in pages:
-            self.assertLessEqual(p.height, 3950)
+            self.assertLessEqual(p.height, 2500)
         one = MessageImageRenderer.render(
             long_text, style="ios", theme_mode="light",
             star_background=False, emoji_remote=False,
@@ -532,6 +532,32 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             star_background=False, emoji_remote=False,
         )
         self.assertEqual(len(short), 1)
+        tiny = MessageImageRenderer.render_pages(
+            long_text, style="ios", theme_mode="light",
+            star_background=False, emoji_remote=False, page_max_h=900,
+        )
+        self.assertGreater(len(tiny), len(pages))
+        for p in tiny:
+            self.assertLessEqual(p.height, 1100)
+
+    def test_save_image_width_clamp(self):
+        """超宽图落盘限宽（默认 1080，手机缩略图不被裁）"""
+        import asyncio
+        from PIL import Image
+        from main import Msg2ImgPlugin
+        plugin = Msg2ImgPlugin(context=None, config=None)
+        big = Image.new("RGB", (2000, 500), (255, 255, 255))
+        path = asyncio.run(plugin._save_render_image(big))
+        try:
+            self.assertIsNotNone(path)
+            with Image.open(path) as saved:
+                self.assertLessEqual(saved.width, 1080)
+        finally:
+            try:
+                if path is not None:
+                    Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def test_ios_emoji_download_offline(self):
         """无网络时 iOS 下载如实失败，不写 ready 标记，不虚标已下载"""

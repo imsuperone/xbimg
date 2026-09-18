@@ -130,6 +130,18 @@
     "options": ["low", "medium", "high"],
     "default": "medium"
   },
+  "page_max_height": {
+    "description": "单页图片最大高度（像素）",
+    "hint": "超长内容按此高度分页输出多图，保证手机一屏能看完（1080x2400 手机建议 2200）；超限不再截断丢弃",
+    "type": "int",
+    "default": 2200
+  },
+  "img_max_width": {
+    "description": "输出图片最大宽度（像素）",
+    "hint": "超宽图等比缩小到该宽度，0 为不限；1080p 手机建议 1080，缩略图不再被裁",
+    "type": "int",
+    "default": 1080
+  },
   "custom_ai_prompt": {
     "description": "自定义 AI 审查提示词",
     "hint": "留空使用系统默认审查提示词，亦可自由定制审查标准与指令",
