@@ -257,10 +257,8 @@ class ContentModerator:
                 violated = True
                 reason = f"触发敏感屏蔽词: {', '.join(matched_kw[:5])}"
 
-        # 2. AI 审查（必须开启 enable_ai_moderation 开关或模式设为 ai/both，且关键词未命中时才调用）
-        ai_enabled = bool(self.config.get("enable_ai_moderation", False)) or (mode in ("ai", "both"))
-        if "enable_ai_moderation" in self.config:
-            ai_enabled = bool(self.config.get("enable_ai_moderation", False))
+        # 2. AI 审查（关键词未命中时才调用；独立开关关闭则绝不调用 AI 接口）
+        ai_enabled = bool(self.config.get("enable_ai_moderation", False))
         if not violated and ai_enabled and mode != "none":
             ai_hit, ai_reason = await self.check_ai(text, context)
             if ai_hit:

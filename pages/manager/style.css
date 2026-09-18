@@ -940,41 +940,6 @@ body {
   border: 1px solid var(--m3-status-green);
 }
 
-.guide-modal {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9998;
-}
-
-.guide-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.42);
-  backdrop-filter: blur(6px);
-}
-
-.guide-modal-card {
-  position: relative;
-  max-width: 560px;
-  width: 90%;
-  max-height: 85vh;
-  overflow-y: auto;
-  background: var(--m3-sys-color-surface-container-high);
-  border: 1px solid var(--m3-sys-color-divider);
-  border-radius: var(--m3-radius-large);
-  padding: 24px;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.24);
-  z-index: 1;
-}
-
-.guide-modal-card h2 {
-  font-size: 20px;
-  margin-bottom: 8px;
-}
-
 .selected-groups-list {
   display: flex;
   flex-direction: column;

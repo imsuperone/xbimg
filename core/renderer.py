@@ -191,6 +191,18 @@ def _collect_font_candidates(extra_first: Optional[List[str]] = None) -> List[st
     return ordered
 
 
+_SYSTEM_CANDIDATES: Optional[List[str]] = None
+
+
+def _system_font_candidates() -> List[str]:
+    """系统字体候选（目录扫描 + fc-list，开销大，进程内缓存；
+    数据目录字体仍每次新鲜扫描，不影响下载/删除即时生效）"""
+    global _SYSTEM_CANDIDATES
+    if _SYSTEM_CANDIDATES is None:
+        _SYSTEM_CANDIDATES = _collect_font_candidates()
+    return list(_SYSTEM_CANDIDATES)
+
+
 def _split_reg_bold(ordered: List[str]) -> Tuple[str, str]:
     # 按文件名区分 regular / bold
     regulars = [p for p in ordered if not _is_bold_font_name(os.path.basename(p))]
@@ -203,7 +215,7 @@ def _split_reg_bold(ordered: List[str]) -> Tuple[str, str]:
 
 def _find_fonts() -> Tuple[str, str]:
     """查找系统可用的中文字体，返回 (regular, bold)。找不到则返回空并打日志。"""
-    ordered = _collect_font_candidates()
+    ordered = _system_font_candidates()
     reg, bold = _split_reg_bold(ordered)
 
     if not reg:
@@ -315,10 +327,6 @@ _EMOJI_STYLE = "none"
 _FONT_DL_RUNNING = False
 
 
-def _font_data_dir() -> Optional[Path]:
-    return _data_subdir(FONT_DATA_SUBDIR)
-
-
 def _is_usable_font(path: str) -> bool:
     """字体可用性校验：存在 + 体积合理 + PIL 可加载 + 中文出字"""
     try:
@@ -377,11 +385,19 @@ def _rebuild_active_fonts():
         except Exception:
             pass
 
+    base_system = _system_font_candidates()
     if src == "system":
-        ordered = _collect_font_candidates()
+        ordered = base_system
     else:
-        # auto/custom：数据目录（含自动下载/URL 下载）优先于系统
-        ordered = _collect_font_candidates(extra_first=extra + data_fonts)
+        # auto/custom：自定义 + 数据目录（含自动下载/URL 下载）优先于系统
+        ordered = []
+        for p in list(extra) + data_fonts + base_system:
+            if not p or p in ordered:
+                continue
+            if os.path.basename(p).lower() in _BROKEN_FONT_FILES:
+                continue
+            if os.path.isfile(p):
+                ordered.append(p)
 
     _ACTIVE_ORDERED = ordered
     _ACTIVE_REGULAR, _ACTIVE_BOLD = _split_reg_bold(ordered)

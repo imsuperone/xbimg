@@ -464,12 +464,6 @@ async def render_text_to_image(text: str):
     let es = cfg.emoji_style;
     if (!es && typeof cfg.emoji_remote !== "undefined") es = cfg.emoji_remote ? "android" : "none";
     setSegmentedValue("segEmojiStyle", es || "none");
-    const guideSeg = document.getElementById("guideSegEmoji");
-    if (guideSeg) {
-      guideSeg.querySelectorAll(".seg-item").forEach(i=>i.classList.remove("active"));
-      const g = guideSeg.querySelector(`.seg-item[data-val="${es||"none"}"]`);
-      if (g) g.classList.add("active");
-    }
 
     const cfEl = document.getElementById("cfgCustomFont");
     if (cfEl) cfEl.value = cfg.custom_font_path || "";
@@ -657,7 +651,6 @@ async def render_text_to_image(text: str):
   // ==========================================
   // 字体状态查询与手动下载
   // ==========================================
-  let _isFetchingFonts = false;
   async function fetchFontStatus(silent = false) {
     const pill = document.getElementById("fontStatusPill");
     const hint = document.getElementById("fontFetchHint");
@@ -690,42 +683,9 @@ async def render_text_to_image(text: str):
         const label = style==="none" ? "未启用" : style;
         emojiHint.textContent = `占用 ${txt} · 当前 ${label}`;
       }
-      // 首次引导：无字体或 emoji 未选则弹出
-      if (!silent) checkAndShowGuide(f);
-      else {
-        // 静默加载也检查是否需要首次引导（仅首次）
-        const guided = (()=>{ try{ return localStorage.getItem("msg2img_guided")==="1"; }catch(e){ return true; }})();
-        if (!guided && (!f.has_cjk || (f.emoji_style||"none")==="none")) checkAndShowGuide(f);
-      }
     } catch (e) {
       if (pill) pill.textContent = "字体状态未知";
       if (!silent) showToast("查询字体状态: " + e.message);
-    }
-  }
-
-  async function downloadFonts() {
-    if (_isFetchingFonts) return;
-    _isFetchingFonts = true;
-    const hint = document.getElementById("fontFetchHint");
-    const btn = document.getElementById("fetchFontsBtn");
-    try {
-      if (btn) btn.disabled = true;
-      if (hint) hint.textContent = "正在下载（中文字体约 10MB、全彩 Emoji 约 24MB，请稍候）…";
-      const res = await api.post("fonts/download");
-      if (res && res.downloaded && res.downloaded.length) {
-        showToast(`✅ 下载完成: ${res.downloaded.join(", ")}`);
-      } else if (res && res.ok) {
-        showToast("✅ 已就绪，无需下载");
-      } else {
-        showToast("下载提示: " + ((res && res.error) || "未知"));
-      }
-      await fetchFontStatus(true);
-      await fetchFontFiles();
-    } catch (e) {
-      showToast("字体下载: " + e.message);
-    } finally {
-      _isFetchingFonts = false;
-      if (btn) btn.disabled = false;
     }
   }
 
@@ -851,42 +811,6 @@ async def render_text_to_image(text: str):
     } catch (e) {
       showToast("下载失败: " + e.message);
     }
-  }
-
-  // 首次引导
-  function checkAndShowGuide(f) {
-    try {
-      if (localStorage.getItem("msg2img_guided")==="1") return;
-    } catch(e){ return; }
-    const needFont = !f.has_cjk;
-    const needEmoji = (f.emoji_style||"none")==="none";
-    if (!needFont && !needEmoji) return;
-    const modal = document.getElementById("firstGuideModal");
-    const box = document.getElementById("guideFontBox");
-    if (modal && box) {
-      // 克隆精选列表到引导
-      const src = document.getElementById("curatedFontsBox");
-      if (src) box.innerHTML = src.innerHTML;
-      // 去除按钮禁用，让引导可下载
-      box.querySelectorAll("button[disabled]").forEach(b=>b.removeAttribute("disabled"));
-      modal.style.display = "flex";
-    }
-  }
-  function hideGuide(){ const m=document.getElementById("firstGuideModal"); if(m) m.style.display="none"; try{ localStorage.setItem("msg2img_guided","1"); }catch(e){} }
-  async function guideConfirm(){
-    const sel = document.querySelector("#guideFontBox .curated-font-row.ready, #curatedFontsBox .curated-font-row.ready");
-    // 若引导内未选，尝试取第一个已下载，否则提示
-    const guideSel = document.querySelector("#guideFontBox .curated-install-btn:not([disabled])");
-    const emojiVal = document.querySelector("#guideSegEmoji .seg-item.active")?.getAttribute("data-val") || "android";
-    // 先应用 emoji
-    setSegmentedValue("segEmojiStyle", emojiVal);
-    // 若有已下载字体，自动应用第一个
-    const readyBtn = document.querySelector("#curatedFontsBox .curated-font-row.ready .curated-install-btn");
-    // 引导确认仅保存 emoji，若字体已下载则提示去持久化选择
-    await saveConfig(false);
-    hideGuide();
-    showToast("✅ 已保存引导选择，可在持久化目录选择字体");
-    await fetchFontStatus(true);
   }
 
   let _deletingFont = "";
@@ -1942,13 +1866,6 @@ async def render_text_to_image(text: str):
         return;
       }
 
-      // 9. 字体下载按钮
-      if (e.target.closest("#fetchFontsBtn")) {
-        e.preventDefault();
-        downloadFonts();
-        return;
-      }
-
       // 11. 精选字体安装按钮
       const curatedBtn = e.target.closest(".curated-install-btn");
       if (curatedBtn && curatedBtn.hasAttribute("data-id")) {
@@ -1981,10 +1898,6 @@ async def render_text_to_image(text: str):
         if(el){ el.value=100; if(valEl) valEl.textContent="100%"; triggerAutoSave(); triggerPreview(); }
         return;
       }
-
-      // 15. 首次引导
-      if (e.target.closest("#guideConfirmBtn")) { e.preventDefault(); guideConfirm(); return; }
-      if (e.target.closest("#guideSkipBtn") || e.target.closest("#firstGuideModal .guide-modal-backdrop")) { e.preventDefault(); hideGuide(); return; }
     });
 
     // 开关状态联动
@@ -2116,7 +2029,6 @@ async def render_text_to_image(text: str):
     applyPreset: applyPreset,
     fetchGroups: fetchGroups,
     fetchFontStatus: fetchFontStatus,
-    downloadFonts: downloadFonts,
     fetchFontFiles: fetchFontFiles,
     deleteFont: deleteFont,
     fetchCuratedFonts: fetchCuratedFonts,

@@ -196,6 +196,9 @@ class Msg2ImgPlugin(Star):
             if grp:
                 grp_name = str(getattr(grp, "group_name", "") or "")
             self._seen_groups[gid] = {"gid": gid, "group_name": grp_name or gid}
+            # 有界增长：超限淘汰最早记录，避免常年运行内存膨胀
+            while len(self._seen_groups) > 2000:
+                self._seen_groups.pop(next(iter(self._seen_groups)))
         except Exception:
             pass
         return gid
@@ -1824,8 +1827,12 @@ class Msg2ImgPlugin(Star):
             return error_response("输出图片流失败", status_code=500)
 
     async def _api_reset_config(self):
-        from .core.config import DEFAULT_CONFIG
-        self.cfg_mgr.config = dict(DEFAULT_CONFIG)
+        from copy import deepcopy
+        try:
+            from .core.config import DEFAULT_CONFIG
+        except (ImportError, ValueError):
+            from core.config import DEFAULT_CONFIG
+        self.cfg_mgr.config = deepcopy(DEFAULT_CONFIG)
         self.cfg_mgr.save()
         self._group_cache_sig = None
         try:

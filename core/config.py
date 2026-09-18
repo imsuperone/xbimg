@@ -3,6 +3,7 @@
 插件配置管理与持久化模块
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -189,7 +190,8 @@ class ConfigManager:
         self._stats: Optional[Dict[str, Any]] = None
         self._stats_last_flush: float = 0.0
 
-        self.config = dict(DEFAULT_CONFIG)
+        # 深拷贝默认配置：嵌套词库 dict 与模块常量隔离，避免原地修改污染全局默认
+        self.config = copy.deepcopy(DEFAULT_CONFIG)
         if raw_cfg:
             try:
                 if isinstance(raw_cfg, dict):
@@ -221,15 +223,14 @@ class ConfigManager:
                 with open(self.cfg_file, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                     if isinstance(saved, dict):
-                        # 确保新版本的默认预设不丢失，同时保留用户自定义修改
+                        # 确保新版本的默认预设不丢失，同时保留用户自定义修改；
+                        # 内置条目深拷贝，与模块常量隔离
                         old_presets = saved.get("keyword_presets")
                         if isinstance(old_presets, dict):
-                            merged = dict(DEFAULT_KEYWORD_PRESETS)
+                            merged = copy.deepcopy(DEFAULT_KEYWORD_PRESETS)
                             merged.update(old_presets)
                             saved["keyword_presets"] = merged
                         self.config.update(saved)
-            except Exception:
-                pass
             except Exception:
                 pass
 

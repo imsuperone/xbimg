@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.4" />
+  <link rel="stylesheet" href="./style.css?v=1.0.5" />
 </head>
 <body>
   <div class="app-layout">
@@ -607,27 +607,6 @@
     <button id="mobileFloatPreviewBtn" class="mobile-float-preview-btn" type="button" title="查看实时预览">
       <span>👁️ 实时预览</span>
     </button>
-
-    <!-- First Entry Guide Modal -->
-    <div id="firstGuideModal" class="guide-modal" style="display:none;">
-      <div class="guide-modal-backdrop"></div>
-      <div class="guide-modal-card">
-        <h2>👋 欢迎使用消息转图助手</h2>
-        <p class="guide-desc">插件为了保持轻量高效，默认不预载大型字体与 Emoji 资源。您可以按需选择：</p>
-        <div class="form-group" style="margin-bottom:14px;">
-          <label class="form-label">Emoji 样式选择</label>
-          <div class="m3-segmented-control" id="segGuideEmoji">
-            <button type="button" class="seg-item active" data-val="none">🚫 暂不下载 (纯净)</button>
-            <button type="button" class="seg-item" data-val="ios">🍎 iOS 最新全彩</button>
-            <button type="button" class="seg-item" data-val="android">🤖 Android Noto</button>
-            <button type="button" class="seg-item" data-val="windows">🪟 Windows 矢量</button>
-          </div>
-        </div>
-        <div class="guide-actions">
-          <button id="guideConfirmBtn" class="m3-btn primary-btn" type="button">进入控制台</button>
-        </div>
-      </div>
-    </div>
 
     <!-- Toast Notifications Container -->
     <div id="toastContainer" class="toast-container"></div>

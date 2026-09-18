@@ -327,6 +327,16 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertEqual(c, {})
         self.assertEqual(plugin._get_group_font_scale("123456"), 100)
 
+    def test_config_defaults_isolation(self):
+        """默认配置隔离：实例修改词库不污染模块全局默认"""
+        from core.config import ConfigManager, DEFAULT_KEYWORD_PRESETS
+        before = DEFAULT_KEYWORD_PRESETS["default"]["keywords"]
+        m1 = ConfigManager()
+        m1.config["keyword_presets"]["default"]["keywords"] = "__polluted__"
+        m2 = ConfigManager()
+        self.assertNotIn("__polluted__", m2.config["keyword_presets"]["default"]["keywords"])
+        self.assertEqual(DEFAULT_KEYWORD_PRESETS["default"]["keywords"], before)
+
     def test_presets_update_flow(self):
         """内置词库更新检测：过期本地标记更新，覆盖/保留后恢复一致"""
         import copy
