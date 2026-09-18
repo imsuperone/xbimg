@@ -36,9 +36,42 @@ class HandlersMixin:
     # 设置高优先级 priority=100，确保在其它插件之前检查并打标
     # ==========================================
     async def on_all_message_entry(self, event: AstrMessageEvent):
-        # 懒启动后台任务 + 记录已见群聊
+        # 懒启动后台任务 + 记录已见群聊 + 顺手给本次事件的 bot 打补丁
+        # （event.bot 就是发送用的同一实例，零发现延迟；后台巡检兜底重连的新实例）
         self._ensure_bg_tasks()
         self._remember_group(event)
+        self._patch_event_bot(event)
+
+    def _patch_event_bot(self, event: AstrMessageEvent) -> None:
+        """顺手给本次事件的 bot 挂载发送补丁：幂等，仅 aiocqhttp/OneBot 系。
+
+        后台巡检有 2s×15 的发现延迟，首条消息常赶在挂载成功前发出；
+        event.bot 与发送是同一实例，在这里顺手挂载可关闭该时间窗。
+        """
+        try:
+            bot = getattr(event, "bot", None)
+            if bot is None:
+                return
+            try:
+                _fn = getattr(event, "get_platform_name", None)
+                pname = str(_fn() or "").lower() if callable(_fn) else ""
+            except Exception:
+                pname = ""
+            if pname:
+                if pname != "aiocqhttp":
+                    return
+            else:
+                # 拿不到平台名时用启发式，避免误伤其他平台
+                try:
+                    t = type(bot)
+                    hay = f"{getattr(t, '__name__', '')} {getattr(t, '__module__', '')}".lower()
+                except Exception:
+                    return
+                if "cqhttp" not in hay and "onebot" not in hay:
+                    return
+            self._patch_bot_send(bot)
+        except Exception:
+            pass
 
 
 
