@@ -184,7 +184,25 @@ class Msg2ImgPlugin(Star):
             asyncio.create_task(self._clean_old_cache_periodic()),
             asyncio.create_task(self._hook_adapters_when_ready()),
             asyncio.create_task(self._ensure_fonts_once()),
+            asyncio.create_task(self._prewarm_render()),
         ]
+
+    async def _prewarm_render(self):
+        """后台预热一次渲染（字体/字形/度量缓存就绪），首条真实消息不再付冷启动费"""
+        try:
+            await asyncio.sleep(3)
+            if self._cache_stop_event is not None and self._cache_stop_event.is_set():
+                return
+            await asyncio.to_thread(
+                MessageImageRenderer.render_pages,
+                text="预热Abc123中文测试",
+                style=str(self.cfg_mgr.config.get("style", "ios")),
+                theme_mode=str(self.cfg_mgr.config.get("theme_mode", "light")),
+                star_background=False,
+                emoji_remote=False,
+            )
+        except Exception:
+            pass
 
     async def terminate(self):
         """插件卸载/停用时回收后台任务，避免重载后旧任务残留重复工作"""
@@ -363,9 +381,9 @@ class Msg2ImgPlugin(Star):
             except Exception:
                 page_max_h = 3000
             try:
-                card_max_w = int(cfg.get("card_max_width", 680) or 680)
+                card_max_w = int(cfg.get("card_max_width", 640) or 640)
             except Exception:
-                card_max_w = 680
+                card_max_w = 640
             imgs = await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
                 text=full_text,

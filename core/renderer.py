@@ -1743,6 +1743,82 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
     return {"ok": False, "downloaded": [], "error": f"{NOTO_EMOJI_FILE} 下载失败: {err or '未知错误'}"}
 
 
+def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64) -> int:
+    """批量预取文本中缺失的全彩 emoji 图（并行 IO）。
+
+    绘制时缺图会逐个串行等待网络（最慢 8s 超时/个），预取后绘制零等待。
+    多字符簇必走图片通道；单个 emoji 仅在无系统字体直绘时才需图片。已缓存/已落盘跳过。
+    返回本次新下载成功数。
+    """
+    if not text:
+        return 0
+    try:
+        if time.time() < _EMOJI_REMOTE_DEAD_UNTIL:
+            return 0
+    except Exception:
+        pass
+    try:
+        try:
+            _ef, _ = get_emoji_font(32)
+        except Exception:
+            _ef = None
+        seen = set()
+        todo = []
+        i, n = 0, len(text)
+        while i < n:
+            cluster, i = _take_cluster(text, i)
+            if not _is_emoji_cluster(cluster):
+                continue
+            if len(cluster) < 2 and _ef is not None:
+                continue
+            for code in _cluster_codes(cluster):
+                if code in seen:
+                    continue
+                seen.add(code)
+                key_hit = False
+                try:
+                    if (code, 32) in _EMOJI_IMG_CACHE:
+                        key_hit = True
+                except Exception:
+                    pass
+                if key_hit:
+                    continue
+                try:
+                    if (EMOJI_ASSETS_DIR / f"{code}.png").is_file():
+                        continue
+                    d = _data_subdir("emoji")
+                    if d is not None and (d / f"{code}.png").is_file():
+                        continue
+                except Exception:
+                    pass
+                todo.append(code)
+                if len(todo) >= max_codes:
+                    break
+            if len(todo) >= max_codes:
+                break
+    except Exception:
+        return 0
+    if not todo:
+        return 0
+    try:
+        data_dir = _data_subdir("emoji")
+        if data_dir is None:
+            return 0
+        import concurrent.futures as _cf
+        done = 0
+        with _cf.ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(todo)))) as ex:
+            futs = {ex.submit(_fetch_remote_emoji, code, data_dir): code for code in todo}
+            for fut in _cf.as_completed(futs):
+                try:
+                    if fut.result():
+                        done += 1
+                except Exception:
+                    pass
+        return done
+    except Exception:
+        return 0
+
+
 def _get_emoji_image(cluster: str, size: int, allow_remote: bool = True) -> Optional[Image.Image]:
     """取簇的全彩图：本地 → 数据目录 → 云端（可选）→ None（调用方降级字体绘制）"""
     codes = _cluster_codes(cluster)
@@ -2133,9 +2209,9 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
     except Exception:
         pmh = 3000
     try:
-        cmw = int(card_max_width or 680)
+        cmw = int(card_max_width or 640)
     except Exception:
-        cmw = 680
+        cmw = 640
     return (h, style, theme_mode, bool(star_background), str(star_density),
             mosaic_mode, mosaic_type, mosaic_half_pos, vw,
             int(font_scale or 100), str(emoji_style), minute, epoch, pmh, cmw)
@@ -2208,7 +2284,7 @@ class MessageImageRenderer:
         font_scale: int = 100,  # 字体百分比 70-150
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
         page_max_h: int = 3000,  # 单页总高度上限（点开看长图长度不限）
-        card_max_width: int = 680,  # 卡片宽度基线（聊天气泡完整显示）
+        card_max_width: int = 640,  # 卡片宽度基线（聊天气泡完整显示）
     ) -> Image.Image:
         """渲染单图（长内容取第一页；完整多页请用 render_pages）"""
         pages = cls.render_pages(
@@ -2233,7 +2309,7 @@ class MessageImageRenderer:
         emoji_remote: bool = True,
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
-        card_max_width: int = 680,
+        card_max_width: int = 640,
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
@@ -2290,9 +2366,9 @@ class MessageImageRenderer:
         # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）
         scale_ratio = font_scale / 100.0
         try:
-            _cw_base = max(480, min(1200, int(card_max_width or 680)))
+            _cw_base = max(480, min(1200, int(card_max_width or 640)))
         except Exception:
-            _cw_base = 680
+            _cw_base = 640
         inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
         min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
         max_w = max(min_w + 120, int(round(_cw_base * min(2.8, max(0.75, scale_ratio)))))
@@ -2357,7 +2433,7 @@ class MessageImageRenderer:
         font_scale: int = 100,
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
-        card_max_width: int = 680,
+        card_max_width: int = 640,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表。
 
@@ -2385,6 +2461,12 @@ class MessageImageRenderer:
                     return list(hit)
             except Exception:
                 pass
+        # emoji 缺图并行预取（绘制时不再逐个串行等网络）
+        try:
+            if ctx["emoji_remote_eff"]:
+                _prefetch_emoji_images(ctx["text"])
+        except Exception:
+            pass
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)
         images = [
@@ -2652,14 +2734,12 @@ class MessageImageRenderer:
             return
 
         # 对每个违规字符施加马赛克（更精致：柔和像素/磨砂+主题色轻遮罩）
+        # 同行连续且同半区的字符合并为一次区域操作，大幅减少逐字 resize 开销
         is_dark = theme.bg_gradient_start[0] < 80  # 简易深浅判断
-        # 随机模式用稳定种子，保证同文本同效果但每字不同
+        # 随机模式用稳定种子，保证同文本同效果但每字不同（先逐字决策再合并，随机序列不变）
         rand = random.Random(_stable_seed(text + "".join(violation_words)) ^ 0x9E3779B9) if mosaic_half_pos == "random" else None
+        runs = []
         for ci in sorted(violation_char_indices):
-            cx, cw, cy, _ch, clh = all_char_positions[ci]
-            left = max(0, int(cx))
-            right = min(card_surface.width, int(cx + cw + 1))
-
             if mosaic_mode == "half":
                 # 半打码：按配置选择上/下/随机
                 if mosaic_half_pos == "top":
@@ -2668,6 +2748,22 @@ class MessageImageRenderer:
                     is_top = rand.choice([True, False]) if rand else False  # type: ignore
                 else:
                     is_top = False
+            else:
+                is_top = None
+            if runs and runs[-1][0] == is_top and ci == runs[-1][1][-1] + 1:
+                _, _, cy0, _, clh0 = all_char_positions[runs[-1][1][0]]
+                _, _, cy1, _, clh1 = all_char_positions[ci]
+                if cy0 == cy1 and clh0 == clh1:
+                    runs[-1][1].append(ci)
+                    continue
+            runs.append([is_top, [ci]])
+        for is_top, idxs in runs:
+            cx, _cw0, cy, _ch, clh = all_char_positions[idxs[0]]
+            _ex, _ew, _ey, _ech, _elh = all_char_positions[idxs[-1]]
+            left = max(0, int(cx))
+            right = min(card_surface.width, int(_ex + _ew + 1))
+
+            if mosaic_mode == "half":
                 mid_y = int(cy + clh * 0.48)
                 if is_top:
                     top = max(0, int(cy))

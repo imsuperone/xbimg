@@ -144,9 +144,9 @@
   },
   "card_max_width": {
     "description": "卡片宽度基线（像素）",
-    "hint": "超长单行按此折行，保证聊天气泡缩略图完整显示；默认 680",
+    "hint": "超长单行按此折行，保证聊天气泡缩略图完整显示；默认 640",
     "type": "int",
-    "default": 680
+    "default": 640
   },
   "custom_ai_prompt": {
     "description": "自定义 AI 审查提示词",

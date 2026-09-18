@@ -610,12 +610,29 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         async def _t():
             p = Msg2ImgPlugin(context=None, config=dict(DEFAULT_CONFIG))
             p._ensure_bg_tasks()
-            self.assertEqual(len(p._bg_tasks), 3)
+            self.assertEqual(len(p._bg_tasks), 4)
             await p.terminate()
             self.assertFalse(p._bg_started)
             self.assertEqual(p._bg_tasks, [])
 
         asyncio.run(_t())
+
+    def test_emoji_prefetch(self):
+        """emoji 缺图并行预取：断网退避直接返回；mock 下成功计数"""
+        from core import renderer as R
+        orig_dead = R._EMOJI_REMOTE_DEAD_UNTIL
+        orig_fetch = R._fetch_remote_emoji
+        try:
+            import time as _t
+            R._EMOJI_REMOTE_DEAD_UNTIL = _t.time() + 600
+            self.assertEqual(R._prefetch_emoji_images("👨‍👩‍👧好"), 0)
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
+            R._fetch_remote_emoji = lambda code, dest: True
+            self.assertGreater(R._prefetch_emoji_images("👨‍👩‍👧好"), 0)
+            self.assertEqual(R._prefetch_emoji_images("纯文本无表情"), 0)
+        finally:
+            R._EMOJI_REMOTE_DEAD_UNTIL = orig_dead
+            R._fetch_remote_emoji = orig_fetch
 
     def test_mosaic_positions_char_aligned(self):
         """打码定位：VS16/ZWJ 簇拆成单字符条目，串定位与条目定位一致（防打码错位）"""
