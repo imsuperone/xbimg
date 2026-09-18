@@ -416,6 +416,11 @@ async def render_text_to_image(text: str):
 
     setSegmentedValue("segImgCompress", cfg.img_compress_level || "medium");
 
+    const pageMaxHEl = document.getElementById("cfgPageMaxHeight");
+    if (pageMaxHEl) pageMaxHEl.value = cfg.page_max_height || 2200;
+    const imgMaxWEl = document.getElementById("cfgImgMaxWidth");
+    if (imgMaxWEl) imgMaxWEl.value = (cfg.img_max_width ?? 1080);
+
     // 填充与同步多预设词库
     populateKeywordPresets();
 
@@ -555,6 +560,8 @@ async def render_text_to_image(text: str):
       custom_font_url: cfUrlEl ? cfUrlEl.value.trim() : "",
       font_scale: fontScaleEl ? parseInt(fontScaleEl.value,10) || 100 : 100,
       img_compress_level: getSegmentedValue("segImgCompress", "medium"),
+      page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 2200; return Math.min(3800, Math.max(800, v || 2200)); })(),
+      img_max_width: (()=>{ const el = document.getElementById("cfgImgMaxWidth"); if (!el || el.value === "") return 1080; const v = parseInt(el.value,10); return isNaN(v) ? 1080 : Math.min(3000, Math.max(0, v)); })(),
       custom_ai_prompt: document.getElementById("cfgCustomAiPrompt")?.value.trim() || "",
       group_configs: (()=>{
         const curList = (document.getElementById("cfgGroupList")?.value || "").split(/[,;\s]+/).map(s=>s.trim()).filter(Boolean);
@@ -2003,7 +2010,7 @@ async def render_text_to_image(text: str):
         currentConfig.custom_keywords = e.target.value.trim();
         triggerAutoSave();
       }
-      if (e.target && (e.target.id === "cfgKeywords" || e.target.id === "cfgMinLength")) {
+      if (e.target && (e.target.id === "cfgKeywords" || e.target.id === "cfgMinLength" || e.target.id === "cfgPageMaxHeight" || e.target.id === "cfgImgMaxWidth")) {
         triggerAutoSave();
       }
       if (e.target && (e.target.id === "cfgCustomFont" || e.target.id === "cfgCustomBoldFont")) {

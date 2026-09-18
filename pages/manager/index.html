@@ -214,6 +214,24 @@
           </div>
         </div>
 
+        <!-- Card: Phone Screen Fit -->
+        <div class="m3-card">
+          <h2 class="card-title">📱 手机屏适配</h2>
+          <p class="card-desc">控制生成图片的尺寸，保证手机缩略图完整显示、不被裁切。</p>
+
+          <div class="form-group">
+            <label class="form-label">单页图片最大高度（像素）</label>
+            <input type="number" id="cfgPageMaxHeight" class="m3-input" min="800" max="3800" step="100" value="2200" />
+            <span class="field-hint">超长内容按此高度分页输出多图；1080x2400 手机建议 2200。超限不再截断丢弃。</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">输出图片最大宽度（像素，0 为不限）</label>
+            <input type="number" id="cfgImgMaxWidth" class="m3-input" min="0" max="3000" step="20" value="1080" />
+            <span class="field-hint">超宽图等比缩小到该宽度；1080p 手机建议 1080。</span>
+          </div>
+        </div>
+
         <!-- Card: Link Handling Strategy -->
         <div class="m3-card">
           <h2 class="card-title">🔗 智能链接发送策略</h2>
