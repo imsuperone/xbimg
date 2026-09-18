@@ -138,9 +138,15 @@
   },
   "img_max_width": {
     "description": "输出图片最大宽度（像素）",
-    "hint": "超宽图等比缩小到该宽度，0 为不限；1080p 手机建议 1080，缩略图不再被裁",
+    "hint": "超宽图等比缩小到该宽度，0 为不限；1080p 手机建议 1080",
     "type": "int",
     "default": 1080
+  },
+  "card_max_width": {
+    "description": "卡片宽度基线（像素）",
+    "hint": "超长单行按此折行，保证聊天气泡缩略图完整显示；默认 680",
+    "type": "int",
+    "default": 680
   },
   "custom_ai_prompt": {
     "description": "自定义 AI 审查提示词",

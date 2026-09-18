@@ -310,6 +310,10 @@ class Msg2ImgPlugin(Star):
                 page_max_h = int(cfg.get("page_max_height", 3000) or 3000)
             except Exception:
                 page_max_h = 3000
+            try:
+                card_max_w = int(cfg.get("card_max_width", 680) or 680)
+            except Exception:
+                card_max_w = 680
             imgs = await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
                 text=full_text,
@@ -325,6 +329,7 @@ class Msg2ImgPlugin(Star):
                 font_scale=font_scale,
                 emoji_style=_es,
                 page_max_h=page_max_h,
+                card_max_width=card_max_w,
             )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 渲染失败: {e}")

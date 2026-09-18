@@ -133,6 +133,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "img_compress_level": "medium",
     "page_max_height": 3000,
     "img_max_width": 1080,
+    "card_max_width": 680,
     "custom_ai_prompt": "",
     "group_configs": {},
     "ai_provider_mode": "astrbot",

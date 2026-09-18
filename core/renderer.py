@@ -401,6 +401,20 @@ def _rebuild_active_fonts():
 
     _ACTIVE_ORDERED = ordered
     _ACTIVE_REGULAR, _ACTIVE_BOLD = _split_reg_bold(ordered)
+    # 候选集变化后，覆盖判定缓存必须失效：旧字体对象地址会被新对象复用(id 一致)，
+    # 否则换字体后仍命中过期结论导致 tofu
+    try:
+        _COVER_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _RESOLVE_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _INK_CACHE.clear()
+    except Exception:
+        pass
     # 同步旧全局变量（兼容直接读 _FONT_* 的外部代码）
     global _FONT_REGULAR_PATH, _FONT_BOLD_PATH, _CANDIDATE_FONTS
     if _ACTIVE_REGULAR:
@@ -936,11 +950,21 @@ def _load_font_file(path: str, size: int) -> Optional[ImageFont.FreeTypeFont]:
         if path.lower().endswith((".ttc", ".otc")):
             for idx in range(4):
                 try:
-                    return ImageFont.truetype(io.BytesIO(data), size, index=idx)
+                    f = ImageFont.truetype(io.BytesIO(data), size, index=idx)
+                    try:
+                        f._src_path = path
+                    except Exception:
+                        pass
+                    return f
                 except Exception:
                     continue
             return None
-        return ImageFont.truetype(io.BytesIO(data), size)
+        f = ImageFont.truetype(io.BytesIO(data), size)
+        try:
+            f._src_path = path
+        except Exception:
+            pass
+        return f
     except Exception:
         return None
 
@@ -985,6 +1009,25 @@ def _char_advance(font: ImageFont.FreeTypeFont, char: str) -> float:
 _BLANK_PASSTHROUGH = frozenset(["\u200b", "\u200d", "\ufe0f", "\u00ad"])
 _COVER_CACHE: Dict[Tuple, bool] = {}
 _RESOLVE_CACHE: Dict[Tuple, Any] = {}
+_CMAP_CACHE: Dict[str, Optional[frozenset]] = {}
+_UNCOVERED_LOG_AT: Dict[str, float] = {}
+
+
+def _font_key(font):
+    """字体缓存键：优先用加载来源路径（跨重载稳定），否则退化到 id"""
+    try:
+        sp = getattr(font, "_src_path", None)
+        if isinstance(sp, str) and sp:
+            return sp
+        fp = getattr(font, "path", None)
+        if isinstance(fp, (str, bytes)):
+            return fp
+    except Exception:
+        pass
+    try:
+        return id(font)
+    except Exception:
+        return 0
 
 
 def _mask_bytes(core) -> bytes:
@@ -1007,8 +1050,7 @@ def _font_covers(font: ImageFont.FreeTypeFont, ch: str) -> bool:
     if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH:
         return True
     try:
-        fp = getattr(font, "path", None)
-        key = (fp if isinstance(fp, (str, bytes)) else id(font), getattr(font, "size", 0), ch)
+        key = (_font_key(font), getattr(font, "size", 0), ch)
     except Exception:
         return True
     hit = _COVER_CACHE.get(key)
@@ -1026,6 +1068,16 @@ def _font_covers(font: ImageFont.FreeTypeFont, ch: str) -> bool:
             ok = True  # 外框不同必为不同字形
         else:
             ok = _mask_bytes(m) != _mask_bytes(ref)
+        if ok:
+            # 启发式通过后再用 cmap 复核（有 fonttools 时）：文件级缺字则必缺
+            try:
+                sp = getattr(font, "_src_path", None)
+                if isinstance(sp, str) and sp:
+                    cmap = _file_cmap(sp)
+                    if cmap is not None and ord(ch) not in cmap:
+                        ok = False
+            except Exception:
+                pass
     except Exception:
         ok = True
     if len(_COVER_CACHE) > 6000:
@@ -1057,8 +1109,7 @@ def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.Fr
     if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH:
         return primary
     try:
-        fp = getattr(primary, "path", None)
-        key = (fp if isinstance(fp, (str, bytes)) else id(primary), getattr(primary, "size", 0), ch)
+        key = (_font_key(primary), getattr(primary, "size", 0), ch)
     except Exception:
         return primary
     hit = _RESOLVE_CACHE.get(key)
@@ -1076,12 +1127,94 @@ def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.Fr
                 if f is not None and _font_covers(f, ch):
                     res = f
                     break
+            if res is primary:
+                _note_uncovered(primary, ch)
     except Exception:
         res = primary
     if len(_RESOLVE_CACHE) > 8000:
         _RESOLVE_CACHE.clear()
     _RESOLVE_CACHE[key] = res
     return res
+
+
+_TTFONT = None
+_TTFONT_TRIED = False
+
+
+def _file_cmap(path: str) -> Optional[frozenset]:
+    """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。"""
+    try:
+        hit = _CMAP_CACHE.get(path)
+    except Exception:
+        hit = None
+    if hit is not None:
+        return hit
+    res = None
+    try:
+        global _TTFONT, _TTFONT_TRIED
+        if not _TTFONT_TRIED:
+            _TTFONT_TRIED = True
+            try:
+                from fontTools.ttLib import TTFont as _TT
+                _TTFONT = _TT
+            except Exception:
+                _TTFONT = None
+        if _TTFONT is not None and path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as fp:
+                    data = fp.read()
+            except Exception:
+                data = b""
+            if data:
+                import io as _io
+                codes: set = set()
+                ok_faces = 0
+                for i in range(4):
+                    try:
+                        ff = _TTFONT(_io.BytesIO(data), fontNumber=i, lazy=True)
+                    except Exception:
+                        break
+                    try:
+                        codes |= set(ff.getBestCmap().keys())
+                        ok_faces += 1
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            ff.close()
+                        except Exception:
+                            pass
+                # 健全性门槛：正常字体至少数百码位，否则视为不可信
+                if ok_faces and len(codes) > 100:
+                    res = frozenset(codes)
+    except Exception:
+        res = None
+    try:
+        if len(_CMAP_CACHE) > 64:
+            _CMAP_CACHE.clear()
+        _CMAP_CACHE[path] = res
+    except Exception:
+        pass
+    return res
+
+
+def _note_uncovered(font, ch: str):
+    """链中无任何字体含该字符：限频打日志，帮助定位是缺字库还是真生僻字。
+    Emoji 走专属全彩管线，不在此提示，避免噪音。"""
+    try:
+        if is_emoji_char(ch):
+            return
+        sp = getattr(font, "_src_path", None) or getattr(font, "path", None) or "当前字体"
+        if not isinstance(sp, str):
+            sp = "当前字体"
+        now = time.time()
+        last = _UNCOVERED_LOG_AT.get(sp, 0)
+        if now - last < 300:
+            return
+        _UNCOVERED_LOG_AT[sp] = now
+        logger.warning(f"[msg2img] 字体缺字形（将显示为方框）：{sp} 缺 {ch!r}，链中字体均无该字；请补充含该字符的常规字体")
+    except Exception:
+        pass
 
 
 def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
@@ -1123,8 +1256,7 @@ def _cjk_ink_center_y(font: ImageFont.FreeTypeFont) -> Optional[float]:
     """
     try:
         base = _resolve_char_font("永", font)
-        fp = getattr(base, "path", None)
-        key = (fp if isinstance(fp, (str, bytes)) else id(base), getattr(base, "size", 0))
+        key = (_font_key(base), getattr(base, "size", 0))
     except Exception:
         return None
     hit = _INK_CACHE.get(key)
@@ -1908,12 +2040,13 @@ class MessageImageRenderer:
         font_scale: int = 100,  # 字体百分比 70-150
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
         page_max_h: int = 3000,  # 单页总高度上限（点开看长图长度不限）
+        card_max_width: int = 680,  # 卡片宽度基线（聊天气泡完整显示）
     ) -> Image.Image:
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
-            page_max_h=page_max_h,
+            page_max_h=page_max_h, card_max_width=card_max_width,
         )
         # 解包单页直绘所需局部量（与旧逻辑一致，保证单页输出逐字节不变）
         text = ctx["text"]
@@ -2118,6 +2251,7 @@ class MessageImageRenderer:
         emoji_remote: bool = True,
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
+        card_max_width: int = 680,
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
@@ -2173,9 +2307,13 @@ class MessageImageRenderer:
         # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔；
         # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）
         scale_ratio = font_scale / 100.0
+        try:
+            _cw_base = max(480, min(1200, int(card_max_width or 680)))
+        except Exception:
+            _cw_base = 680
         inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
         min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
-        max_w = max(min_w + 120, int(round(720 * min(2.8, max(0.75, scale_ratio)))))
+        max_w = max(min_w + 120, int(round(_cw_base * min(2.8, max(0.75, scale_ratio)))))
         card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
         content_w = card_w - inner_pad_x * 2
 
@@ -2237,13 +2375,14 @@ class MessageImageRenderer:
         font_scale: int = 100,
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
+        card_max_width: int = 680,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表"""
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
-            page_max_h=page_max_h,
+            page_max_h=page_max_h, card_max_width=card_max_width,
         )
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)

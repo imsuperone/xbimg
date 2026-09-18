@@ -420,6 +420,8 @@ async def render_text_to_image(text: str):
     if (pageMaxHEl) pageMaxHEl.value = cfg.page_max_height || 3000;
     const imgMaxWEl = document.getElementById("cfgImgMaxWidth");
     if (imgMaxWEl) imgMaxWEl.value = (cfg.img_max_width ?? 1080);
+    const cardMaxWEl = document.getElementById("cfgCardMaxWidth");
+    if (cardMaxWEl) cardMaxWEl.value = cfg.card_max_width || 680;
 
     // 填充与同步多预设词库
     populateKeywordPresets();
@@ -562,6 +564,7 @@ async def render_text_to_image(text: str):
       img_compress_level: getSegmentedValue("segImgCompress", "medium"),
       page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 3000; return Math.min(3800, Math.max(800, v || 3000)); })(),
       img_max_width: (()=>{ const el = document.getElementById("cfgImgMaxWidth"); if (!el || el.value === "") return 1080; const v = parseInt(el.value,10); return isNaN(v) ? 1080 : Math.min(3000, Math.max(0, v)); })(),
+      card_max_width: (()=>{ const el = document.getElementById("cfgCardMaxWidth"); const v = el ? parseInt(el.value,10) : 680; return Math.min(1200, Math.max(480, v || 680)); })(),
       custom_ai_prompt: document.getElementById("cfgCustomAiPrompt")?.value.trim() || "",
       group_configs: (()=>{
         const curList = (document.getElementById("cfgGroupList")?.value || "").split(/[,;\s]+/).map(s=>s.trim()).filter(Boolean);
@@ -2010,7 +2013,7 @@ async def render_text_to_image(text: str):
         currentConfig.custom_keywords = e.target.value.trim();
         triggerAutoSave();
       }
-      if (e.target && (e.target.id === "cfgKeywords" || e.target.id === "cfgMinLength" || e.target.id === "cfgPageMaxHeight" || e.target.id === "cfgImgMaxWidth")) {
+      if (e.target && (e.target.id === "cfgKeywords" || e.target.id === "cfgMinLength" || e.target.id === "cfgPageMaxHeight" || e.target.id === "cfgImgMaxWidth" || e.target.id === "cfgCardMaxWidth")) {
         triggerAutoSave();
       }
       if (e.target && (e.target.id === "cfgCustomFont" || e.target.id === "cfgCustomBoldFont")) {

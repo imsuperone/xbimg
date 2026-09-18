@@ -462,6 +462,36 @@ class TestMsg2ImgPlugin(unittest.TestCase):
                 dev_cfg.unlink()
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_font_cmap_coverage(self):
+        """文件级 cmap 精确判定：arial 无中文，msyh 有中文"""
+        from core import renderer as R
+        cmap_ar = R._file_cmap("C:/Windows/Fonts/arial.ttf")
+        self.assertIsNotNone(cmap_ar)
+        self.assertNotIn(0x4E2D, cmap_ar)
+        self.assertIn(0x41, cmap_ar)
+        cmap_ms = R._file_cmap("C:/Windows/Fonts/msyh.ttc")
+        self.assertIsNotNone(cmap_ms)
+        self.assertIn(0x4E2D, cmap_ms)
+        self.assertIsNone(R._file_cmap("C:/nonexistent.ttf"))
+
+    def test_coverage_cache_invalidated_on_rebuild(self):
+        """换字体重建后覆盖判定缓存必须失效（防 id 复用过期误判）"""
+        from core import renderer as R
+        R._resolve_char_font("中", R.get_font(32))
+        self.assertGreater(len(R._RESOLVE_CACHE) + len(R._COVER_CACHE), 0)
+        R._rebuild_active_fonts()
+        self.assertEqual(len(R._RESOLVE_CACHE), 0)
+        self.assertEqual(len(R._COVER_CACHE), 0)
+        self.assertEqual(len(R._INK_CACHE), 0)
+        # 诊断日志不抛异常即可（静音断言，避免污染测试输出）
+        _lg = R.logger
+        _dis = _lg.disabled
+        _lg.disabled = True
+        try:
+            R._note_uncovered(R.get_font(32), "中")
+        finally:
+            _lg.disabled = _dis
+
     def test_decorative_font_fallback(self):
         """装饰字体（缺 CJK）自动回退：拉丁跟随主字体，中文切链中字体，国旗成对不断开"""
         from core.renderer import (
