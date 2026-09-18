@@ -493,6 +493,25 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         finally:
             _lg.disabled = _dis
 
+    def test_mosaic_positions_char_aligned(self):
+        """打码定位：VS16/ZWJ 簇拆成单字符条目，串定位与条目定位一致（防打码错位）"""
+        from PIL import Image, ImageDraw
+        from core.renderer import _draw_mixed_text, get_font
+        canvas = Image.new("RGBA", (900, 120), (255, 255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+        font = get_font(32)
+        pos = _draw_mixed_text(
+            canvas, draw, 10, 30, "📅️测试奴隶好👨‍👩‍👧 end", font,
+            (20, 20, 20, 255), 32, emoji_remote=False, emoji_style="none",
+        )
+        for _x, _w, _y, ch in pos:
+            self.assertEqual(len(ch), 1, f"cluster not split: {ch!r}")
+        chars = "".join(p[3] for p in pos)
+        self.assertIn("奴隶", chars)
+        idx = chars.find("奴隶")
+        self.assertEqual(pos[idx][3], "奴")
+        self.assertEqual(pos[idx + 1][3], "隶")
+
     def test_nfkc_fallback_draw(self):
         """数学花体等无字形符号退化为 NFKC 等价形（𝔖→S），优先同风格绘制"""
         from core import renderer as R

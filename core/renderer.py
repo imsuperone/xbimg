@@ -1794,7 +1794,11 @@ def _draw_mixed_text(
             _py = y + _ink_c - _h_img / 2.0
         canvas.paste(emo_img, (int(cur_x), int(round(_py))), emo_img)
         w = font_size + 2
-        char_positions.append((cur_x, w, y, cluster))
+        # 定位按字符拆分：串定位与条目定位必须一致，否则打码错位
+        n_chars = len(cluster) or 1
+        cw = w / n_chars
+        for j, ch in enumerate(cluster):
+            char_positions.append((cur_x + j * cw, cw, y, ch))
         cur_x += w
         return True
 
@@ -1871,8 +1875,10 @@ def _draw_mixed_text(
                 dc, bf = _draw_char_and_font(bc, font)
                 measured.append((dc, bf, _char_advance(bf, dc)))
             else:
-                # 多字符簇不断开，整体跟随主字体（与旧逻辑一致）
-                measured.append((bc, font, sum(_char_advance(font, c) for c in bc) or float(font_size)))
+                # 多字符簇不断开，整体跟随主字体绘制；定位按字符拆分，保证打码不错位
+                _cw = (sum(_char_advance(font, c) for c in bc) or float(font_size)) / len(bc)
+                for c in bc:
+                    measured.append((c, font, _cw))
         k2 = 0
         while k2 < len(measured):
             j2 = k2 + 1
