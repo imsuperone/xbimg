@@ -270,10 +270,11 @@ class Msg2ImgPlugin(Star):
         theme_mode: Optional[str] = None,
         keyword_preset: Optional[str] = None,
     ):
-        """统一审查+渲染管线：返回 (Image|None, violated, mosaic, blocked)。
+        """统一审查+渲染管线：返回 (List[Image], violated, mosaic, blocked)。
 
         主路径与适配器劫持路径共用，消灭重复代码，保证统计口径一致。
         支持传入群级别覆盖的 style / theme_mode / font_scale / keyword_preset。
+        超长内容分页输出多图，不再丢弃截断部分。
         """
         cfg = self.cfg_mgr.config
         if font_scale is None:
@@ -286,7 +287,7 @@ class Msg2ImgPlugin(Star):
 
         mod_res = await self.moderator.review(full_text, self.context, preset_name=keyword_preset)
         if mod_res.is_violated and mod_res.action == "block":
-            return None, True, False, True
+            return [], True, False, True
         mosaic_mode = "none"
         if mod_res.is_violated:
             if mod_res.action == "notice":
@@ -302,8 +303,8 @@ class Msg2ImgPlugin(Star):
                 _es = "android" if bool(cfg.get("emoji_remote", True)) else "none"
                 if _es == "android" and not str(cfg.get("emoji_style", "")):
                     _es = "none"
-            img = await asyncio.to_thread(
-                MessageImageRenderer.render,
+            imgs = await asyncio.to_thread(
+                MessageImageRenderer.render_pages,
                 text=full_text,
                 style=eff_style,
                 theme_mode=eff_theme,
@@ -319,8 +320,8 @@ class Msg2ImgPlugin(Star):
             )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 渲染失败: {e}")
-            return None, mod_res.is_violated, mosaic_mode != "none", False
-        return img, mod_res.is_violated, mosaic_mode != "none", False
+            return [], mod_res.is_violated, mosaic_mode != "none", False
+        return imgs or [], mod_res.is_violated, mosaic_mode != "none", False
 
     async def _save_render_image(self, img) -> Optional[Path]:
         """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：45 秒后自动清理）"""
@@ -355,6 +356,18 @@ class Msg2ImgPlugin(Star):
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 写入图片失败: {e}")
             return None
+
+    async def _save_render_images(self, imgs) -> List[Path]:
+        """批量落盘（超长分页多图），返回成功路径列表"""
+        paths: List[Path] = []
+        for im in imgs or []:
+            try:
+                p = await self._save_render_image(im)
+            except Exception:
+                p = None
+            if p is not None:
+                paths.append(p)
+        return paths
 
     async def _transform_onebot_message(self, gid: str, message: Any) -> Any:
         """将 OneBot 协议格式的文本消息转图（与主路径同策略：链接模式/审查/统计）"""
@@ -399,10 +412,10 @@ class Msg2ImgPlugin(Star):
                 if not quick_hit and str(cfg.get("moderation_mode", "keywords")) == "none":
                     return message
 
-            # 转为图片（群组单独字体大小与样式）
+            # 转为图片（群组单独字体大小与样式，超长分页多图）
             grp_custom = self._get_group_custom_config(gid)
             eff_scale = self._get_group_font_scale(gid)
-            img, violated, mosaic, blocked = await self._review_and_render(
+            imgs, violated, mosaic, blocked = await self._review_and_render(
                 full_text,
                 font_scale=eff_scale,
                 style=grp_custom.get("style"),
@@ -413,10 +426,10 @@ class Msg2ImgPlugin(Star):
             if render_trigger == "violation_only" and not violated:
                 return message
             self.cfg_mgr.record_render(is_violated=violated, is_mosaic=mosaic)
-            if blocked or img is None:
+            if blocked or not imgs:
                 return message
-            img_path = await self._save_render_image(img)
-            if not img_path:
+            img_paths = await self._save_render_images(imgs)
+            if not img_paths:
                 return message
 
             # 保留前置 at / reply（与主路径一致，不再丢弃 Reply）
@@ -424,7 +437,8 @@ class Msg2ImgPlugin(Star):
                 seg for seg in message
                 if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
             ]
-            new_segs.append({"type": "image", "data": {"file": str(img_path.resolve())}})
+            for img_path in img_paths:
+                new_segs.append({"type": "image", "data": {"file": str(img_path.resolve())}})
             return new_segs
 
         elif isinstance(message, str) and message.strip():
@@ -443,7 +457,7 @@ class Msg2ImgPlugin(Star):
                     return message
             grp_custom2 = self._get_group_custom_config(gid)
             eff_scale2 = self._get_group_font_scale(gid)
-            img, violated, mosaic, blocked = await self._review_and_render(
+            imgs, violated, mosaic, blocked = await self._review_and_render(
                 text,
                 font_scale=eff_scale2,
                 style=grp_custom2.get("style"),
@@ -453,11 +467,11 @@ class Msg2ImgPlugin(Star):
             if render_trigger2 == "violation_only" and not violated:
                 return message
             self.cfg_mgr.record_render(is_violated=violated, is_mosaic=mosaic)
-            if blocked or img is None:
+            if blocked or not imgs:
                 return message
-            img_path = await self._save_render_image(img)
-            if img_path:
-                return [{"type": "image", "data": {"file": str(img_path.resolve())}}]
+            img_paths = await self._save_render_images(imgs)
+            if img_paths:
+                return [{"type": "image", "data": {"file": str(p.resolve())}} for p in img_paths]
 
         return message
 
@@ -629,11 +643,11 @@ class Msg2ImgPlugin(Star):
             if not quick_hit and str(cfg.get("moderation_mode", "keywords")) == "none":
                 return
 
-        # 6-8. 统一审查 + 渲染 + 落盘（群组单独字体大小与专属风格/主题）
+        # 6-8. 统一审查 + 渲染 + 落盘（群组单独字体大小与专属风格/主题，超长分页多图）
         gid_main = self._extract_group_id(event)
         grp_c_main = self._get_group_custom_config(gid_main)
         eff_scale_main = self._get_group_font_scale(gid_main)
-        img, violated, mosaic, blocked = await self._review_and_render(
+        imgs, violated, mosaic, blocked = await self._review_and_render(
             full_text,
             font_scale=eff_scale_main,
             style=grp_c_main.get("style"),
@@ -650,10 +664,10 @@ class Msg2ImgPlugin(Star):
             # 直接拦截不发送
             event.stop_event()
             return
-        if img is None:
+        if not imgs:
             return
-        img_path = await self._save_render_image(img)
-        if img_path is None:
+        img_paths = await self._save_render_images(imgs)
+        if not img_paths:
             return
 
         # 8. 组装新消息链并替换
@@ -663,8 +677,9 @@ class Msg2ImgPlugin(Star):
             if comp.__class__.__name__ in ("At", "AtAll", "Reply"):
                 new_chain.append(comp)
 
-        # 插入渲染出的图片段
-        new_chain.append(AstrImage.fromFileSystem(str(img_path)))
+        # 插入渲染出的图片段（超长分页一次性发出，不再丢弃截断部分）
+        for img_path in img_paths:
+            new_chain.append(AstrImage.fromFileSystem(str(img_path)))
 
         # 保留原链中的多媒体段（长文本配图时不再丢弃原图/音视频）
         for comp in result.chain:
@@ -1387,7 +1402,7 @@ class Msg2ImgPlugin(Star):
                     "```"
                 )
                 img = await asyncio.to_thread(
-                    MessageImageRenderer.render,
+                    MessageImageRenderer.render_pages,
                     text=test_content,
                     style=style_eff,
                     theme_mode=theme_eff,
@@ -1400,18 +1415,21 @@ class Msg2ImgPlugin(Star):
                     mosaic_half_pos=str(cfg.get("mosaic_half_pos", "bottom")),
                     font_scale=eff_scale,
                 )
-                img_filename = f"test_{int(time.time()*1000)}.png"
-                img_path = self.cache_dir / img_filename
-                await asyncio.to_thread(img.save, str(img_path), "PNG")
-                self._schedule_delete(img_path, 45)
-                yield event.chain_result([AstrImage.fromFileSystem(str(img_path))])
+                chain_imgs = []
+                for _idx, _im in enumerate(img or []):
+                    img_filename = f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
+                    img_path = self.cache_dir / img_filename
+                    await asyncio.to_thread(_im.save, str(img_path), "PNG")
+                    self._schedule_delete(img_path, 45)
+                    chain_imgs.append(AstrImage.fromFileSystem(str(img_path)))
+                yield event.chain_result(chain_imgs)
                 return
             yield event.plain_result("未知 group 子指令，请输入 /xbimg group 查看单群菜单。")
             return
         elif sub == "test":
             test_content = arg or "这是一条来自 AstrBot 消息转图助手的测试消息！✨\n祝您使用愉快~"
-            img = await asyncio.to_thread(
-                MessageImageRenderer.render,
+            imgs = await asyncio.to_thread(
+                MessageImageRenderer.render_pages,
                 text=test_content,
                 style=str(cfg.get("style", "ios")),
                 theme_mode=str(cfg.get("theme_mode", "light")),
@@ -1421,9 +1439,12 @@ class Msg2ImgPlugin(Star):
                 mosaic_type=str(cfg.get("mosaic_type", "pixel")),
                 emoji_remote=bool(cfg.get("emoji_remote", True)),
             )
-            test_path = self.cache_dir / f"test_{int(time.time())}.png"
-            await asyncio.to_thread(img.save, str(test_path), "PNG")
-            yield event.chain_result([AstrImage.fromFileSystem(str(test_path))])
+            test_imgs = []
+            for _idx, _im in enumerate(imgs or []):
+                test_path = self.cache_dir / f"test_{int(time.time())}_{_idx}.png"
+                await asyncio.to_thread(_im.save, str(test_path), "PNG")
+                test_imgs.append(AstrImage.fromFileSystem(str(test_path)))
+            yield event.chain_result(test_imgs)
         else:
             yield event.plain_result("未知子指令，请输入 /xbimg 查看指令菜单。")
 

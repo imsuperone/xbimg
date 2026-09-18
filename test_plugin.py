@@ -474,8 +474,8 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertEqual(ni, 2)
         self.assertEqual(_cluster_codes(cl), ["1f1e8-1f1f3"])
 
-    def test_decorative_font_whole_render(self):
-        """装饰字体做主字体但文本需要中文时，整图改用普通字体输出"""
+    def test_decorative_font_mixed_render(self):
+        """装饰字体做主字体时混排渲染：拉丁走装饰字体，缺字逐字回退，排版不断裂"""
         from core import renderer as R
         orig_conf = dict(R._FONT_CONF)
         try:
@@ -486,23 +486,42 @@ class TestMsg2ImgPlugin(unittest.TestCase):
                 "custom_font_url": "",
                 "emoji_style": "none",
             }, None)
-            self.assertTrue(R._should_force_normal("中文测试"))
-            self.assertFalse(R._should_force_normal("Hello only"))
             img = R.MessageImageRenderer.render(
-                "中文测试ABC", style="ios", theme_mode="light",
+                "Hello中文测试", style="ios", theme_mode="light",
                 star_background=False, emoji_remote=False,
             )
             self.assertIsNotNone(img)
             self.assertGreater(img.width, 500)
-            # 强制期间 get_font 返回含中文的普通字体
-            R._TLS.force_normal = True
-            try:
-                f = R.get_font(32)
-                self.assertTrue(R._font_covers(f, "永"))
-            finally:
-                R._TLS.force_normal = False
+            # 回退计量与绘制一致：卡片宽度应容纳混排文本
+            pages = R.MessageImageRenderer.render_pages(
+                "Hello中文测试", style="ios", theme_mode="light",
+                star_background=False, emoji_remote=False,
+            )
+            self.assertEqual(len(pages), 1)
         finally:
             R.configure_fonts(orig_conf, None)
+
+    def test_long_text_pagination(self):
+        """超长内容分页输出多图，不再丢弃截断；短内容仍单图"""
+        from core.renderer import MessageImageRenderer
+        long_text = ("这是很长的一段测试文本，用来验证超长内容分页功能是否正常工作。" * 4 + "\n") * 60
+        pages = MessageImageRenderer.render_pages(
+            long_text, style="ios", theme_mode="light",
+            star_background=False, emoji_remote=False,
+        )
+        self.assertGreater(len(pages), 1)
+        for p in pages:
+            self.assertLessEqual(p.height, 3950)
+        one = MessageImageRenderer.render(
+            long_text, style="ios", theme_mode="light",
+            star_background=False, emoji_remote=False,
+        )
+        self.assertEqual(one.size, pages[0].size)
+        short = MessageImageRenderer.render_pages(
+            "短文本", style="ios", theme_mode="light",
+            star_background=False, emoji_remote=False,
+        )
+        self.assertEqual(len(short), 1)
 
     def test_ios_emoji_download_offline(self):
         """无网络时 iOS 下载如实失败，不写 ready 标记，不虚标已下载"""

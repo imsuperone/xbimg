@@ -16,7 +16,6 @@ import math
 import os
 import random
 import re
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -603,10 +602,6 @@ def clear_font_cache():
     except Exception:
         pass
     try:
-        _NORMAL_CACHE.clear()
-    except Exception:
-        pass
-    try:
         import gc
         gc.collect()
     except Exception:
@@ -934,63 +929,8 @@ def _load_font_file(path: str, size: int) -> Optional[ImageFont.FreeTypeFont]:
         return None
 
 
-# 整图普通字体回退开关（线程隔离：render 走 asyncio.to_thread，每个渲染线程独立）
-_TLS = threading.local()
-# 文本含这些文种即需要中文字体
-_CJK_NEEDED_RE = re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]")
-_NORMAL_CACHE: Dict[Tuple, Any] = {}
-
-
-def _should_force_normal(text: str) -> bool:
-    """文本需要中文但当前主字体缺中文（如哥特装饰体）时，整图改用普通字体输出"""
-    try:
-        if not text or not _CJK_NEEDED_RE.search(text):
-            return False
-        probe = get_font(30)
-        return not _font_covers(probe, "永")
-    except Exception:
-        return False
-
-
-def _normal_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """普通中文字体：链中首个含中文的字体（自动跳过装饰字体），粗体优先粗字重"""
-    key = (size, bool(bold))
-    hit = _NORMAL_CACHE.get(key)
-    if hit is not None:
-        return hit
-    cands = _fallback_font_paths()
-    if bold:
-        cands = sorted(cands, key=lambda p: (not _is_bold_font_name(os.path.basename(p or ""))))
-    for cand in cands:
-        try:
-            f = _load_font_file(cand, size)
-        except Exception:
-            continue
-        if f is not None:
-            try:
-                if _font_covers(f, "永"):
-                    if len(_NORMAL_CACHE) > 64:
-                        _NORMAL_CACHE.clear()
-                    _NORMAL_CACHE[key] = f
-                    return f
-            except Exception:
-                continue
-    f = ImageFont.load_default()
-    _NORMAL_CACHE[key] = f
-    return f
-
-
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """获取 CJK 字体。优先级：配置生效集（自定义/下载/系统）→ import 时探测结果。
-
-    整图普通字体回退生效期间（_TLS.force_normal），直接返回普通中文字体，
-    避免装饰字体导致整图风格割裂与排版错位。
-    """
-    if getattr(_TLS, "force_normal", False):
-        try:
-            return _normal_font(size, bold)
-        except Exception:
-            pass
+    """获取 CJK 字体。优先级：配置生效集（自定义/下载/系统）→ import 时探测结果。"""
     cache_key = (size, bold)
     if cache_key in _FONT_CACHE:
         return _FONT_CACHE[cache_key]
@@ -1134,6 +1074,27 @@ def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
         return _char_advance(_resolve_char_font(ch, font), ch)
     except Exception:
         return _char_advance(font, ch)
+
+
+def _text_advance(font: ImageFont.FreeTypeFont, s: str) -> float:
+    """整串推进宽度：无缺字时走整串测量（与旧逻辑逐字节一致，含字距），
+    含缺字时逐字回退计量，与混排绘制一致"""
+    try:
+        need_fallback = False
+        for c in s:
+            if c.isspace() or ord(c) < 0x20 or c in _BLANK_PASSTHROUGH:
+                continue
+            if not _font_covers(font, c):
+                need_fallback = True
+                break
+        if not need_fallback:
+            return _text_size(font, s)[0]
+        return float(sum(_adv_text(font, c) for c in s))
+    except Exception:
+        try:
+            return _text_size(font, s)[0]
+        except Exception:
+            return 0.0
 
 
 _INK_CACHE: Dict[Tuple, float] = {}
@@ -1860,6 +1821,60 @@ def _text_size(font: ImageFont.FreeTypeFont, s: str) -> Tuple[float, float]:
     return w, h
 
 
+# 单页内容高度上限（超出则分页输出多图，不再丢弃截断）；页数上限防病态超长 OOM
+MAX_CONTENT_PAGES = 10
+
+
+def _continuation_line(idx: int, total: int, font_scale: int = 100):
+    """非末页末尾的“未完待续”行"""
+    fs = max(6, int(round(26 * int(font_scale or 100) / 100)))
+    return (
+        f"⬇️ 未完待续（{idx + 1}/{total}）",
+        LineBlock(text="…", block_type="text", font_size=fs, is_bold=False),
+        int(fs * 1.56),
+    )
+
+
+def _truncated_line(font_scale: int = 100):
+    """病态超长（超页数上限）兜底截断行"""
+    fs = max(6, int(round(26 * int(font_scale or 100) / 100)))
+    return (
+        "… 内容过长已截断 …",
+        LineBlock(text="…", block_type="text", font_size=fs, is_bold=False),
+        int(fs * 1.56),
+    )
+
+
+def _split_content_pages(rendered_lines, max_content: float, font_scale: int = 100, max_pages: int = MAX_CONTENT_PAGES):
+    """按单页高度上限切分排版行；非末页追加未完待续行，超页数上限末页追加截断行"""
+    pages: List[List[Tuple[str, LineBlock, int]]] = []
+    cur: List[Tuple[str, LineBlock, int]] = []
+    cur_h = 0
+    for entry in rendered_lines:
+        _, _, lh = entry
+        if cur and cur_h + lh > max_content:
+            pages.append(cur)
+            cur = []
+            cur_h = 0
+        cur.append(entry)
+        cur_h += lh
+    if cur:
+        pages.append(cur)
+    if not pages:
+        pages = [[]]
+    total = len(pages)
+    out = []
+    for idx, pg in enumerate(pages[:max_pages]):
+        last = idx == min(total, max_pages) - 1
+        if not last:
+            out.append(list(pg) + [_continuation_line(idx, min(total, max_pages), font_scale)])
+        elif total > max_pages:
+            out.append(list(pg) + [_truncated_line(font_scale)])
+        else:
+            out.append(pg)
+    return out
+
+
 class MessageImageRenderer:
     @classmethod
     def render(
@@ -1877,142 +1892,36 @@ class MessageImageRenderer:
         font_scale: int = 100,  # 字体百分比 70-150
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
     ) -> Image.Image:
-        """渲染入口：用户配了装饰字体（如哥特体）但文本需要中文时，
-        整图改用普通字体输出，保证风格统一与排版宽度一致。"""
-        force = _should_force_normal(text)
-        if force:
-            _TLS.force_normal = True
-        try:
-            return cls._render_impl(
-                text=text, style=style, theme_mode=theme_mode,
-                star_background=star_background, star_density=star_density,
-                mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
-                violation_words=violation_words, emoji_remote=emoji_remote,
-                mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
-                emoji_style=emoji_style,
-            )
-        finally:
-            if force:
-                _TLS.force_normal = False
-
-    @classmethod
-    def _render_impl(
-        cls,
-        text: str,
-        style: str = "ios",
-        theme_mode: str = "light",
-        star_background: bool = True,
-        star_density: str = "medium",
-        mosaic_mode: str = "none",  # "none", "half", "full"
-        mosaic_type: str = "pixel",  # "pixel", "blur"
-        violation_words: Optional[List[str]] = None,
-        emoji_remote: bool = True,  # 缺失 emoji 是否云端自动补全
-        mosaic_half_pos: str = "bottom",  # half 模式打码位置: bottom/top/random
-        font_scale: int = 100,  # 字体百分比 70-150
-        emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
-    ) -> Image.Image:
-        # 1. 参数归一化（先 lower 再校验，兼容 "IOS"/"Light" 等大小写）
-        text = str(text or "").strip()
-        style = str(style or "ios").lower()
-        if style not in ("ios", "android16"):
-            style = "ios"
-        theme_mode = str(theme_mode or "light").lower()
-        if theme_mode not in ("light", "dark"):
-            theme_mode = "light"
-        theme = THEMES.get((style, theme_mode), THEMES[("ios", "light")])
-        mosaic_half_pos = str(mosaic_half_pos or "bottom").lower()
-        if mosaic_half_pos not in ("top", "bottom", "random"):
-            mosaic_half_pos = "bottom"
-        try:
-            font_scale = int(font_scale)
-        except Exception:
-            font_scale = 100
-        font_scale = max(50, min(500, font_scale))
-        _sc = lambda v: max(6, int(round(v * font_scale / 100)))
-        # emoji 样式归一化（兼容旧 bool）
-        if emoji_style is None:
-            # 兼容旧调用：emoji_remote bool
-            if isinstance(emoji_remote, str):
-                emoji_style = str(emoji_remote).lower()
-                if emoji_style not in ("none", "ios", "android", "windows"):
-                    emoji_style = _EMOJI_STYLE
-            else:
-                emoji_style = _EMOJI_STYLE if _EMOJI_STYLE in ("none", "ios", "android", "windows") else ("android" if bool(emoji_remote) else "none")
-        else:
-            emoji_style = str(emoji_style).lower()
-            if emoji_style not in ("none", "ios", "android", "windows"):
-                emoji_style = "none"
-        # 是否允许云端
-        emoji_remote_eff = emoji_style != "none"
-
-        # 2. 动态自适应卡片宽度（支持字体百分比缩放自适应撑缩）
-        blocks = _parse_content_blocks(text)
-        if font_scale != 100:
-            for b in blocks:
-                b.font_size = _sc(b.font_size)
-
-        max_natural_w = 0.0
-        for b in blocks:
-            if not b.text or b.block_type == "divider":
-                continue
-            font = get_font(b.font_size, bold=b.is_bold)
-            w, _ = _text_size(font, b.text)
-            if w > max_natural_w:
-                max_natural_w = w
-
-        # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔
-        scale_ratio = font_scale / 100.0
-        inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
-        min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
-        max_w = max(min_w + 120, int(round(960 * min(2.8, max(0.75, scale_ratio)))))
-        card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
-        content_w = card_w - inner_pad_x * 2
-
-        rendered_lines: List[Tuple[str, LineBlock, int]] = []
-        for b in blocks:
-            if b.block_type == "divider":
-                rendered_lines.append(("", b, 24))
-                continue
-            font = get_font(b.font_size, bold=b.is_bold)
-            if not b.text:
-                rendered_lines.append(("", b, int(b.font_size * 0.8)))
-                continue
-
-            sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
-            line_h = int(b.font_size * 1.56)
-            for sl in sub_lines:
-                rendered_lines.append((sl, b, line_h))
-
-        # 3. 计算高度与留白（上下对齐：顶部 header 与底部 footer 对称留白）
-        content_h = sum(lh for _, _, lh in rendered_lines)
-        header_h = 52 if style == "ios" else 40
-        card_inner_pad_y = 24
-        footer_gap = 14  # 正文与底部分割线间距（与顶部 header->正文 10px 对称）
-        foot_font_tmp = get_font(11, bold=False)
-        _, foot_fh = _text_size(foot_font_tmp, "Ag")
-        foot_fh = max(12, int(foot_fh) or 12)
-        footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
-        card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
-        # 500% 极限防护：卡片过高直接截断，避免 OOM/浏览器卡死
-        if card_h > 3800:
-            # 按比例压缩内容高度（保留头部/底部）
-            max_content = 3800 - (card_inner_pad_y*2 + header_h + footer_gap + footer_block)
-            if content_h > max_content:
-                # 截断 rendered_lines
-                acc = 0
-                cut_idx = 0
-                for i, (_, _, lh) in enumerate(rendered_lines):
-                    if acc + lh > max_content:
-                        cut_idx = i
-                        break
-                    acc += lh
-                if cut_idx:
-                    rendered_lines = rendered_lines[:cut_idx]
-                    # 追加省略提示
-                    ellipsis_font = get_font(_sc(26), bold=False)
-                    rendered_lines.append(("… 内容过长已截断 …", LineBlock(text="…", block_type="text", font_size=_sc(26), is_bold=False), int(_sc(26)*1.56)))
-                    content_h = sum(lh for _, _, lh in rendered_lines)
-                    card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
+        ctx = cls._prepare_layout(
+            text=text, style=style, theme_mode=theme_mode,
+            mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
+            emoji_remote=emoji_remote, emoji_style=emoji_style,
+        )
+        # 解包单页直绘所需局部量（与旧逻辑一致，保证单页输出逐字节不变）
+        text = ctx["text"]
+        style = ctx["style"]
+        theme = ctx["theme"]
+        theme_mode = ctx["theme_mode"]
+        mosaic_half_pos = ctx["mosaic_half_pos"]
+        font_scale = ctx["font_scale"]
+        emoji_style = ctx["emoji_style"]
+        emoji_remote_eff = ctx["emoji_remote_eff"]
+        card_w = ctx["card_w"]
+        content_w = ctx["content_w"]
+        header_h = ctx["header_h"]
+        card_inner_pad_y = ctx["card_inner_pad_y"]
+        footer_gap = ctx["footer_gap"]
+        footer_block = ctx["footer_block"]
+        foot_fh = ctx["foot_fh"]
+        inner_pad_x = ctx["inner_pad_x"]
+        content_h = ctx["content_h"]
+        card_h = ctx["card_h"]
+        rendered_lines = ctx["rendered_lines"]
+        max_content = ctx["max_content"]
+        # 超长分页：单页内容上限，超限分页输出多图，不再丢弃截断
+        pages = _split_content_pages(rendered_lines, max_content, font_scale)
+        if len(pages) > 1:
+            return cls._draw_page(ctx, pages[0], 0, len(pages))
 
         margin_x = 36
         margin_y = 36
@@ -2159,6 +2068,345 @@ class MessageImageRenderer:
         c_draw.line([(inner_pad_x, footer_line_y), (card_w - inner_pad_x, footer_line_y)], fill=theme.divider, width=1)
         foot_font = get_font(11, bold=False)
         ft_text = "Generated by xbimg"
+        c_draw.text((inner_pad_x, footer_line_y + 8), ft_text, font=foot_font, fill=theme.text_muted)
+
+        # 11. 处理违规马赛克（字级精准半打码：支持上/下/随机）
+        if mosaic_mode in ("half", "full") and all_char_positions:
+            cls._apply_word_level_mosaic(
+                card_surface=card_surface,
+                all_char_positions=all_char_positions,
+                text=text,
+                violation_words=violation_words or [],
+                mosaic_mode=mosaic_mode,
+                mosaic_type=mosaic_type,
+                theme=theme,
+                card_w=card_w,
+                mosaic_half_pos=mosaic_half_pos,
+            )
+
+        # 12. 将卡片合成到画布上
+        canvas.paste(card_surface, (margin_x, margin_y), card_surface)
+
+        return canvas.convert("RGB")
+
+    @classmethod
+    def _prepare_layout(
+        cls,
+        text: str = "",
+        style: str = "ios",
+        theme_mode: str = "light",
+        mosaic_half_pos: str = "bottom",
+        font_scale: int = 100,
+        emoji_remote: bool = True,
+        emoji_style: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
+        返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
+        # 1. 参数归一化（先 lower 再校验，兼容 "IOS"/"Light" 等大小写）
+        text = str(text or "").strip()
+        style = str(style or "ios").lower()
+        if style not in ("ios", "android16"):
+            style = "ios"
+        theme_mode = str(theme_mode or "light").lower()
+        if theme_mode not in ("light", "dark"):
+            theme_mode = "light"
+        theme = THEMES.get((style, theme_mode), THEMES[("ios", "light")])
+        mosaic_half_pos = str(mosaic_half_pos or "bottom").lower()
+        if mosaic_half_pos not in ("top", "bottom", "random"):
+            mosaic_half_pos = "bottom"
+        try:
+            font_scale = int(font_scale)
+        except Exception:
+            font_scale = 100
+        font_scale = max(50, min(500, font_scale))
+        _sc = lambda v: max(6, int(round(v * font_scale / 100)))
+        # emoji 样式归一化（兼容旧 bool）
+        if emoji_style is None:
+            # 兼容旧调用：emoji_remote bool
+            if isinstance(emoji_remote, str):
+                emoji_style = str(emoji_remote).lower()
+                if emoji_style not in ("none", "ios", "android", "windows"):
+                    emoji_style = _EMOJI_STYLE
+            else:
+                emoji_style = _EMOJI_STYLE if _EMOJI_STYLE in ("none", "ios", "android", "windows") else ("android" if bool(emoji_remote) else "none")
+        else:
+            emoji_style = str(emoji_style).lower()
+            if emoji_style not in ("none", "ios", "android", "windows"):
+                emoji_style = "none"
+        # 是否允许云端
+        emoji_remote_eff = emoji_style != "none"
+
+        # 2. 动态自适应卡片宽度（支持字体百分比缩放自适应撑缩）
+        blocks = _parse_content_blocks(text)
+        if font_scale != 100:
+            for b in blocks:
+                b.font_size = _sc(b.font_size)
+
+        max_natural_w = 0.0
+        for b in blocks:
+            if not b.text or b.block_type == "divider":
+                continue
+            font = get_font(b.font_size, bold=b.is_bold)
+            w = _text_advance(font, b.text)
+            if w > max_natural_w:
+                max_natural_w = w
+
+        # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔
+        scale_ratio = font_scale / 100.0
+        inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
+        min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
+        max_w = max(min_w + 120, int(round(960 * min(2.8, max(0.75, scale_ratio)))))
+        card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
+        content_w = card_w - inner_pad_x * 2
+
+        rendered_lines: List[Tuple[str, LineBlock, int]] = []
+        for b in blocks:
+            if b.block_type == "divider":
+                rendered_lines.append(("", b, 24))
+                continue
+            font = get_font(b.font_size, bold=b.is_bold)
+            if not b.text:
+                rendered_lines.append(("", b, int(b.font_size * 0.8)))
+                continue
+
+            sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
+            line_h = int(b.font_size * 1.56)
+            for sl in sub_lines:
+                rendered_lines.append((sl, b, line_h))
+
+        # 3. 计算高度与留白（上下对齐：顶部 header 与底部 footer 对称留白）
+        content_h = sum(lh for _, _, lh in rendered_lines)
+        header_h = 52 if style == "ios" else 40
+        card_inner_pad_y = 24
+        footer_gap = 14  # 正文与底部分割线间距（与顶部 header->正文 10px 对称）
+        foot_font_tmp = get_font(11, bold=False)
+        _, foot_fh = _text_size(foot_font_tmp, "Ag")
+        foot_fh = max(12, int(foot_fh) or 12)
+        footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
+        card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
+        max_content = 3800 - (card_inner_pad_y*2 + header_h + footer_gap + footer_block)
+        return {
+            "text": text, "style": style, "theme": theme, "theme_mode": theme_mode,
+            "mosaic_half_pos": mosaic_half_pos, "font_scale": font_scale,
+            "emoji_style": emoji_style, "emoji_remote_eff": emoji_remote_eff,
+            "card_w": card_w, "content_w": content_w, "header_h": header_h,
+            "card_inner_pad_y": card_inner_pad_y, "footer_gap": footer_gap,
+            "footer_block": footer_block, "foot_fh": foot_fh,
+            "inner_pad_x": inner_pad_x, "content_h": content_h, "card_h": card_h,
+            "rendered_lines": rendered_lines, "max_content": max_content,
+        }
+
+    @classmethod
+    def render_pages(
+        cls,
+        text: str = "",
+        style: str = "ios",
+        theme_mode: str = "light",
+        star_background: bool = True,
+        star_density: str = "medium",
+        mosaic_mode: str = "none",
+        mosaic_type: str = "pixel",
+        violation_words: Optional[List[str]] = None,
+        emoji_remote: bool = True,
+        mosaic_half_pos: str = "bottom",
+        font_scale: int = 100,
+        emoji_style: Optional[str] = None,
+    ) -> List[Image.Image]:
+        """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表"""
+        ctx = cls._prepare_layout(
+            text=text, style=style, theme_mode=theme_mode,
+            mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
+            emoji_remote=emoji_remote, emoji_style=emoji_style,
+        )
+        pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
+        total = len(pages)
+        return [
+            cls._draw_page(
+                ctx, pg, idx, total,
+                star_background=star_background, star_density=star_density,
+                mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
+                mosaic_half_pos=ctx["mosaic_half_pos"],
+                violation_words=violation_words,
+                emoji_remote_eff=ctx["emoji_remote_eff"],
+                emoji_style=ctx["emoji_style"],
+            )
+            for idx, pg in enumerate(pages)
+        ]
+
+    @classmethod
+    def _draw_page(
+        cls,
+        ctx: Dict[str, Any],
+        page_lines: List[Tuple[str, LineBlock, int]],
+        page_idx: int,
+        total_pages: int,
+        star_background: bool = True,
+        star_density: str = "medium",
+        mosaic_mode: str = "none",
+        mosaic_type: str = "pixel",
+        mosaic_half_pos: str = "bottom",
+        violation_words: Optional[List[str]] = None,
+        emoji_remote_eff: bool = True,
+        emoji_style: str = "none",
+    ) -> Image.Image:
+        """绘制单页卡片（render 单页直绘与 render_pages 共用，逻辑一致）"""
+        style = ctx["style"]
+        theme = ctx["theme"]
+        theme_mode = ctx["theme_mode"]
+        text = ctx["text"]
+        card_w = ctx["card_w"]
+        header_h = ctx["header_h"]
+        card_inner_pad_y = ctx["card_inner_pad_y"]
+        footer_gap = ctx["footer_gap"]
+        footer_block = ctx["footer_block"]
+        inner_pad_x = ctx["inner_pad_x"]
+        content_h = sum(lh for _, _, lh in page_lines)
+        card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
+        margin_x = 36
+        margin_y = 36
+        canvas_w = card_w + margin_x * 2
+        canvas_h = card_h + margin_y * 2
+
+        # 4. 极速生成背景渐变
+        canvas = _fast_linear_gradient(canvas_w, canvas_h, theme.bg_gradient_start, theme.bg_gradient_end)
+
+        # 5. 星空微粒背景 (主要散布在卡片外部留白与边缘四周，避免在卡片文字区域形成杂乱噪点)
+        if star_background:
+            star_counts = {"sparse": 18, "medium": 36, "dense": 60}
+            count = star_counts.get(star_density, 36)
+            star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+            s_draw = ImageDraw.Draw(star_layer)
+
+            rng = random.Random(_stable_seed(text))
+            for _ in range(count):
+                zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
+                if zone == "top":
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(8, max(margin_y + 12, 40))
+                elif zone == "bottom":
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(min(margin_y + card_h - 12, canvas_h - 40), canvas_h - 8)
+                elif zone == "left":
+                    sx = rng.uniform(8, max(margin_x + 12, 40))
+                    sy = rng.uniform(8, canvas_h - 8)
+                elif zone == "right":
+                    sx = rng.uniform(min(margin_x + card_w - 12, canvas_w - 40), canvas_w - 8)
+                    sy = rng.uniform(8, canvas_h - 8)
+                else:
+                    sx = rng.uniform(8, canvas_w - 8)
+                    sy = rng.uniform(8, canvas_h - 8)
+
+                s_radius = rng.uniform(2.8, 8.5)
+                s_color = rng.choice(theme.star_colors)
+                s_alpha = rng.randint(85, 200)
+                st_type = rng.choice(["sparkle", "cross", "diamond"])
+                _draw_star_sparkle(s_draw, sx, sy, s_radius, s_color, s_alpha, st_type)
+
+            canvas = Image.alpha_composite(canvas, star_layer)
+
+        # 6. 轻量柔和卡片投影（同尺寸直接复用缓存）
+        corner_radius = 24 if style == "ios" else 32
+        blur_rad = 14
+        pad = blur_rad * 2
+        shadow_img = _get_card_shadow(card_w, card_h, corner_radius, theme.card_shadow, blur_rad)
+        canvas.paste(shadow_img, (margin_x - pad, margin_y - pad), shadow_img)
+
+        # 7. 绘制卡片底板
+        card_surface = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+        c_draw = ImageDraw.Draw(card_surface)
+
+        c_draw.rounded_rectangle(
+            [0, 0, card_w, card_h],
+            radius=corner_radius,
+            fill=theme.card_bg,
+            outline=theme.card_border,
+            width=2 if style == "ios" else 1,
+        )
+
+        # 8. 绘制顶部栏
+        cur_y = card_inner_pad_y
+
+        if style == "ios":
+            dot_y = cur_y + 12
+            dot_r = 5.5
+            c_draw.ellipse([inner_pad_x, dot_y - dot_r, inner_pad_x + dot_r * 2, dot_y + dot_r], fill=(255, 95, 87))
+            c_draw.ellipse([inner_pad_x + 18, dot_y - dot_r, inner_pad_x + 18 + dot_r * 2, dot_y + dot_r], fill=(254, 188, 46))
+            c_draw.ellipse([inner_pad_x + 36, dot_y - dot_r, inner_pad_x + 36 + dot_r * 2, dot_y + dot_r], fill=(40, 200, 64))
+
+            time_font = get_font(13, bold=False)
+            time_str = time.strftime("%H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        else:
+            # Android 16：无品牌顶栏，仅右侧时间（头像/账号已移除）
+            time_font = get_font(12, bold=False)
+            time_str = time.strftime("%m-%d %H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 10), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        # 9. 绘制正文内容
+        content_x = inner_pad_x
+        # 所有已绘制字符的位置信息 [(char_x, char_w, char_y, char_str, line_h), ...]
+        all_char_positions: List[Tuple[float, float, float, str, int]] = []
+
+        for wrap_line, block, line_h in page_lines:
+            if block.block_type == "divider":
+                div_y = cur_y + line_h // 2
+                c_draw.line([(content_x, div_y), (card_w - content_x, div_y)], fill=theme.divider, width=1)
+                cur_y += line_h
+                continue
+
+            if not wrap_line:
+                cur_y += line_h
+                continue
+
+            font = get_font(block.font_size, bold=block.is_bold)
+
+            if block.block_type == "code":
+                c_draw.rounded_rectangle(
+                    [content_x - 6, cur_y - 2, card_w - content_x + 6, cur_y + line_h - 2],
+                    radius=6,
+                    fill=theme.code_bg,
+                    outline=theme.code_border,
+                    width=1,
+                )
+                positions = _draw_mixed_text(card_surface, c_draw, content_x + 6, cur_y, wrap_line, font, theme.code_text, block.font_size, emoji_remote_eff, emoji_style)
+                for px, pw, py, pc in positions:
+                    all_char_positions.append((px, pw, py, pc, line_h))
+            elif block.block_type == "quote":
+                c_draw.rounded_rectangle([content_x, cur_y, content_x + 3, cur_y + line_h - 4], radius=2, fill=theme.accent)
+                positions = _draw_mixed_text(card_surface, c_draw, content_x + 14, cur_y, wrap_line, font, theme.text_secondary, block.font_size, emoji_remote_eff, emoji_style)
+                for px, pw, py, pc in positions:
+                    all_char_positions.append((px, pw, py, pc, line_h))
+            elif block.block_type == "bullet":
+                positions = _draw_mixed_text(card_surface, c_draw, content_x + 4, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+                for px, pw, py, pc in positions:
+                    all_char_positions.append((px, pw, py, pc, line_h))
+            elif block.block_type.startswith("heading"):
+                heading_color = theme.accent if (style == "android16" and block.block_type == "heading1") else theme.text_primary
+                positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, heading_color, block.font_size, emoji_remote_eff, emoji_style)
+                for px, pw, py, pc in positions:
+                    all_char_positions.append((px, pw, py, pc, line_h))
+            else:
+                positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+                for px, pw, py, pc in positions:
+                    all_char_positions.append((px, pw, py, pc, line_h))
+
+            cur_y += line_h
+
+        # 10. 绘制高雅极简 Footer（移动到左下角，多页时标注页码）
+        # cur_y 此时为正文结束位置
+        footer_line_y = cur_y + footer_gap
+        c_draw.line([(inner_pad_x, footer_line_y), (card_w - inner_pad_x, footer_line_y)], fill=theme.divider, width=1)
+        foot_font = get_font(11, bold=False)
+        ft_text = "Generated by xbimg" + (f" · ({page_idx + 1}/{total_pages})" if total_pages > 1 else "")
         c_draw.text((inner_pad_x, footer_line_y + 8), ft_text, font=foot_font, fill=theme.text_muted)
 
         # 11. 处理违规马赛克（字级精准半打码：支持上/下/随机）
