@@ -1494,39 +1494,33 @@ async def render_text_to_image(text: str):
       _lastActiveTab = tabId;
     }
     document.querySelectorAll(".cat-tab").forEach((t) => {
-      if (t.getAttribute("data-tab") === tabId) {
-        t.classList.add("active");
-      } else {
-        t.classList.remove("active");
-      }
+      t.classList.toggle("active", t.getAttribute("data-tab") === tabId);
+    });
+
+    // 所有页（含预览页）统一按 data-section 显隐，预览页以前漏了这步导致点不开
+    document.querySelectorAll(".settings-section").forEach((sec) => {
+      sec.classList.toggle("active", sec.getAttribute("data-section") === tabId);
     });
 
     const workspace = document.getElementById("mainWorkspace");
     const isMobile = window.innerWidth <= 900;
+    const mobBtn = document.getElementById("mobileFloatPreviewBtn");
 
     if (tabId === "preview") {
       if (isMobile) {
         if (workspace) workspace.classList.add("mobile-view-preview");
-        const mobBtn = document.getElementById("mobileFloatPreviewBtn");
         if (mobBtn) mobBtn.innerHTML = `<span>⚙️ 返回配置</span>`;
       } else {
-        const prevCol = document.getElementById("previewColumn");
-        if (prevCol) {
-          prevCol.scrollIntoView({ behavior: "smooth", block: "start" });
+        const prevSec = document.getElementById("previewSection");
+        if (prevSec && prevSec.scrollIntoView) {
+          try {
+            prevSec.scrollIntoView({ behavior: "smooth", block: "start" });
+          } catch (e) {}
         }
       }
     } else {
       if (workspace) workspace.classList.remove("mobile-view-preview");
-      const mobBtn = document.getElementById("mobileFloatPreviewBtn");
       if (mobBtn) mobBtn.innerHTML = `<span>👁️ 实时预览</span>`;
-
-      document.querySelectorAll(".settings-section").forEach((sec) => {
-        if (sec.getAttribute("data-section") === tabId) {
-          sec.classList.add("active");
-        } else {
-          sec.classList.remove("active");
-        }
-      });
     }
   }
 

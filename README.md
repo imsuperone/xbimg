@@ -4,7 +4,7 @@
 
 - 📦 项目主页：https://github.com/imsuperone/xbimg
 - 🔌 插件 ID：`astrbot_plugin_xbimg`
-- 📌 版本：`v1.0.16`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
+- 📌 版本：`v1.0.17`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
 
 ---
 
