@@ -120,10 +120,9 @@ def _clean_urls(urls: List[str]) -> List[str]:
     return out
 
 
-# 输出体积档位：新名 lossless / balanced / compact，兼容老值 low / medium / high
+# 输出体积档位：lossless / balanced / compact（中文为输入别名）
 _COMPRESS_CANON = {
     "lossless": "lossless", "balanced": "balanced", "compact": "compact",
-    "low": "lossless", "medium": "balanced", "high": "compact",
     "无损": "lossless", "原画": "lossless", "png": "lossless",
     "均衡": "balanced", "标准": "balanced",
     "省流": "compact", "紧凑": "compact", "极小": "compact",
@@ -1034,7 +1033,7 @@ class Msg2ImgPlugin(Star):
                 self.cfg_mgr.save()
                 yield event.plain_result("💾 文件体积优化已设为：均衡适中 (JPEG 92% · 推荐)")
             else:
-                yield event.plain_result("用法：/xbimg quality lossless / balanced / compact（兼容老值 low / medium / high）")
+                yield event.plain_result("用法：/xbimg quality lossless / balanced / compact")
         elif sub in ("link", "linkmode", "链接"):
             if arg in ("image", "as_image", "图", "图片"):
                 cfg["link_mode"] = "as_image"

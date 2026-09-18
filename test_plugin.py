@@ -569,14 +569,12 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_compress_level_mapping(self):
-        """体积档位改名：新值直通，老值无缝迁移"""
+        """体积档位：新值直通，未知值回落默认"""
         import main as main_mod
         self.assertEqual(main_mod._compress_level({"img_compress_level": "lossless"}), "lossless")
         self.assertEqual(main_mod._compress_level({"img_compress_level": "balanced"}), "balanced")
         self.assertEqual(main_mod._compress_level({"img_compress_level": "compact"}), "compact")
-        self.assertEqual(main_mod._compress_level({"img_compress_level": "low"}), "lossless")
-        self.assertEqual(main_mod._compress_level({"img_compress_level": "medium"}), "balanced")
-        self.assertEqual(main_mod._compress_level({"img_compress_level": "high"}), "compact")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "省流"}), "compact")
         self.assertEqual(main_mod._compress_level({}), "balanced")
         self.assertEqual(main_mod._compress_level({"img_compress_level": "???"}), "balanced")
 
