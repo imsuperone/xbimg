@@ -414,7 +414,7 @@ async def render_text_to_image(text: str):
       if (fontScaleVal) fontScaleVal.textContent = (cfg.font_scale || 100) + "%";
     }
 
-    setSegmentedValue("segImgCompress", cfg.img_compress_level || "medium");
+    setSegmentedValue("segImgCompress", cfg.img_compress_level || "balanced");
 
     const pageMaxHEl = document.getElementById("cfgPageMaxHeight");
     if (pageMaxHEl) pageMaxHEl.value = cfg.page_max_height || 3000;
@@ -561,7 +561,7 @@ async def render_text_to_image(text: str):
       custom_bold_font_path: cbfEl ? cbfEl.value.trim() : "",
       custom_font_url: cfUrlEl ? cfUrlEl.value.trim() : "",
       font_scale: fontScaleEl ? parseInt(fontScaleEl.value,10) || 100 : 100,
-      img_compress_level: getSegmentedValue("segImgCompress", "medium"),
+      img_compress_level: getSegmentedValue("segImgCompress", "balanced"),
       page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 3000; return Math.min(3800, Math.max(800, v || 3000)); })(),
       img_max_width: (()=>{ const el = document.getElementById("cfgImgMaxWidth"); if (!el || el.value === "") return 1080; const v = parseInt(el.value,10); return isNaN(v) ? 1080 : Math.min(3000, Math.max(0, v)); })(),
       card_max_width: (()=>{ const el = document.getElementById("cfgCardMaxWidth"); const v = el ? parseInt(el.value,10) : 680; return Math.min(1200, Math.max(480, v || 680)); })(),

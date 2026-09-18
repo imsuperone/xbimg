@@ -203,7 +203,11 @@ def _collect_font_candidates(extra_first: Optional[List[str]] = None) -> List[st
 
 
 _SYSTEM_CANDIDATES: Optional[List[str]] = None
-
+# 渲染缓存失效代际：任何字体/emoji 配置变更即递增，旧缓存自动作废
+_FONT_EPOCH = 0
+# 相同文本渲染结果缓存（主链路与适配器钩子常对同一文本各渲染一次，命中直接复用）
+_RENDER_CACHE: Dict[Tuple, List[Image.Image]] = {}
+_RENDER_CACHE_LIMIT = 12
 
 def _system_font_candidates() -> List[str]:
     """系统字体候选（目录扫描 + fc-list，开销大，进程内缓存；
@@ -438,7 +442,11 @@ def _rebuild_active_fonts():
 
 def configure_fonts(config: Optional[Dict[str, Any]], data_dir: Optional[Path] = None):
     """插件/配置变更入口：同步字体与 emoji 配置并重建候选集（只读文件，不下载）"""
-    global _FONT_DATA_DIR, _EMOJI_STYLE
+    global _FONT_DATA_DIR, _EMOJI_STYLE, _FONT_EPOCH
+    try:
+        _FONT_EPOCH += 1
+    except Exception:
+        pass
     if data_dir is not None:
         try:
             _FONT_DATA_DIR = Path(data_dir)
@@ -2098,6 +2106,32 @@ def _text_size(font: ImageFont.FreeTypeFont, s: str) -> Tuple[float, float]:
 MAX_CONTENT_PAGES = 10
 
 
+def _render_cache_key(text: str, style: str, theme_mode: str, star_background: bool,
+                      star_density: str, mosaic_mode: str, mosaic_type: str,
+                      mosaic_half_pos: str, violation_words, font_scale: int,
+                      emoji_style: str) -> tuple:
+    """渲染缓存键：文本哈希 + 全套渲染参数 + 当前分钟（顶栏时间参与输出）+ 字体代际"""
+    try:
+        h = hashlib.md5(str(text or "").encode("utf-8", "ignore")).hexdigest()
+    except Exception:
+        h = str(hash(text)) if text else ""
+    try:
+        vw = tuple(violation_words or [])
+    except Exception:
+        vw = ()
+    try:
+        minute = time.strftime("%H:%M")
+    except Exception:
+        minute = ""
+    try:
+        epoch = int(_FONT_EPOCH)
+    except Exception:
+        epoch = 0
+    return (h, style, theme_mode, bool(star_background), str(star_density),
+            mosaic_mode, mosaic_type, mosaic_half_pos, vw,
+            int(font_scale or 100), str(emoji_style), minute, epoch)
+
+
 def _continuation_line(idx: int, total: int, font_scale: int = 100):
     """非末页末尾的“未完待续”行"""
     fs = max(6, int(round(26 * int(font_scale or 100) / 100)))
@@ -2502,16 +2536,34 @@ class MessageImageRenderer:
         page_max_h: int = 3000,
         card_max_width: int = 680,
     ) -> List[Image.Image]:
-        """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表"""
+        """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表。
+
+        相同输入短时间内直接复用结果（主链路与适配器钩子常对同一文本各渲染一次）。
+        """
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
             page_max_h=page_max_h, card_max_width=card_max_width,
         )
+        try:
+            cache_key = _render_cache_key(
+                ctx["text"], ctx["style"], ctx["theme_mode"], star_background, star_density,
+                mosaic_mode, mosaic_type, ctx["mosaic_half_pos"], violation_words,
+                ctx["font_scale"], ctx["emoji_style"],
+            )
+        except Exception:
+            cache_key = None
+        if cache_key is not None:
+            try:
+                hit = _RENDER_CACHE.get(cache_key)
+                if hit:
+                    return list(hit)
+            except Exception:
+                pass
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)
-        return [
+        images = [
             cls._draw_page(
                 ctx, pg, idx, total,
                 star_background=star_background, star_density=star_density,
@@ -2523,6 +2575,15 @@ class MessageImageRenderer:
             )
             for idx, pg in enumerate(pages)
         ]
+        # 仅缓存小体量结果，避免大长图堆内存
+        if cache_key is not None and len(images) <= 2:
+            try:
+                if len(_RENDER_CACHE) >= _RENDER_CACHE_LIMIT:
+                    _RENDER_CACHE.pop(next(iter(_RENDER_CACHE)))
+                _RENDER_CACHE[cache_key] = list(images)
+            except Exception:
+                pass
+        return images
 
     @classmethod
     def _draw_page(

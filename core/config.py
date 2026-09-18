@@ -132,7 +132,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "keyword_presets": DEFAULT_KEYWORD_PRESETS,
     "builtin_presets_hash": "",
     "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
-    "img_compress_level": "medium",
+    "img_compress_level": "balanced",
     "page_max_height": 3000,
     "img_max_width": 1080,
     "card_max_width": 680,

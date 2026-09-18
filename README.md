@@ -4,7 +4,7 @@
 
 - 📦 项目主页：https://github.com/imsuperone/xbimg
 - 🔌 插件 ID：`astrbot_plugin_xbimg`
-- 📌 版本：`v1.0.12`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
+- 📌 版本：`v1.0.13`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
 
 ---
 
@@ -47,7 +47,7 @@
 | `/xbimg theme light` / `dark` | 全局浅色 / 深色 |
 | `/xbimg star on` / `off` | 星空背景开关 |
 | `/xbimg density sparse` / `medium` / `dense` | 星星密度 |
-| `/xbimg quality low` / `medium` / `high` | 原画无损 / 均衡 / 极小文件 |
+| `/xbimg quality lossless` / `balanced` / `compact` | 原画无损 / 均衡 / 极小文件 |
 | `/xbimg link image` / `text` / `append` | 链接转图 / 保持文本 / 转图+附链接 |
 | `/xbimg mod on` / `off` | 屏蔽词审查开关 |
 | `/xbimg ai on` / `off` | AI 审查独立开关 |

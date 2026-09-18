@@ -229,9 +229,13 @@ class ContentModerator:
             reason = str(obj.get("reason", "") or "").strip()
             return is_violated, reason
         except Exception:
-            # 如果不是标准 JSON，做基础意图推断（大小写不敏感）
+            # 非标返回兜底：只认明确违规表述。“true”这类弱信号不认，
+            # 否则模型说 "It's true this is safe" 也会被误杀
             low = raw_reply.lower()
-            if any(w in low for w in ["true", "违规", "不合规", "敏感", "禁止"]):
+            if any(w in low for w in ["违规", "不合规", "敏感", "禁止", "违法", "涉黄", "涉毒"]):
+                return True, "AI 判定可能违规"
+            compact = re.sub(r"\s+", "", low)
+            if '"violated":true' in compact or "'violated':true" in compact:
                 return True, "AI 判定可能违规"
             return False, ""
 

@@ -120,6 +120,25 @@ def _clean_urls(urls: List[str]) -> List[str]:
     return out
 
 
+# 输出体积档位：新名 lossless / balanced / compact，兼容老值 low / medium / high
+_COMPRESS_CANON = {
+    "lossless": "lossless", "balanced": "balanced", "compact": "compact",
+    "low": "lossless", "medium": "balanced", "high": "compact",
+    "无损": "lossless", "原画": "lossless", "png": "lossless",
+    "均衡": "balanced", "标准": "balanced",
+    "省流": "compact", "紧凑": "compact", "极小": "compact",
+}
+
+
+def _compress_level(cfg) -> str:
+    """归一化体积档位，老配置无缝迁移"""
+    try:
+        v = str(cfg.get("img_compress_level", "balanced") or "balanced").strip().lower()
+    except Exception:
+        v = "balanced"
+    return _COMPRESS_CANON.get(v, "balanced")
+
+
 class Msg2ImgPlugin(Star):
     def __init__(self, context: Context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
@@ -130,6 +149,7 @@ class Msg2ImgPlugin(Star):
         # 后台任务状态（__init__ 时往往没有 running loop，改为首次事件时懒启动）
         self._bg_started = False
         self._cache_stop_event: Optional[asyncio.Event] = None
+        self._bg_tasks: List[asyncio.Task] = []
         # 群白名单解析缓存：(mode, raw_list) -> tokens
         self._group_cache_sig: Optional[tuple] = None
         self._group_cache_tokens: List[str] = []
@@ -161,9 +181,27 @@ class Msg2ImgPlugin(Star):
             return
         self._bg_started = True
         self._cache_stop_event = asyncio.Event()
-        asyncio.create_task(self._clean_old_cache_periodic())
-        asyncio.create_task(self._hook_adapters_when_ready())
-        asyncio.create_task(self._ensure_fonts_once())
+        self._bg_tasks = [
+            asyncio.create_task(self._clean_old_cache_periodic()),
+            asyncio.create_task(self._hook_adapters_when_ready()),
+            asyncio.create_task(self._ensure_fonts_once()),
+        ]
+
+    async def terminate(self):
+        """插件卸载/停用时回收后台任务，避免重载后旧任务残留重复工作"""
+        try:
+            if self._cache_stop_event is not None:
+                self._cache_stop_event.set()
+        except Exception:
+            pass
+        for t in list(getattr(self, "_bg_tasks", []) or []):
+            try:
+                if not t.done():
+                    t.cancel()
+            except Exception:
+                pass
+        self._bg_started = False
+        self._bg_tasks = []
 
     async def _ensure_fonts_once(self):
         """首次进入仅引导，不自动下载（按用户要求默认不下载）"""
@@ -214,8 +252,11 @@ class Msg2ImgPlugin(Star):
         self._remember_group(event)
 
     async def _hook_adapters_when_ready(self):
-        """等待 AstrBot 平台适配器就绪后，无损挂载 send 拦截钩子"""
+        """等待适配器就绪后挂载钩子；之后每 60 秒巡检补扫，重连/晚连的适配器也能挂上"""
+        stop = self._cache_stop_event
         for _ in range(15):
+            if stop is not None and stop.is_set():
+                return
             await asyncio.sleep(2)
             try:
                 # 重试循环内强制新鲜扫描（不用 60s 缓存，否则首次空结果会堵住后续重试）
@@ -224,6 +265,18 @@ class Msg2ImgPlugin(Star):
                     for b in bots:
                         self._patch_bot_send(b)
                     break
+            except Exception:
+                pass
+        while stop is None or not stop.is_set():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                break
+            if stop is not None and stop.is_set():
+                break
+            try:
+                for b in self._find_all_bots(max_age=0):
+                    self._patch_bot_send(b)
             except Exception:
                 pass
 
@@ -236,12 +289,12 @@ class Msg2ImgPlugin(Star):
         if hasattr(bot_inst, "send_group_msg") and callable(getattr(bot_inst, "send_group_msg")):
             orig_send_group = bot_inst.send_group_msg
 
-            async def patched_send_group(group_id, message, **kwargs):
+            async def patched_send_group(group_id, message, *args, **kwargs):
                 try:
                     message = await self._transform_onebot_message(str(group_id), message)
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
-                return await orig_send_group(group_id=group_id, message=message, **kwargs)
+                return await orig_send_group(group_id=group_id, message=message, *args, **kwargs)
 
             bot_inst.send_group_msg = patched_send_group
 
@@ -339,7 +392,7 @@ class Msg2ImgPlugin(Star):
     async def _save_render_image(self, img) -> Optional[Path]:
         """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：45 秒后自动清理）"""
         cfg = self.cfg_mgr.config
-        lvl = str(cfg.get("img_compress_level", "medium") or "medium").lower()
+        lvl = _compress_level(cfg)
         # 手机屏适配：超宽图等比限宽（默认 1080，小米 13 这类 1080p 手机缩略图不再被裁）
         try:
             max_w = int(cfg.get("img_max_width", 1080) or 0)
@@ -353,13 +406,13 @@ class Msg2ImgPlugin(Star):
             pass
 
         # 三档压缩策略（全部确保清晰阅读，仅在体积与无损之间平衡，4:4:4 无色度抽样噪点，极速编码）
-        if lvl == "high":
+        if lvl == "compact":
             # 极小文件：高质量紧凑 JPEG (Q86) + 4:4:4 无抽样，体积极小无噪点
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.jpg"
             img_path = self.cache_dir / img_filename
             save_img = img.convert("RGB") if img.mode != "RGB" else img
             save_kwargs = {"format": "JPEG", "quality": 86, "subsampling": 0}
-        elif lvl == "low":
+        elif lvl == "lossless":
             # 原画无损：无损 PNG，低压缩比最高画质与极快保存
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}.png"
             img_path = self.cache_dir / img_filename
@@ -819,9 +872,9 @@ class Msg2ImgPlugin(Star):
         cfg = self.cfg_mgr.config
 
         comp_map = {
-            "high": "⚡ 极小文件 (省流紧凑)",
-            "medium": "⚖️ 均衡适中 (推荐)",
-            "low": "💎 原画无损 (高清大图)",
+            "compact": "⚡ 极小文件 (省流紧凑)",
+            "balanced": "⚖️ 均衡适中 (推荐)",
+            "lossless": "💎 原画无损 (高清大图)",
         }
         action_map = {
             "mosaic_half": "🎭 打一半马赛克",
@@ -855,7 +908,7 @@ class Msg2ImgPlugin(Star):
                 f"• 视觉风格：{cfg.get('style', 'ios').upper()}\n"
                 f"• 配色主题：{'🌞 浅色明亮' if cfg.get('theme_mode') == 'light' else '🌙 深色暗黑'}\n"
                 f"• 星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'} ({density_map.get(cfg.get('star_density', 'medium'), '标准')})\n"
-                f"• 文件体积：{comp_map.get(cfg.get('img_compress_level', 'medium'), '均衡适中')}\n"
+                f"• 文件体积：{comp_map.get(_compress_level(cfg), '均衡适中')}\n"
                 f"• 链接策略：{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
                 f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
                 f"• AI 审查开关：{'🤖 开启' if cfg.get('enable_ai_moderation') else '⚪ 关闭'}\n"
@@ -871,7 +924,7 @@ class Msg2ImgPlugin(Star):
                 "• /xbimg theme light / dark - 全局配色\n"
                 "• /xbimg star on / off - 背景星空开关\n"
                 "• /xbimg density sparse / medium / dense - 星星密度\n"
-                "• /xbimg quality low / medium / high - 输出文件大小档位\n"
+                "• /xbimg quality lossless / balanced / compact - 输出文件大小档位\n"
                 "• /xbimg link image / text / append - 链接策略\n"
                 "• /xbimg mod on / off - 屏蔽词审查开关\n"
                 "• /xbimg ai on / off - AI 审查独立开关\n"
@@ -967,20 +1020,21 @@ class Msg2ImgPlugin(Star):
             else:
                 yield event.plain_result("用法：/xbimg density sparse / medium / dense")
         elif sub in ("quality", "compress", "压缩", "文件大小"):
-            if arg in ("low", "原画", "无损", "png"):
-                cfg["img_compress_level"] = "low"
+            canon = _COMPRESS_CANON.get(arg.strip().lower(), "")
+            if canon == "lossless":
+                cfg["img_compress_level"] = "lossless"
                 self.cfg_mgr.save()
                 yield event.plain_result("💾 文件体积优化已设为：原画无损 (PNG · 最高画质)")
-            elif arg in ("high", "紧凑", "极小", "省流"):
-                cfg["img_compress_level"] = "high"
+            elif canon == "compact":
+                cfg["img_compress_level"] = "compact"
                 self.cfg_mgr.save()
                 yield event.plain_result("💾 文件体积优化已设为：极小文件 (JPEG 82% · 极致省流量)")
-            elif arg in ("medium", "标准", "均衡"):
-                cfg["img_compress_level"] = "medium"
+            elif canon == "balanced":
+                cfg["img_compress_level"] = "balanced"
                 self.cfg_mgr.save()
                 yield event.plain_result("💾 文件体积优化已设为：均衡适中 (JPEG 92% · 推荐)")
             else:
-                yield event.plain_result("用法：/xbimg quality low / medium / high")
+                yield event.plain_result("用法：/xbimg quality lossless / balanced / compact（兼容老值 low / medium / high）")
         elif sub in ("link", "linkmode", "链接"):
             if arg in ("image", "as_image", "图", "图片"):
                 cfg["link_mode"] = "as_image"

@@ -125,10 +125,10 @@
   },
   "img_compress_level": {
     "description": "输出图片文件存储大小优化",
-    "hint": "low: 原画无损 (PNG · 文件较大); medium: 均衡适中 (JPEG 92% · 推荐); high: 极小文件 (JPEG 82% · 极省流量)。仅优化文件存储字节体积（KB/MB），绝不改变长宽分辨率与排版清晰度。",
+    "hint": "lossless: 原画无损 (PNG · 文件较大); balanced: 均衡适中 (JPEG 92% · 推荐); compact: 极小文件 (JPEG 82% · 极省流量)。仅优化文件存储字节体积（KB/MB），绝不改变长宽分辨率与排版清晰度。",
     "type": "string",
-    "options": ["low", "medium", "high"],
-    "default": "medium"
+    "options": ["lossless", "balanced", "compact"],
+    "default": "balanced"
   },
   "page_max_height": {
     "description": "单页图片最大高度（像素）",

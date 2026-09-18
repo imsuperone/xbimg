@@ -568,6 +568,57 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._EMOJI_IMG_CACHE.clear()
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_compress_level_mapping(self):
+        """体积档位改名：新值直通，老值无缝迁移"""
+        import main as main_mod
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "lossless"}), "lossless")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "balanced"}), "balanced")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "compact"}), "compact")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "low"}), "lossless")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "medium"}), "balanced")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "high"}), "compact")
+        self.assertEqual(main_mod._compress_level({}), "balanced")
+        self.assertEqual(main_mod._compress_level({"img_compress_level": "???"}), "balanced")
+
+    def test_ai_fallback_no_true_trap(self):
+        """AI 非标返回兜底：孤立 true 不判违规，明确表述才判"""
+        from core.moderation import ContentModerator
+        mod = ContentModerator(dict(DEFAULT_CONFIG))
+        hit, _ = ContentModerator._parse_ai_decision("It's true this is safe, nothing wrong.")
+        self.assertFalse(hit)
+        hit, _ = ContentModerator._parse_ai_decision("经审查，内容违规，建议拦截。")
+        self.assertTrue(hit)
+        hit, _ = ContentModerator._parse_ai_decision('{"violated": true, "reason": "x"}')
+        self.assertTrue(hit)
+        hit, _ = ContentModerator._parse_ai_decision("一切正常。")
+        self.assertFalse(hit)
+        _ = mod
+
+    def test_render_cache_reuse(self):
+        """相同文本短时复用渲染结果"""
+        from core.renderer import MessageImageRenderer
+        kw = dict(text="缓存复用测试文本", style="ios", theme_mode="light",
+                  star_background=False, emoji_remote=False)
+        p1 = MessageImageRenderer.render_pages(**kw)
+        p2 = MessageImageRenderer.render_pages(**kw)
+        self.assertEqual(len(p1), len(p2))
+        self.assertIs(p1[0], p2[0])
+
+    def test_terminate_cleans_tasks(self):
+        """terminate 回收后台任务"""
+        import asyncio
+        from main import Msg2ImgPlugin
+
+        async def _t():
+            p = Msg2ImgPlugin(context=None, config=dict(DEFAULT_CONFIG))
+            p._ensure_bg_tasks()
+            self.assertEqual(len(p._bg_tasks), 3)
+            await p.terminate()
+            self.assertFalse(p._bg_started)
+            self.assertEqual(p._bg_tasks, [])
+
+        asyncio.run(_t())
+
     def test_mosaic_positions_char_aligned(self):
         """打码定位：VS16/ZWJ 簇拆成单字符条目，串定位与条目定位一致（防打码错位）"""
         from PIL import Image, ImageDraw
