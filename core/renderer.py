@@ -17,6 +17,7 @@ import os
 import random
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1127,14 +1128,81 @@ def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.Fr
                 if f is not None and _font_covers(f, ch):
                     res = f
                     break
-            if res is primary:
-                _note_uncovered(primary, ch)
     except Exception:
         res = primary
     if len(_RESOLVE_CACHE) > 8000:
         _RESOLVE_CACHE.clear()
     _RESOLVE_CACHE[key] = res
     return res
+
+
+_NFKC_MISSING = object()
+_NFKC_CACHE: Dict[str, Any] = {}
+
+
+def _nfc_fallback_char(ch: str, primary: ImageFont.FreeTypeFont) -> Optional[str]:
+    """数学花体/全角等特殊符号无字形时，退化为 NFKC 等价单字符（如 𝔖→S、Ｎ→N、①→1）。
+
+    等价字符优先用主字体绘制（风格统一，如哥特体 S），主字体也没有则链中字体兜底。
+    无等价形或等价形依然无字形时返回 None（保留原文，不乱改）。
+    """
+    if not ch or len(ch) != 1:
+        return None
+    try:
+        hit = _NFKC_CACHE.get(ch, _NFKC_MISSING)
+    except Exception:
+        hit = _NFKC_MISSING
+    if hit is not _NFKC_MISSING:
+        return hit
+    res = None
+    try:
+        norm = unicodedata.normalize("NFKC", ch)
+        if norm and len(norm) == 1 and norm != ch:
+            if _font_covers(primary, norm):
+                res = norm
+            else:
+                size = getattr(primary, "size", 26) or 26
+                for cand in _fallback_font_paths():
+                    try:
+                        f = _load_font_file(cand, size)
+                    except Exception:
+                        continue
+                    if f is not None and _font_covers(f, norm):
+                        res = norm
+                        break
+    except Exception:
+        res = None
+    try:
+        if len(_NFKC_CACHE) > 2000:
+            _NFKC_CACHE.clear()
+        _NFKC_CACHE[ch] = res
+    except Exception:
+        pass
+    return res
+
+
+def _draw_char_and_font(ch: str, primary: ImageFont.FreeTypeFont) -> Tuple[str, ImageFont.FreeTypeFont]:
+    """返回 (实际绘制字符, 字体)：缺字先按链回退字体；链中全无则 NFKC 等价形兜底；
+    仍无解才保留原字（tofu），并记一条诊断日志方便定位缺字库。"""
+    try:
+        f = _resolve_char_font(ch, primary)
+    except Exception:
+        return ch, primary
+    try:
+        if f is not primary or len(ch) != 1:
+            return ch, f
+        if _font_covers(primary, ch):
+            return ch, primary
+        alt = _nfc_fallback_char(ch, primary)
+        if alt is not None:
+            try:
+                return alt, _resolve_char_font(alt, primary)
+            except Exception:
+                return alt, primary
+        _note_uncovered(primary, ch)
+        return ch, primary
+    except Exception:
+        return ch, primary
 
 
 _TTFONT = None
@@ -1218,9 +1286,10 @@ def _note_uncovered(font, ch: str):
 
 
 def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
-    """正文字符推进宽度（含缺字回退，与实际绘制字体一致）"""
+    """正文字符推进宽度（含缺字回退与 NFKC 兜底，与实际绘制一致）"""
     try:
-        return _char_advance(_resolve_char_font(ch, font), ch)
+        dc, f = _draw_char_and_font(ch, font)
+        return _char_advance(f, dc)
     except Exception:
         return _char_advance(font, ch)
 
@@ -1799,8 +1868,8 @@ def _draw_mixed_text(
         measured: List[Tuple[str, Any, float]] = []
         for bc in batch_chars:
             if len(bc) == 1:
-                bf = _resolve_char_font(bc, font)
-                measured.append((bc, bf, _char_advance(bf, bc)))
+                dc, bf = _draw_char_and_font(bc, font)
+                measured.append((dc, bf, _char_advance(bf, dc)))
             else:
                 # 多字符簇不断开，整体跟随主字体（与旧逻辑一致）
                 measured.append((bc, font, sum(_char_advance(font, c) for c in bc) or float(font_size)))

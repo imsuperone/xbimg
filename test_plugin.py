@@ -492,6 +492,21 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         finally:
             _lg.disabled = _dis
 
+    def test_nfkc_fallback_draw(self):
+        """数学花体等无字形符号退化为 NFKC 等价形（𝔖→S），优先同风格绘制"""
+        from core import renderer as R
+        lat = R._load_font_file("C:/Windows/Fonts/arial.ttf", 32)
+        cjk = R.get_font(32)
+        self.assertEqual(R._nfc_fallback_char("𝔖", lat), "S")
+        self.assertEqual(R._nfc_fallback_char("Ｎ", lat), "N")
+        self.assertIsNone(R._nfc_fallback_char("中", lat))
+        self.assertIsNone(R._nfc_fallback_char("A", lat))
+        dc, f = R._draw_char_and_font("𝔖", lat)
+        self.assertEqual(dc, "S")
+        self.assertIs(f, lat)  # 主字体有 S，直接同风格绘制
+        dc2, _ = R._draw_char_and_font("中", cjk)
+        self.assertEqual(dc2, "中")
+
     def test_decorative_font_fallback(self):
         """装饰字体（缺 CJK）自动回退：拉丁跟随主字体，中文切链中字体，国旗成对不断开"""
         from core.renderer import (
