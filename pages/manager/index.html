@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.5" />
+  <link rel="stylesheet" href="./style.css?v=1.0.6" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.0.4</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.0.6</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -221,8 +221,8 @@
 
           <div class="form-group">
             <label class="form-label">单页图片最大高度（像素）</label>
-            <input type="number" id="cfgPageMaxHeight" class="m3-input" min="800" max="3800" step="100" value="2200" />
-            <span class="field-hint">超长内容按此高度分页输出多图；1080x2400 手机建议 2200。超限不再截断丢弃。</span>
+            <input type="number" id="cfgPageMaxHeight" class="m3-input" min="800" max="3800" step="100" value="3000" />
+            <span class="field-hint">超长内容按此高度分页输出多图；点开看长图长度不限。默认 3000。</span>
           </div>
 
           <div class="form-group">
@@ -630,6 +630,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.0.5"></script>
+  <script src="./app.js?v=1.0.6"></script>
 </body>
 </html>

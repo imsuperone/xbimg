@@ -307,9 +307,9 @@ class Msg2ImgPlugin(Star):
                 if _es == "android" and not str(cfg.get("emoji_style", "")):
                     _es = "none"
             try:
-                page_max_h = int(cfg.get("page_max_height", 2200) or 2200)
+                page_max_h = int(cfg.get("page_max_height", 3000) or 3000)
             except Exception:
-                page_max_h = 2200
+                page_max_h = 3000
             imgs = await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
                 text=full_text,

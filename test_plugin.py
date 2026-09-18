@@ -521,7 +521,8 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         )
         self.assertGreater(len(pages), 1)
         for p in pages:
-            self.assertLessEqual(p.height, 2500)
+            self.assertLessEqual(p.height, 3200)
+            self.assertLessEqual(p.width, 820)
         one = MessageImageRenderer.render(
             long_text, style="ios", theme_mode="light",
             star_background=False, emoji_remote=False,
@@ -539,6 +540,16 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertGreater(len(tiny), len(pages))
         for p in tiny:
             self.assertLessEqual(p.height, 1100)
+
+    def test_long_single_line_wraps_in_bubble(self):
+        """超长单行不横向撑出气泡：折行显示，保证手机缩略图完整"""
+        from core.renderer import MessageImageRenderer
+        line = "[虚妄]笑~忍神大人心情不错，看着面前楚楚可怜的[虚妄]，忍不住伸手摸了摸她的头又捏了捏她的脸。"
+        img = MessageImageRenderer.render(
+            line, style="ios", theme_mode="light",
+            star_background=False, emoji_remote=False,
+        )
+        self.assertLessEqual(img.width, 820)
 
     def test_save_image_width_clamp(self):
         """超宽图落盘限宽（默认 1080，手机缩略图不被裁）"""

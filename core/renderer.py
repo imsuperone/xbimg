@@ -1907,7 +1907,7 @@ class MessageImageRenderer:
         mosaic_half_pos: str = "bottom",  # half 模式打码位置: bottom/top/random
         font_scale: int = 100,  # 字体百分比 70-150
         emoji_style: Optional[str] = None,  # none/ios/android/windows，None 则用全局配置
-        page_max_h: int = 2200,  # 单页总高度上限（手机一屏看完为宜）
+        page_max_h: int = 3000,  # 单页总高度上限（点开看长图长度不限）
     ) -> Image.Image:
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
@@ -2117,7 +2117,7 @@ class MessageImageRenderer:
         font_scale: int = 100,
         emoji_remote: bool = True,
         emoji_style: Optional[str] = None,
-        page_max_h: int = 2200,
+        page_max_h: int = 3000,
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
@@ -2170,11 +2170,12 @@ class MessageImageRenderer:
             if w > max_natural_w:
                 max_natural_w = w
 
-        # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔
+        # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔；
+        # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）
         scale_ratio = font_scale / 100.0
         inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
         min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
-        max_w = max(min_w + 120, int(round(960 * min(2.8, max(0.75, scale_ratio)))))
+        max_w = max(min_w + 120, int(round(720 * min(2.8, max(0.75, scale_ratio)))))
         card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
         content_w = card_w - inner_pad_x * 2
 
@@ -2203,11 +2204,11 @@ class MessageImageRenderer:
         foot_fh = max(12, int(foot_fh) or 12)
         footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
         card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
-        # 单页总高度上限（默认 2200，手机一屏能看完；超限分页输出，不再丢弃截断）
+        # 单页总高度上限（默认 3000，点开看长图长度不限；超限分页输出，不再丢弃截断）
         try:
-            page_max_h = max(800, min(3800, int(page_max_h or 2200)))
+            page_max_h = max(800, min(3800, int(page_max_h or 3000)))
         except Exception:
-            page_max_h = 2200
+            page_max_h = 3000
         max_content = max(400, page_max_h - (card_inner_pad_y*2 + header_h + footer_gap + footer_block))
         return {
             "text": text, "style": style, "theme": theme, "theme_mode": theme_mode,
@@ -2235,7 +2236,7 @@ class MessageImageRenderer:
         mosaic_half_pos: str = "bottom",
         font_scale: int = 100,
         emoji_style: Optional[str] = None,
-        page_max_h: int = 2200,
+        page_max_h: int = 3000,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表"""
         ctx = cls._prepare_layout(

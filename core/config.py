@@ -131,7 +131,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "builtin_presets_hash": "",
     "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
     "img_compress_level": "medium",
-    "page_max_height": 2200,
+    "page_max_height": 3000,
     "img_max_width": 1080,
     "custom_ai_prompt": "",
     "group_configs": {},
