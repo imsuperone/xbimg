@@ -74,7 +74,19 @@ class HandlersMixin:
 
 
     def _patch_bot_send(self, bot_inst: Any):
-        """为 OneBot/aiocqhttp 等适配器实例挂载无损转图补丁"""
+        """为 OneBot/aiocqhttp 等适配器实例挂载无损转图补丁。
+
+        包装器必须签名透明 (*args/**kwargs 原样转发)：CQHttp 系客户端内部多为
+        `self.call_action(action, params)` 位置参数调用，写死签名会直接炸掉全量发送。
+        """
+        import functools as _ft
+
+        def _safe_wraps(orig):
+            try:
+                return _ft.wraps(orig)
+            except Exception:
+                return lambda fn: fn
+
         if getattr(bot_inst, "_msg2img_patched", False):
             return
 
@@ -82,12 +94,23 @@ class HandlersMixin:
         if hasattr(bot_inst, "send_group_msg") and callable(getattr(bot_inst, "send_group_msg")):
             orig_send_group = bot_inst.send_group_msg
 
-            async def patched_send_group(group_id, message, *args, **kwargs):
+            @_safe_wraps(orig_send_group)
+            async def patched_send_group(*args, **kwargs):
                 try:
-                    message = await self._transform_onebot_message(str(group_id), message)
+                    # 兼容位置/关键字两种调用：send_group_msg(group_id, message[, ...])
+                    _gid = kwargs.get("group_id", args[0] if len(args) > 0 else None)
+                    _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
+                    if _gid is not None and _msg is not None:
+                        _new = await self._transform_onebot_message(str(_gid), _msg)
+                        if "message" in kwargs:
+                            kwargs["message"] = _new
+                        elif len(args) > 1:
+                            args = (args[0], _new) + tuple(args[2:])
+                        else:
+                            kwargs["message"] = _new
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
-                return await orig_send_group(group_id=group_id, message=message, *args, **kwargs)
+                return await orig_send_group(*args, **kwargs)
 
             bot_inst.send_group_msg = patched_send_group
             try:
@@ -99,16 +122,30 @@ class HandlersMixin:
         if hasattr(bot_inst, "call_action") and callable(getattr(bot_inst, "call_action")):
             orig_call_action = bot_inst.call_action
 
-            async def patched_call_action(action, **kwargs):
+            @_safe_wraps(orig_call_action)
+            async def patched_call_action(action, *args, **kwargs):
                 try:
                     if action in ("send_group_msg", "send_msg"):
-                        gid = kwargs.get("group_id")
-                        msg = kwargs.get("message")
-                        if gid and msg is not None:
-                            kwargs["message"] = await self._transform_onebot_message(str(gid), msg)
+                        # 形式 A：call_action(action, group_id=.., message=..)
+                        # 形式 B：call_action(action, {"group_id":.., "message":..})
+                        _params = None
+                        if args and isinstance(args[0], dict):
+                            _params = args[0]
+                        _gid = kwargs.get("group_id", (_params.get("group_id") if _params else None))
+                        _msg = kwargs.get("message", (_params.get("message") if _params else None))
+                        if _gid and _msg is not None:
+                            _new = await self._transform_onebot_message(str(_gid), _msg)
+                            if "message" in kwargs:
+                                kwargs["message"] = _new
+                            elif _params is not None:
+                                _params = dict(_params)
+                                _params["message"] = _new
+                                args = (_params,) + tuple(args[1:])
+                            else:
+                                kwargs["message"] = _new
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
-                return await orig_call_action(action, **kwargs)
+                return await orig_call_action(action, *args, **kwargs)
 
             bot_inst.call_action = patched_call_action
             try:
