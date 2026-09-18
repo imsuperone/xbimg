@@ -102,6 +102,69 @@ class HandlersMixin:
             "unexpected keyword argument" in msg
         ) or ("missing " in msg and "required positional argument" in msg)
 
+    @staticmethod
+    def _describe_callable(fn: Any, _depth: int = 0) -> str:
+        """调用链点名：类型/qualname/模块/partial 链（最多 3 层），用于定位中间包装器"""
+        try:
+            if _depth > 3:
+                return "..."
+            import functools as _ft
+            if isinstance(fn, _ft.partial):
+                inner = HandlersMixin._describe_callable(fn.func, _depth + 1)
+                try:
+                    keys = sorted((fn.keywords or {}).keys())
+                except Exception:
+                    keys = []
+                return f"partial({inner}, keywords={keys})"
+            qn = getattr(fn, "__qualname__", None) or type(fn).__name__
+            mod = getattr(fn, "__module__", "?")
+            return f"{type(fn).__name__}:{mod}.{qn}"
+        except Exception:
+            try:
+                return repr(fn)[:120]
+            except Exception:
+                return "<?>"
+
+    @classmethod
+    def _resolve_genuine_call(cls, bot_inst: Any) -> Any:
+        """沿 MRO 找真正的 call_action：跳过我们标记的包装器，解开 __wrapped__ 链，
+        返回绑定到实例的 genuine 方法；找不到返回 None。"""
+        try:
+            mro = type(bot_inst).__mro__
+        except Exception:
+            return None
+        for klass in mro:
+            try:
+                fn = klass.__dict__.get("call_action", None)
+            except Exception:
+                continue
+            if fn is None:
+                continue
+            if isinstance(fn, (staticmethod, classmethod)):
+                try:
+                    fn = fn.__func__
+                except Exception:
+                    continue
+            cur, bad, depth = fn, False, 0
+            while depth < 8:
+                try:
+                    if getattr(cur, "_xbimg_wrapper_", False):
+                        bad = True
+                        break
+                    nxt = getattr(cur, "__wrapped__", None)
+                except Exception:
+                    break
+                if nxt is None:
+                    break
+                cur, depth = nxt, depth + 1
+            if bad:
+                continue
+            try:
+                return cur.__get__(bot_inst, type(bot_inst))
+            except Exception:
+                continue
+        return None
+
     def _patch_bot_send(self, bot_inst: Any):
         """为 OneBot/aiocqhttp 等适配器实例挂载无损转图补丁。
 
@@ -147,22 +210,51 @@ class HandlersMixin:
                     if not self._is_bind_error(e):
                         raise
                     # 归一化重试：位置参数按 OneBot 顺序具名化（group_id, message, auto_escape）
+                    _rk = dict(kwargs)
+                    if "group_id" not in _rk and len(args) > 0:
+                        _rk["group_id"] = args[0]
+                    if "message" not in _rk and len(args) > 1:
+                        _rk["message"] = args[1]
+                    if len(args) > 2 and "auto_escape" not in _rk and isinstance(args[2], bool):
+                        _rk["auto_escape"] = args[2]
                     try:
-                        _rk = dict(kwargs)
-                        if "group_id" not in _rk and len(args) > 0:
-                            _rk["group_id"] = args[0]
-                        if "message" not in _rk and len(args) > 1:
-                            _rk["message"] = args[1]
-                        if len(args) > 2 and "auto_escape" not in _rk and isinstance(args[2], bool):
-                            _rk["auto_escape"] = args[2]
                         logger.warning(
                             f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
                             f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
                         )
                         return await orig_send_group(**_rk)
-                    except TypeError:
-                        raise
+                    except TypeError as e2:
+                        if not self._is_bind_error(e2):
+                            raise
+                        # 终极兜底：orig 链下游仍有位置委托中间件时，绕过它直调 genuine；
+                        # 找不到 genuine 则抛归一化错误（附调用链点名供定位）
+                        _genuine = self._resolve_genuine_call(bot_inst)
+                        try:
+                            _same = bool(_genuine is not None and _genuine == orig_send_group)
+                        except Exception:
+                            _same = True
+                        if _genuine is None or _same:
+                            logger.error(
+                                f"[{PLUGIN_NAME}] send_group_msg 归一化重试仍失败({e2})，"
+                                f"orig={self._describe_callable(orig_send_group)}"
+                            )
+                            raise
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] send_group_msg 归一化重试仍失败({e2})，"
+                            f"orig={self._describe_callable(orig_send_group)}，"
+                            f"直调 genuine 兜底"
+                        )
+                        try:
+                            return await _genuine("send_group_msg", **_rk)
+                        except TypeError as e3:
+                            logger.error(
+                                f"[{PLUGIN_NAME}] send_group_msg genuine 直调仍失败({e3})，"
+                                f"orig={self._describe_callable(orig_send_group)} "
+                                f"genuine={self._describe_callable(_genuine)}"
+                            )
+                            raise
 
+            patched_send_group._xbimg_wrapper_ = True
             bot_inst.send_group_msg = patched_send_group
             try:
                 bot_inst._msg2img_orig_send_group_msg = orig_send_group
@@ -203,24 +295,51 @@ class HandlersMixin:
                         raise
                     # 归一化重试：位置 params 字典并入关键字（调用方关键字优先）；
                     # 无可归一化的位置参数时直接抛原错，避免静默丢参数
+                    _rk = dict(kwargs)
+                    _merged = False
+                    for _a in args:
+                        if isinstance(_a, dict):
+                            for _k, _v in _a.items():
+                                _rk.setdefault(_k, _v)
+                            _merged = True
+                    if not _merged:
+                        raise
                     try:
-                        _rk = dict(kwargs)
-                        _merged = False
-                        for _a in args:
-                            if isinstance(_a, dict):
-                                for _k, _v in _a.items():
-                                    _rk.setdefault(_k, _v)
-                                _merged = True
-                        if _merged:
-                            logger.warning(
-                                f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
-                                f"已归一化为关键字重试 keys={sorted(_rk)}"
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
+                            f"已归一化为关键字重试 keys={sorted(_rk)}"
+                        )
+                        return await orig_call_action(action, **_rk)
+                    except TypeError as e2:
+                        if not self._is_bind_error(e2):
+                            raise
+                        _genuine = self._resolve_genuine_call(bot_inst)
+                        try:
+                            _same = bool(_genuine is not None and _genuine == orig_call_action)
+                        except Exception:
+                            _same = True
+                        if _genuine is None or _same:
+                            logger.error(
+                                f"[{PLUGIN_NAME}] call_action({action}) 归一化重试仍失败({e2})，"
+                                f"orig={self._describe_callable(orig_call_action)}"
                             )
-                            return await orig_call_action(action, **_rk)
-                    except TypeError:
-                        pass
-                    raise
+                            raise
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] call_action({action}) 归一化重试仍失败({e2})，"
+                            f"orig={self._describe_callable(orig_call_action)}，"
+                            f"直调 genuine 兜底"
+                        )
+                        try:
+                            return await _genuine(action, **_rk)
+                        except TypeError as e3:
+                            logger.error(
+                                f"[{PLUGIN_NAME}] call_action({action}) genuine 直调仍失败({e3})，"
+                                f"orig={self._describe_callable(orig_call_action)} "
+                                f"genuine={self._describe_callable(_genuine)}"
+                            )
+                            raise
 
+            patched_call_action._xbimg_wrapper_ = True
             bot_inst.call_action = patched_call_action
             try:
                 bot_inst._msg2img_orig_call_action = orig_call_action
