@@ -493,6 +493,81 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         finally:
             _lg.disabled = _dis
 
+    def test_android_emoji_download_fallback(self):
+        """Android 表情包多直链容错：首源失败自动换源；残包体积校验"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+        orig_dl = R._download_file
+        seen_urls = []
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        def flaky_dl(url, dest):
+            seen_urls.append(url)
+            if "jsdelivr" in url:
+                return False, "cdn fail"
+            dest.write_bytes(b"0" * (2 * 1024 * 1024))
+            return True, ""
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            R._download_file = flaky_dl
+            R.clear_font_cache()
+            res = R.download_emoji_pack("android")
+            self.assertTrue(res["ok"])
+            self.assertGreaterEqual(len(seen_urls), 2)
+            self.assertTrue((tmp / "emoji" / R.ANDROID_EMOJI_FILE).is_file())
+            packs = {p["id"]: p for p in R.get_emoji_packs_status()}
+            self.assertTrue(packs["android"]["installed"])
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._download_file = orig_dl
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_android_prefers_color_image(self):
+        """android 风格有全彩图时优先图片（真彩），而非系统单色字体"""
+        import shutil
+        import tempfile
+        from PIL import Image, ImageDraw
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            (tmp / "emoji").mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (72, 72), (230, 30, 30, 255)).save(tmp / "emoji" / "1f600.png")
+            R._EMOJI_IMG_CACHE.clear()
+            canvas = Image.new("RGBA", (300, 100), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(canvas)
+            font = R.get_font(32)
+            R._draw_mixed_text(canvas, draw, 10, 20, "😀", font, (20, 20, 20, 255), 32,
+                               emoji_remote=False, emoji_style="android")
+            px = canvas.load()
+            red = sum(
+                1 for yy in range(100) for xx in range(300)
+                if (lambda p: p[3] > 128 and p[0] - min(p[1], p[2]) > 100)(px[xx, yy]))
+            self.assertGreater(red, 50)
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._EMOJI_IMG_CACHE.clear()
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_mosaic_positions_char_aligned(self):
         """打码定位：VS16/ZWJ 簇拆成单字符条目，串定位与条目定位一致（防打码错位）"""
         from PIL import Image, ImageDraw

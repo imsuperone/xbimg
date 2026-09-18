@@ -543,11 +543,26 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         extra = "（已齐全）" if dl_cnt == 0 else ""
         return {"ok": True, "downloaded": [f"iOS基础Emoji({dl_cnt}个){extra}"], "storage_kb": get_emoji_storage_kb("ios")}
 
-    # android 或 windows
+    # android 或 windows（多直链容错，依次尝试；下载后校验体积，残包换源重试）
     fname = ANDROID_EMOJI_FILE if style == "android" else WINDOWS_EMOJI_FILE
-    furl = ANDROID_EMOJI_URL if style == "android" else WINDOWS_EMOJI_URL
+    if style == "android":
+        furls = list(ANDROID_EMOJI_URLS)
+    else:
+        furls = [WINDOWS_EMOJI_URL]
     target = d / fname
-    ok, err = _download_file(furl, target)
+    ok, err = False, ""
+    for furl in furls:
+        ok, err = _download_file(furl, target)
+        if not ok:
+            continue
+        try:
+            if target.stat().st_size < _EMOJI_MIN_FONT_BYTES:
+                ok, err = False, "文件不完整，已换源重试"
+                continue
+        except Exception:
+            ok, err = False, "文件校验失败"
+            continue
+        break
     if ok:
         _EMOJI_FONT_CACHE.clear()
         return {"ok": True, "downloaded": [fname], "storage_kb": get_emoji_storage_kb(style)}
@@ -1504,12 +1519,23 @@ _TWEMOJI_BASE = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72
 _EMOJI_DL_TIMEOUT = 8
 _EMOJI_DL_MAX_BYTES = 2 * 1024 * 1024
 # Noto 全彩 Emoji 字体（Android 原生风格）
+# 注意：上游 noto-emoji 仓库已改为源码仓，旧 main 直链永久 404；
+# 改用 commit 锁定的 unicode16 版本（不可变，永久有效），jsdelivr 主 + raw 备用
 ANDROID_EMOJI_FILE = "NotoColorEmoji.ttf"
-ANDROID_EMOJI_URL = "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji.ttf"
+_NOTO_PIN_SHA = "124c7d40bb51bc026b5407dfffd34e1e6843e1a8"
+ANDROID_EMOJI_URLS = [
+    f"https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
+    f"https://raw.githubusercontent.com/googlefonts/noto-emoji/{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
+]
+ANDROID_EMOJI_URL = ANDROID_EMOJI_URLS[0]
 # EmojiOne/Twemoji 全彩字体（跨平台标准矢量风格）
 WINDOWS_EMOJI_FILE = "EmojiOneColor.otf"
 WINDOWS_EMOJI_URL = "https://raw.githubusercontent.com/adobe-fonts/emojione-color/master/EmojiOneColor.otf"
 _EMOJI_MIN_FONT_BYTES = 1 * 1024 * 1024
+# 历史遗留别名（检测/补齐函数引用）
+NOTO_EMOJI_FILE = ANDROID_EMOJI_FILE
+NOTO_EMOJI_URL = ANDROID_EMOJI_URL
+_NOTO_EMOJI_MIN_BYTES = _EMOJI_MIN_FONT_BYTES
 
 # CDN 不可达时退避（DNS 黑洞等只挡一次，10 分钟内不再尝试，避免消息延迟）
 _EMOJI_REMOTE_DEAD_UNTIL = 0.0
@@ -1855,10 +1881,12 @@ def _draw_mixed_text(
                         i = ni
                         continue
                 else:
-                    if _draw_with_font(cluster):
+                    # 非 iOS（含 android）：全彩图优先。NotoColorEmoji 系单尺寸位图，
+                    # PIL 无法按任意字号加载，全彩图是唯一可靠的彩色来源；无图再降级字体
+                    if _paste_image(cluster):
                         i = ni
                         continue
-                    if _paste_image(cluster):
+                    if _draw_with_font(cluster):
                         i = ni
                         continue
 
