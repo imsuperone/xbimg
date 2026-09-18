@@ -2109,7 +2109,8 @@ MAX_CONTENT_PAGES = 10
 def _render_cache_key(text: str, style: str, theme_mode: str, star_background: bool,
                       star_density: str, mosaic_mode: str, mosaic_type: str,
                       mosaic_half_pos: str, violation_words, font_scale: int,
-                      emoji_style: str) -> tuple:
+                      emoji_style: str, page_max_h: int = 3000,
+                      card_max_width: int = 680) -> tuple:
     """渲染缓存键：文本哈希 + 全套渲染参数 + 当前分钟（顶栏时间参与输出）+ 字体代际"""
     try:
         h = hashlib.md5(str(text or "").encode("utf-8", "ignore")).hexdigest()
@@ -2127,9 +2128,17 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
         epoch = int(_FONT_EPOCH)
     except Exception:
         epoch = 0
+    try:
+        pmh = int(page_max_h or 3000)
+    except Exception:
+        pmh = 3000
+    try:
+        cmw = int(card_max_width or 680)
+    except Exception:
+        cmw = 680
     return (h, style, theme_mode, bool(star_background), str(star_density),
             mosaic_mode, mosaic_type, mosaic_half_pos, vw,
-            int(font_scale or 100), str(emoji_style), minute, epoch)
+            int(font_scale or 100), str(emoji_style), minute, epoch, pmh, cmw)
 
 
 def _continuation_line(idx: int, total: int, font_scale: int = 100):
@@ -2201,203 +2210,17 @@ class MessageImageRenderer:
         page_max_h: int = 3000,  # 单页总高度上限（点开看长图长度不限）
         card_max_width: int = 680,  # 卡片宽度基线（聊天气泡完整显示）
     ) -> Image.Image:
-        ctx = cls._prepare_layout(
+        """渲染单图（长内容取第一页；完整多页请用 render_pages）"""
+        pages = cls.render_pages(
             text=text, style=style, theme_mode=theme_mode,
+            star_background=star_background, star_density=star_density,
+            mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
+            violation_words=violation_words, emoji_remote=emoji_remote,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
-            emoji_remote=emoji_remote, emoji_style=emoji_style,
-            page_max_h=page_max_h, card_max_width=card_max_width,
+            emoji_style=emoji_style, page_max_h=page_max_h,
+            card_max_width=card_max_width,
         )
-        # 解包单页直绘所需局部量（与旧逻辑一致，保证单页输出逐字节不变）
-        text = ctx["text"]
-        style = ctx["style"]
-        theme = ctx["theme"]
-        theme_mode = ctx["theme_mode"]
-        mosaic_half_pos = ctx["mosaic_half_pos"]
-        font_scale = ctx["font_scale"]
-        emoji_style = ctx["emoji_style"]
-        emoji_remote_eff = ctx["emoji_remote_eff"]
-        card_w = ctx["card_w"]
-        content_w = ctx["content_w"]
-        header_h = ctx["header_h"]
-        card_inner_pad_y = ctx["card_inner_pad_y"]
-        footer_gap = ctx["footer_gap"]
-        footer_block = ctx["footer_block"]
-        foot_fh = ctx["foot_fh"]
-        inner_pad_x = ctx["inner_pad_x"]
-        content_h = ctx["content_h"]
-        card_h = ctx["card_h"]
-        rendered_lines = ctx["rendered_lines"]
-        max_content = ctx["max_content"]
-        # 超长分页：单页内容上限，超限分页输出多图，不再丢弃截断
-        pages = _split_content_pages(rendered_lines, max_content, font_scale)
-        if len(pages) > 1:
-            return cls._draw_page(ctx, pages[0], 0, len(pages))
-
-        margin_x = 36
-        margin_y = 36
-        canvas_w = card_w + margin_x * 2
-        canvas_h = card_h + margin_y * 2
-
-        # 4. 极速生成背景渐变
-        canvas = _fast_linear_gradient(canvas_w, canvas_h, theme.bg_gradient_start, theme.bg_gradient_end)
-
-        # 5. 星空微粒背景 (主要散布在卡片外部留白与边缘四周，避免在卡片文字区域形成杂乱噪点)
-        if star_background:
-            star_counts = {"sparse": 18, "medium": 36, "dense": 60}
-            count = star_counts.get(star_density, 36)
-            star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-            s_draw = ImageDraw.Draw(star_layer)
-
-            rng = random.Random(_stable_seed(text))
-            for _ in range(count):
-                zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
-                if zone == "top":
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(8, max(margin_y + 12, 40))
-                elif zone == "bottom":
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(min(margin_y + card_h - 12, canvas_h - 40), canvas_h - 8)
-                elif zone == "left":
-                    sx = rng.uniform(8, max(margin_x + 12, 40))
-                    sy = rng.uniform(8, canvas_h - 8)
-                elif zone == "right":
-                    sx = rng.uniform(min(margin_x + card_w - 12, canvas_w - 40), canvas_w - 8)
-                    sy = rng.uniform(8, canvas_h - 8)
-                else:
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(8, canvas_h - 8)
-
-                s_radius = rng.uniform(2.8, 8.5)
-                s_color = rng.choice(theme.star_colors)
-                s_alpha = rng.randint(85, 200)
-                st_type = rng.choice(["sparkle", "cross", "diamond"])
-                _draw_star_sparkle(s_draw, sx, sy, s_radius, s_color, s_alpha, st_type)
-
-            canvas = Image.alpha_composite(canvas, star_layer)
-
-        # 6. 轻量柔和卡片投影（同尺寸直接复用缓存）
-        corner_radius = 24 if style == "ios" else 32
-        blur_rad = 14
-        pad = blur_rad * 2
-        shadow_img = _get_card_shadow(card_w, card_h, corner_radius, theme.card_shadow, blur_rad)
-        canvas.paste(shadow_img, (margin_x - pad, margin_y - pad), shadow_img)
-
-        # 7. 绘制卡片底板
-        card_surface = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-        c_draw = ImageDraw.Draw(card_surface)
-
-        c_draw.rounded_rectangle(
-            [0, 0, card_w, card_h],
-            radius=corner_radius,
-            fill=theme.card_bg,
-            outline=theme.card_border,
-            width=2 if style == "ios" else 1,
-        )
-
-        # 8. 绘制顶部栏
-        cur_y = card_inner_pad_y
-
-        if style == "ios":
-            dot_y = cur_y + 12
-            dot_r = 5.5
-            c_draw.ellipse([inner_pad_x, dot_y - dot_r, inner_pad_x + dot_r * 2, dot_y + dot_r], fill=(255, 95, 87))
-            c_draw.ellipse([inner_pad_x + 18, dot_y - dot_r, inner_pad_x + 18 + dot_r * 2, dot_y + dot_r], fill=(254, 188, 46))
-            c_draw.ellipse([inner_pad_x + 36, dot_y - dot_r, inner_pad_x + 36 + dot_r * 2, dot_y + dot_r], fill=(40, 200, 64))
-
-            time_font = get_font(13, bold=False)
-            time_str = time.strftime("%H:%M")
-            t_w, _ = _text_size(time_font, time_str)
-            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
-
-            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
-            cur_y += header_h
-
-        else:
-            # Android 16：无品牌顶栏，仅右侧时间（头像/账号已移除）
-            time_font = get_font(12, bold=False)
-            time_str = time.strftime("%m-%d %H:%M")
-            t_w, _ = _text_size(time_font, time_str)
-            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 10), time_str, font=time_font, fill=theme.text_muted)
-
-            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
-            cur_y += header_h
-
-        # 9. 绘制正文内容
-        content_x = inner_pad_x
-        # 所有已绘制字符的位置信息 [(char_x, char_w, char_y, char_str, line_h), ...]
-        all_char_positions: List[Tuple[float, float, float, str, int]] = []
-
-        for wrap_line, block, line_h in rendered_lines:
-            if block.block_type == "divider":
-                div_y = cur_y + line_h // 2
-                c_draw.line([(content_x, div_y), (card_w - content_x, div_y)], fill=theme.divider, width=1)
-                cur_y += line_h
-                continue
-
-            if not wrap_line:
-                cur_y += line_h
-                continue
-
-            font = get_font(block.font_size, bold=block.is_bold)
-
-            if block.block_type == "code":
-                c_draw.rounded_rectangle(
-                    [content_x - 6, cur_y - 2, card_w - content_x + 6, cur_y + line_h - 2],
-                    radius=6,
-                    fill=theme.code_bg,
-                    outline=theme.code_border,
-                    width=1,
-                )
-                positions = _draw_mixed_text(card_surface, c_draw, content_x + 6, cur_y, wrap_line, font, theme.code_text, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
-            elif block.block_type == "quote":
-                c_draw.rounded_rectangle([content_x, cur_y, content_x + 3, cur_y + line_h - 4], radius=2, fill=theme.accent)
-                positions = _draw_mixed_text(card_surface, c_draw, content_x + 14, cur_y, wrap_line, font, theme.text_secondary, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
-            elif block.block_type == "bullet":
-                positions = _draw_mixed_text(card_surface, c_draw, content_x + 4, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
-            elif block.block_type.startswith("heading"):
-                heading_color = theme.accent if (style == "android16" and block.block_type == "heading1") else theme.text_primary
-                positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, heading_color, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
-            else:
-                positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
-
-            cur_y += line_h
-
-        # 10. 绘制高雅极简 Footer（移动到左下角）
-        # cur_y 此时为正文结束位置
-        footer_line_y = cur_y + footer_gap
-        c_draw.line([(inner_pad_x, footer_line_y), (card_w - inner_pad_x, footer_line_y)], fill=theme.divider, width=1)
-        foot_font = get_font(11, bold=False)
-        ft_text = "Generated by xbimg"
-        c_draw.text((inner_pad_x, footer_line_y + 8), ft_text, font=foot_font, fill=theme.text_muted)
-
-        # 11. 处理违规马赛克（字级精准半打码：支持上/下/随机）
-        if mosaic_mode in ("half", "full") and all_char_positions:
-            cls._apply_word_level_mosaic(
-                card_surface=card_surface,
-                all_char_positions=all_char_positions,
-                text=text,
-                violation_words=violation_words or [],
-                mosaic_mode=mosaic_mode,
-                mosaic_type=mosaic_type,
-                theme=theme,
-                card_w=card_w,
-                mosaic_half_pos=mosaic_half_pos,
-            )
-
-        # 12. 将卡片合成到画布上
-        canvas.paste(card_surface, (margin_x, margin_y), card_surface)
-
-        return canvas.convert("RGB")
+        return pages[0]
 
     @classmethod
     def _prepare_layout(
@@ -2551,6 +2374,7 @@ class MessageImageRenderer:
                 ctx["text"], ctx["style"], ctx["theme_mode"], star_background, star_density,
                 mosaic_mode, mosaic_type, ctx["mosaic_half_pos"], violation_words,
                 ctx["font_scale"], ctx["emoji_style"],
+                page_max_h=page_max_h, card_max_width=card_max_width,
             )
         except Exception:
             cache_key = None
