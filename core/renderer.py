@@ -2713,7 +2713,8 @@ class MessageImageRenderer:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表。
 
         相同输入短时间内直接复用结果（主链路与适配器钩子常对同一文本各渲染一次）。
-        perf_out 非 None 时回填 mosaic_ms / prefetch_ms（毫秒）；为 None 则不计时，零开销。
+        perf_out 非 None 时回填 layout_ms / prefetch_ms / draw_ms / mosaic_ms（毫秒）；
+        为 None 则不计时，零开销。缓存命中时各项为 0（确实没干活）。
         """
         group_font = resolve_group_font_override(custom_font_path, custom_bold_font_path)
         _tok = _GROUP_FONT_OVERRIDE.set(group_font if any(group_font) else None)
@@ -2754,12 +2755,25 @@ class MessageImageRenderer:
         group_font: Tuple[str, str] = ("", ""),
         perf_out: Optional[Dict[str, float]] = None,
     ) -> List[Image.Image]:
+        if perf_out is not None:
+            for _k in ("layout_ms", "prefetch_ms", "draw_ms", "mosaic_ms"):
+                try:
+                    perf_out[_k] = 0.0
+                except Exception:
+                    break
+        if perf_out is not None:
+            _t_layout = time.perf_counter()
         ctx = cls._prepare_layout(
             text=text, style=style, theme_mode=theme_mode,
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
             page_max_h=page_max_h, card_max_width=card_max_width,
         )
+        if perf_out is not None:
+            try:
+                perf_out["layout_ms"] = (time.perf_counter() - _t_layout) * 1000.0
+            except Exception:
+                pass
         try:
             cache_key = _render_cache_key(
                 ctx["text"], ctx["style"], ctx["theme_mode"], star_background, star_density,
@@ -2778,9 +2792,7 @@ class MessageImageRenderer:
             except Exception:
                 pass
         # emoji 缺图并行预取（绘制时不再逐个串行等网络）
-        if perf_out is not None:
-            perf_out["prefetch_ms"] = 0.0
-            perf_out["mosaic_ms"] = 0.0
+        # emoji 缺图并行预取（绘制时不再逐个串行等网络；键已在入口初始化）
         try:
             if ctx["emoji_remote_eff"]:
                 try:
@@ -2797,6 +2809,8 @@ class MessageImageRenderer:
             pass
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)
+        if perf_out is not None:
+            _t_draw = time.perf_counter()
         images = [
             cls._draw_page(
                 ctx, pg, idx, total,
@@ -2810,6 +2824,11 @@ class MessageImageRenderer:
             )
             for idx, pg in enumerate(pages)
         ]
+        if perf_out is not None:
+            try:
+                perf_out["draw_ms"] = float(perf_out.get("draw_ms", 0.0)) + (time.perf_counter() - _t_draw) * 1000.0
+            except Exception:
+                pass
         # 仅缓存小体量结果，避免大长图堆内存
         if cache_key is not None and len(images) <= 2:
             try:

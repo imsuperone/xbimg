@@ -800,9 +800,18 @@ class WebApiMixin:
     async def _api_fonts_curated_install(self):
         try:
             payload = await request.json(default={})
+            if not isinstance(payload, dict):
+                payload = {}
             cid = str(payload.get("id", "") or "").strip()
             if not cid:
-                return error_response("缺少字体 id", status_code=400)
+                try:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] curated_install 缺少字体 id："
+                        f"keys={sorted(payload.keys())} raw={str(payload)[:200]}"
+                    )
+                except Exception:
+                    pass
+                return error_response(f"缺少字体 id: {str(payload)[:100] or '空参数'}", status_code=400)
             res = await asyncio.to_thread(download_curated_font, cid)
             # 仅下载不自动切换（切换请走 group ttf / 字体选择），此处不再回写 _FONT_CONF
             return json_response({"ok": res.get("ok", False), **res})
@@ -822,9 +831,18 @@ class WebApiMixin:
     async def _api_emoji_download(self):
         try:
             payload = await request.json(default={})
+            if not isinstance(payload, dict):
+                payload = {}
             style = str(payload.get("style", "") or payload.get("id", "") or "").strip().lower()
             if style not in ("ios", "android", "windows"):
-                return error_response("未知样式", status_code=400)
+                try:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] emoji/download 未知样式："
+                        f"keys={sorted(payload.keys())} raw={str(payload)[:200]}"
+                    )
+                except Exception:
+                    pass
+                return error_response(f"未知样式: {style or '空'}", status_code=400)
             res = await asyncio.to_thread(download_emoji_pack, style)
             # 保存选择
             try:
@@ -846,9 +864,18 @@ class WebApiMixin:
     async def _api_emoji_delete(self):
         try:
             payload = await request.json(default={})
+            if not isinstance(payload, dict):
+                payload = {}
             style = str(payload.get("style", "") or payload.get("id", "") or "").strip().lower()
             if style not in ("ios", "android", "windows", "all"):
-                return error_response("未知样式", status_code=400)
+                try:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] emoji/delete 未知样式："
+                        f"keys={sorted(payload.keys())} raw={str(payload)[:200]}"
+                    )
+                except Exception:
+                    pass
+                return error_response(f"未知样式: {style or '空'}", status_code=400)
             res = await asyncio.to_thread(delete_emoji_pack, style)
             # 若删除的是当前样式则切回 none
             try:

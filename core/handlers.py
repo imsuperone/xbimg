@@ -436,6 +436,20 @@ class HandlersMixin:
             return v.strip().lower() in ("1", "true", "yes", "on")
         return bool(v)
 
+    @staticmethod
+    def _perf_vals(perf_out) -> tuple:
+        """从渲染回填字典取值 (mosaic, prefetch, draw, layout)，缺省全 0"""
+        try:
+            d = perf_out or {}
+            return (
+                float(d.get("mosaic_ms", 0.0)),
+                float(d.get("prefetch_ms", 0.0)),
+                float(d.get("draw_ms", 0.0)),
+                float(d.get("layout_ms", 0.0)),
+            )
+        except Exception:
+            return (0.0, 0.0, 0.0, 0.0)
+
     def _emit_perf_log(
         self,
         session: str,
@@ -446,6 +460,9 @@ class HandlersMixin:
         imgs,
         img_paths,
         blocked: bool = False,
+        draw_ms: float = 0.0,
+        layout_ms: float = 0.0,
+        save_ms: float = 0.0,
     ) -> None:
         """单行性能日志：grep `\\[性能\\]` 可直接捞出（仅 perf_log 开启时调用）"""
         try:
@@ -469,7 +486,8 @@ class HandlersMixin:
                 page = f"· 第{idx + 1}/{total}页" if total > 1 else ""
                 logger.info(
                     f"[xbimg] [性能] 会话{session}：总耗时 {total_ms:.0f}ms"
-                    f"（安全审查 {mod_ms:.0f}ms · 打码 {mosaic_ms:.0f}ms · 下载 {prefetch_ms:.0f}ms）"
+                    f"（安全审查 {mod_ms:.0f}ms · 打码 {mosaic_ms:.0f}ms · 下载 {prefetch_ms:.0f}ms"
+                    f" · 绘制 {draw_ms:.0f}ms · 排版 {layout_ms:.0f}ms · 落盘 {save_ms:.0f}ms）"
                     f"{page}· 图片 {w}x{h}/{kb}KB · blocked=False"
                 )
         except Exception:
@@ -820,15 +838,18 @@ class HandlersMixin:
             )
             if not imgs:
                 return message
+            if _perf:
+                _t_save = time.perf_counter()
             img_paths = await self._save_render_images(imgs)
             if _perf:
                 try:
                     _total_ms = (time.perf_counter() - _t0) * 1000.0
+                    _mo, _pf, _dr, _la = self._perf_vals(_perf_out)
                     self._emit_perf_log(
-                        f"群{gid}", _total_ms, _mod_ms,
-                        float((_perf_out or {}).get("mosaic_ms", 0.0)),
-                        float((_perf_out or {}).get("prefetch_ms", 0.0)),
+                        f"群{gid}", _total_ms, _mod_ms, _mo, _pf,
                         imgs, img_paths,
+                        draw_ms=_dr, layout_ms=_la,
+                        save_ms=(time.perf_counter() - _t_save) * 1000.0,
                     )
                 except Exception:
                     pass
@@ -901,15 +922,18 @@ class HandlersMixin:
             )
             if not imgs2:
                 return message
+            if _perf2:
+                _t_save2 = time.perf_counter()
             img_paths = await self._save_render_images(imgs2)
             if _perf2:
                 try:
                     _total_ms2 = (time.perf_counter() - _t0b) * 1000.0
+                    _mo2, _pf2, _dr2, _la2 = self._perf_vals(_perf_out2)
                     self._emit_perf_log(
-                        f"群{gid}", _total_ms2, _mod_ms2,
-                        float((_perf_out2 or {}).get("mosaic_ms", 0.0)),
-                        float((_perf_out2 or {}).get("prefetch_ms", 0.0)),
+                        f"群{gid}", _total_ms2, _mod_ms2, _mo2, _pf2,
                         imgs2, img_paths,
+                        draw_ms=_dr2, layout_ms=_la2,
+                        save_ms=(time.perf_counter() - _t_save2) * 1000.0,
                     )
                 except Exception:
                     pass
@@ -1030,15 +1054,18 @@ class HandlersMixin:
             logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=False mosaic={mosaic_m}")
         if not imgs:
             return
+        if _perf_m:
+            _t_savem = time.perf_counter()
         img_paths = await self._save_render_images(imgs)
         if _perf_m:
             try:
                 _sess = f"群{gid_main}" if gid_main else "私聊"
+                _mom, _pfm, _drm, _lam = self._perf_vals(_perf_out_m)
                 self._emit_perf_log(
                     _sess, (time.perf_counter() - _t0m) * 1000.0, _mod_ms_m,
-                    float((_perf_out_m or {}).get("mosaic_ms", 0.0)),
-                    float((_perf_out_m or {}).get("prefetch_ms", 0.0)),
-                    imgs, img_paths,
+                    _mom, _pfm, imgs, img_paths,
+                    draw_ms=_drm, layout_ms=_lam,
+                    save_ms=(time.perf_counter() - _t_savem) * 1000.0,
                 )
             except Exception:
                 pass
