@@ -791,7 +791,12 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
 
 
 def clear_font_cache():
-    """清除字体缓存（删除前调用，释放 Windows 文件句柄与内存缓存）"""
+    """清除字体缓存（删除前调用，释放内存缓存）。
+
+    注意：不要在这里 gc.collect()——字体经 BytesIO 加载，无常驻文件句柄；
+    全量 GC 在渲染图片堆积的进程里可卡数秒，且会暂停整个事件循环。
+    引用计数即时回收已足够，循环垃圾交给解释器自动 GC。
+    """
     _FONT_CACHE.clear()
     _EMOJI_FONT_CACHE.clear()
     _FONT_BYTES_CACHE.clear()
@@ -810,11 +815,6 @@ def clear_font_cache():
         pass
     try:
         _ADV_CACHE.clear()
-    except Exception:
-        pass
-    try:
-        import gc
-        gc.collect()
     except Exception:
         pass
 

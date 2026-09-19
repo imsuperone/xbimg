@@ -1131,10 +1131,45 @@ async def render_text_to_image(text: str):
       box.innerHTML=`<div class="font-files-empty">读取失败: ${escapeHtml(e.message)}</div>`;
     }
   }
+  // 后台下载轮询：长任务不等 HTTP，前端 2s 查一次，最长约 6 分钟
+  async function pollDownloadJob(statusEndpoint, jobId, { intervalMs = 2000, maxRounds = 180 } = {}) {
+    let transportFails = 0;
+    for (let i = 0; i < maxRounds; i++) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      let s;
+      try {
+        s = await api.get(statusEndpoint, { job_id: jobId });
+      } catch (e) {
+        // 状态查询本身抖动：连续 5 次失败才放弃（任务仍在后台跑）
+        if (++transportFails >= 5) throw e;
+        continue;
+      }
+      transportFails = 0;
+      if (!s) continue;
+      if (s.status === "done") return s;
+      if (s.status === "error") throw new Error(s.detail || s.error || "下载失败");
+    }
+    throw new Error("下载超时，任务仍在后台继续，可稍后在列表中查看是否已完成");
+  }
   async function downloadEmojiPack(style){
     try{
-      showToast("⬇️ 正在下载 Emoji "+style+"…");
-      const res=await api.post("emoji/download", {style});
+      showToast("⬇️ 正在后台下载 Emoji "+style+"，完成后自动生效…");
+      let res = null, asyncOk = false;
+      try {
+        // 新版后端：立即返回任务，走轮询（不受面板超时限制）
+        res = await api.post("emoji/download_async", {style});
+        asyncOk = true;
+      } catch (e) {
+        res = null; // 旧版后端无此接口，走同步兼容
+      }
+      if (asyncOk && res && res.job_id) {
+        const job = await pollDownloadJob("emoji/download_status", res.job_id);
+        // 轮询返回的是任务包，展平为下载结果
+        const r = (job && job.result) || {};
+        res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, storage_kb: r.storage_kb, error: r.error || job.detail };
+      } else if (!asyncOk) {
+        res = await api.post("emoji/download", {style});
+      }
       if(res&&res.ok) {
         showToast("✅ Emoji 下载完成，已可选中");
         setSegmentedValue("segEmojiStyle", style);
@@ -1143,16 +1178,26 @@ async def render_text_to_image(text: str):
       } else {
         showToast("下载提示: "+((res&&res.error)||"未知"));
       }
+      try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
     }catch(e){ showToast("下载失败: "+e.message); }
+  }
+  // POST 失败自动重试一次（面板桥接偶发抖动，删除本身幂等可重入）
+  async function apiPostRetryOnce(endpoint, data) {
+    try {
+      return await api.post(endpoint, data);
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return await api.post(endpoint, data);
+    }
   }
   async function deleteEmojiPack(style){
     if(!style) return;
     if(!(await uiConfirm(`确定删除 Emoji 样式 ${style} 的下载缓存吗？`))) return;
     try{
       showToast("正在删除 Emoji 缓存…");
-      const res=await api.post("emoji/delete", {style});
+      const res=await apiPostRetryOnce("emoji/delete", {style});
       if(res&&res.ok) {
         showToast("🗑️ 已删除 "+style);
         // 如果当前选中的是被删样式，重置为 none
@@ -1196,8 +1241,21 @@ async def render_text_to_image(text: str):
     if (!cid || _installingCurated) return;
     _installingCurated = cid;
     try {
-      showToast("⬇️ 正在下载字体，请稍候…");
-      const res = await api.post("fonts/curated_install", { id: cid });
+      showToast("⬇️ 正在后台下载字体，请稍候…");
+      let res = null, asyncOk = false;
+      try {
+        res = await api.post("fonts/curated_install_async", { id: cid });
+        asyncOk = true;
+      } catch (e) {
+        res = null; // 旧版后端无此接口，走同步兼容
+      }
+      if (asyncOk && res && res.job_id) {
+        const job = await pollDownloadJob("fonts/curated_install_status", res.job_id);
+        const r = (job && job.result) || {};
+        res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, error: r.error || job.detail };
+      } else if (!asyncOk) {
+        res = await api.post("fonts/curated_install", { id: cid });
+      }
       if (res && res.ok) {
         const dl = (res.downloaded || []).join("、");
         if (res.error) {
@@ -1654,7 +1712,7 @@ async def render_text_to_image(text: str):
           if (!(await uiConfirm("确定清空全部 Emoji 资源与下载缓存吗？", "确定清空"))) return;
           try {
             showToast("正在清空全部 Emoji 缓存…");
-            const res = await api.post("emoji/delete", { style: "all" });
+            const res = await apiPostRetryOnce("emoji/delete", { style: "all" });
             if (res && res.ok) {
               showToast("🗑️ 已清空全部 Emoji 缓存");
               setSegmentedValue("segEmojiStyle", "none");

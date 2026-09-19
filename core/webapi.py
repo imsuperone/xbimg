@@ -140,7 +140,11 @@ class WebApiMixin:
         reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
         reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
         reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
+        reg(f"/{pfx}/emoji/download_async", self._api_emoji_download_async, ["POST"], "后台下载 Emoji（立即返回任务）")
+        reg(f"/{pfx}/emoji/download_status", self._api_emoji_download_status, ["GET"], "查询 Emoji 下载进度")
         reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
+        reg(f"/{pfx}/fonts/curated_install_async", self._api_fonts_curated_install_async, ["POST"], "后台安装精选字体")
+        reg(f"/{pfx}/fonts/curated_install_status", self._api_fonts_curated_install_status, ["GET"], "查询精选字体安装进度")
         reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
         reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
@@ -895,6 +899,179 @@ class WebApiMixin:
             return json_response({"ok": res.get("ok", False), **res})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
+
+
+
+    # ==========================================
+    # 后台下载任务（长耗时下载不占用 HTTP 请求：立即返回 job_id，前端轮询进度）
+    # 面板桥接/代理常对单请求设超时，10MB+ 字体与几十个 emoji 不适合同步等待
+    # ==========================================
+    _DOWNLOAD_JOBS: Dict[str, Dict[str, Any]] = {}
+    _DOWNLOAD_JOB_LIMIT = 20
+
+    @classmethod
+    def _new_download_job(cls, kind: str, target: str) -> str:
+        try:
+            now = time.time()
+            old = [k for k, v in cls._DOWNLOAD_JOBS.items()
+                   if now - float(v.get("ts", 0) or 0) > 1800]
+            for k in old:
+                cls._DOWNLOAD_JOBS.pop(k, None)
+            while len(cls._DOWNLOAD_JOBS) >= int(cls._DOWNLOAD_JOB_LIMIT):
+                cls._DOWNLOAD_JOBS.pop(next(iter(cls._DOWNLOAD_JOBS)), None)
+            jid = f"job_{int(now * 1000):x}_{os.urandom(4).hex()}"
+            cls._DOWNLOAD_JOBS[jid] = {
+                "status": "running", "kind": kind, "target": target,
+                "detail": "下载中…", "ts": now,
+            }
+            return jid
+        except Exception:
+            jid = f"job_{os.urandom(8).hex()}"
+            cls._DOWNLOAD_JOBS[jid] = {"status": "running", "kind": kind,
+                                   "target": target, "detail": "",
+                                   "ts": time.time()}
+            return jid
+
+    @classmethod
+    def _finish_download_job(cls, jid: str, ok: bool, detail: str = "",
+                             result: Optional[Dict[str, Any]] = None) -> None:
+        try:
+            job = cls._DOWNLOAD_JOBS.get(jid)
+            if job is None:
+                return
+            job["status"] = "done" if ok else "error"
+            job["detail"] = detail
+            if isinstance(result, dict):
+                job["result"] = result
+        except Exception:
+            pass
+
+    @classmethod
+    def _job_public(cls, jid: str) -> Optional[Dict[str, Any]]:
+        try:
+            job = cls._DOWNLOAD_JOBS.get(jid)
+        except Exception:
+            return None
+        if not isinstance(job, dict):
+            return None
+        out = {"ok": True, "job_id": jid, "status": job.get("status", "running"),
+               "kind": job.get("kind", ""), "target": job.get("target", ""),
+               "detail": job.get("detail", "")}
+        if isinstance(job.get("result"), dict):
+            out["result"] = job["result"]
+        return out
+
+    async def _run_download_job(self, jid: str, kind: str, target: str) -> None:
+        """后台执行下载（网络部分放线程池，配置生效放事件循环，无历史包袱）"""
+        try:
+            if kind == "emoji":
+                res = await asyncio.to_thread(download_emoji_pack, target)
+            elif kind == "curated_font":
+                res = await asyncio.to_thread(download_curated_font, target)
+            else:
+                self._finish_download_job(jid, False, f"未知任务类型: {kind}")
+                return
+            if res.get("ok"):
+                try:
+                    if kind == "emoji":
+                        self.cfg_mgr.config["emoji_style"] = target
+                        self.cfg_mgr.save({"emoji_style": target})
+                        configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
+                except Exception as e:
+                    logger.warning(f"[{PLUGIN_NAME}] 下载后配置生效异常: {e}")
+            detail = ""
+            try:
+                if isinstance(res.get("downloaded"), list) and res["downloaded"]:
+                    detail = "、".join(str(x) for x in res["downloaded"][:3])
+                if res.get("error"):
+                    detail = (detail + "; " if detail else "") + str(res["error"])
+            except Exception:
+                pass
+            self._finish_download_job(jid, bool(res.get("ok")), detail or "完成", res)
+        except Exception as e:
+            try:
+                self._finish_download_job(jid, False, f"下载异常: {e}")
+            except Exception:
+                pass
+
+    def _launch_download_job(self, kind: str, target: str) -> Optional[str]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        jid = self._new_download_job(kind, target)
+        try:
+            loop.create_task(self._run_download_job(jid, kind, target))
+            return jid
+        except Exception:
+            self._DOWNLOAD_JOBS.pop(jid, None)
+            return None
+
+    async def _api_emoji_download_async(self):
+        """后台下载 Emoji：参数校验后立即返回 job，前端轮询 download_status"""
+        try:
+            payload = await request.json(default={})
+            if not isinstance(payload, dict):
+                payload = {}
+            style = str(payload.get("style", "") or payload.get("id", "") or "").strip().lower()
+            if style not in ("ios", "android", "windows"):
+                return error_response(f"未知样式: {style or '空'}", status_code=400)
+            jid = self._launch_download_job("emoji", style)
+            if not jid:
+                return error_response("后台任务启动失败", status_code=500)
+            return json_response({"ok": True, "job_id": jid, "status": "running"})
+        except Exception as e:
+            return error_response(f"启动下载失败: {e}", status_code=500)
+
+    async def _api_emoji_download_status(self):
+        """查询 Emoji 后台下载进度：GET ?job_id=xxx"""
+        try:
+            jid = ""
+            try:
+                if request is not None:
+                    args = getattr(request, "args", None)
+                    if args is not None:
+                        try:
+                            jid = str(args.get("job_id", "") or "")
+                        except Exception:
+                            jid = ""
+                    if not jid:
+                        try:
+                            from urllib.parse import parse_qs
+                            env = getattr(request, "environ", None) or {}
+                            vals = parse_qs(str(env.get("QUERY_STRING", "") or "")).get("job_id", [])
+                            if vals:
+                                jid = str(vals[0])
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            pub = self._job_public(jid) if jid else None
+            if pub is None:
+                return error_response("任务不存在或已过期", status_code=404)
+            return json_response(pub)
+        except Exception as e:
+            return error_response(f"查询失败: {e}", status_code=500)
+
+    async def _api_fonts_curated_install_async(self):
+        """后台安装精选字体：立即返回 job，前端轮询 curated_install_status"""
+        try:
+            payload = await request.json(default={})
+            if not isinstance(payload, dict):
+                payload = {}
+            cid = str(payload.get("id", "") or "").strip()
+            if not cid:
+                return error_response(f"缺少字体 id: {str(payload)[:100] or '空参数'}", status_code=400)
+            jid = self._launch_download_job("curated_font", cid)
+            if not jid:
+                return error_response("后台任务启动失败", status_code=500)
+            return json_response({"ok": True, "job_id": jid, "status": "running"})
+        except Exception as e:
+            return error_response(f"启动安装失败: {e}", status_code=500)
+
+    async def _api_fonts_curated_install_status(self):
+        """查询精选字体后台安装进度：GET ?job_id=xxx（与 emoji 共用任务表）"""
+        return await self._api_emoji_download_status()
 
 
 

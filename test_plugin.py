@@ -1137,6 +1137,68 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         imgs = asyncio.run(_go())
         self.assertTrue(imgs)
 
+    def test_async_download_job_api(self):
+        """异步下载接口：立即返回 job，轮询到 done（下载函数打桩零网络）"""
+        import asyncio
+        import core.webapi as webapi_mod
+        from main import Msg2ImgPlugin
+        plugin = Msg2ImgPlugin(context=None, config=dict(DEFAULT_CONFIG))
+        orig_req = webapi_mod.request
+        orig_jr = webapi_mod.json_response
+        orig_er = webapi_mod.error_response
+        orig_dl = webapi_mod.download_emoji_pack
+
+        class Req:
+            def __init__(self, p=None, q=""):
+                self.p = p or {}
+                self.args = {}
+                if q:
+                    from urllib.parse import parse_qs
+                    self.args = {k: v[0] for k, v in parse_qs(q).items()}
+                self.environ = {"QUERY_STRING": q}
+
+            async def json(self, default=None):
+                return self.p
+
+        webapi_mod.json_response = lambda d: d
+        webapi_mod.error_response = lambda msg, status_code=500: {"ok": False, "error": msg}
+        webapi_mod.download_emoji_pack = lambda style: {"ok": True, "downloaded": [style], "storage_kb": 1.0}
+        try:
+            async def _go():
+                webapi_mod.request = Req({"style": "android"})
+                started = await plugin._api_emoji_download_async()
+                self.assertTrue(started.get("job_id"))
+                self.assertEqual(started.get("status"), "running")
+                for _ in range(100):
+                    webapi_mod.request = Req(None, f"job_id={started['job_id']}")
+                    st = await plugin._api_emoji_download_status()
+                    if st.get("status") != "running":
+                        return st
+                    await asyncio.sleep(0.05)
+                return {"ok": False, "error": "timeout"}
+
+            st = asyncio.run(_go())
+            self.assertEqual(st.get("status"), "done")
+            self.assertTrue(st["result"]["ok"])
+            # 非法参数 400 自报
+            async def _bad():
+                webapi_mod.request = Req({"style": "xxx"})
+                return await plugin._api_emoji_download_async()
+            bad = asyncio.run(_bad())
+            self.assertFalse(bad.get("ok"))
+            self.assertIn("xxx", bad.get("error", ""))
+            # 未知任务 404
+            async def _unknown():
+                webapi_mod.request = Req(None, "job_id=nope")
+                return await plugin._api_emoji_download_status()
+            unk = asyncio.run(_unknown())
+            self.assertFalse(unk.get("ok"))
+        finally:
+            webapi_mod.request = orig_req
+            webapi_mod.json_response = orig_jr
+            webapi_mod.error_response = orig_er
+            webapi_mod.download_emoji_pack = orig_dl
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re
