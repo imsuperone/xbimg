@@ -552,10 +552,10 @@ class CommandsMixin:
                 return
             if action in ("list", "列表"):
                 try:
-                    from core.renderer import CURATED_FONTS as _CF
+                    from .renderer import CURATED_FONTS as _CF
                 except Exception:
                     try:
-                        from .core.renderer import CURATED_FONTS as _CF
+                        from core.renderer import CURATED_FONTS as _CF
                     except Exception:
                         _CF = []
                 presets = cfg.get("keyword_presets", {})
@@ -666,10 +666,10 @@ class CommandsMixin:
                     yield event.plain_result("用法：/xbimg group ttf <字体id> [群号]\n可发送 /xbimg group list 查看可用 id。")
                     return
                 try:
-                    from core.renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
+                    from .renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
                 except Exception:
                     try:
-                        from .core.renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
+                        from core.renderer import CURATED_FONTS as _CF2, download_curated_font as _dl2
                     except Exception:
                         _CF2 = []
                         _dl2 = None

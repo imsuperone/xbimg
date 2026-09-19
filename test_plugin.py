@@ -1137,6 +1137,18 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         imgs = asyncio.run(_go())
         self.assertTrue(imgs)
 
+    def test_lazy_imports_relative_first(self):
+        """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
+        import re
+        core_dir = WORKSPACE / "core"
+        bad = []
+        for f in sorted(core_dir.glob("*.py")):
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                s = line.strip()
+                if re.match(r"from \.core\.\w+ import", s):
+                    bad.append(f"{f.name}:{i}: {s}")
+        self.assertEqual(bad, [])
+
     def test_android_singles_skip_network_when_font_ready(self):
         """android 本地彩字已装时单字零网络：fetch 直接抛错也必须出图且零调用"""
         import shutil

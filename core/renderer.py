@@ -679,12 +679,16 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
             "1f4a9", "1f4ac", "1f4f7", "23e9", "1f552", "1f6a7", "1f52e",
             "1f3af", "1f3b0", "1f3b2", "1f3b3",
         ]
-        dl_cnt = 0
-        for code in base_emojis:
-            p = d / f"{code}.png"
-            if not p.is_file():
-                if _fetch_remote_emoji(code, d):
-                    dl_cnt += 1
+        # 缺失项并行补齐（单文件 urllib 无复用，并行大幅缩短总耗时；失败静默按需再补）
+        missing = [c for c in base_emojis if not (d / f"{c}.png").is_file()]
+        pre_have = len(base_emojis) - len(missing)
+        if missing:
+            try:
+                import concurrent.futures as _cfut
+                with _cfut.ThreadPoolExecutor(max_workers=min(6, len(missing))) as _ex:
+                    list(_ex.map(lambda _c: _fetch_remote_emoji(_c, d), missing))
+            except Exception:
+                pass
         have = sum(1 for code in base_emojis if (d / f"{code}.png").is_file())
         if not have:
             # 一个都没下来：不写 ready 标记，如实报错（否则会虚标“已下载”）
@@ -697,7 +701,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
             (d / "ios_pack.ready").write_text("ok", encoding="utf-8")
         except Exception:
             pass
-        extra = "（已齐全）" if dl_cnt == 0 else ""
+        extra = "（已齐全）" if have <= pre_have else ""
         return {"ok": True, "downloaded": [f"iOS基础Emoji({have}/{len(base_emojis)}个常用{extra}，其余按需自动补全)"], "storage_kb": get_emoji_storage_kb("ios")}
 
     # android 或 windows（多直链容错，依次尝试；下载后校验体积，残包换源重试）
@@ -1804,7 +1808,7 @@ def _data_subdir(name: str) -> Optional[Path]:
             _FONT_DATA_DIR = resolve_data_dir()
         except Exception:
             try:
-                from core.config import resolve_data_dir
+                from .config import resolve_data_dir
                 _FONT_DATA_DIR = resolve_data_dir()
             except Exception:
                 pass

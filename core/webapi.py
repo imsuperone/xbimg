@@ -519,7 +519,7 @@ class WebApiMixin:
     async def _api_reset_config(self):
         from copy import deepcopy
         try:
-            from .core.config import DEFAULT_CONFIG
+            from .config import DEFAULT_CONFIG
         except (ImportError, ValueError):
             from core.config import DEFAULT_CONFIG
         self.cfg_mgr.config = deepcopy(DEFAULT_CONFIG)
@@ -571,9 +571,9 @@ class WebApiMixin:
         """持久化字体目录：直接复用 renderer._font_data_dir（唯一来源，避免双份逻辑漂移）"""
         try:
             try:
-                from core.renderer import _font_data_dir
+                from .renderer import _font_data_dir
             except (ImportError, ValueError):
-                from .core.renderer import _font_data_dir
+                from core.renderer import _font_data_dir
             d = _font_data_dir()
             if d is not None:
                 return d
@@ -581,9 +581,9 @@ class WebApiMixin:
             pass
         try:
             try:
-                from core.renderer import FONT_DATA_SUBDIR
+                from .renderer import FONT_DATA_SUBDIR
             except (ImportError, ValueError):
-                from .core.renderer import FONT_DATA_SUBDIR
+                from core.renderer import FONT_DATA_SUBDIR
             d = self.cfg_mgr.data_dir / FONT_DATA_SUBDIR
             try:
                 d.mkdir(parents=True, exist_ok=True)
@@ -603,9 +603,9 @@ class WebApiMixin:
     def _usable_data_fonts(self) -> List[str]:
         """持久化目录可用字体文件名（排序，与 WebUI 列表同序），供删除后回退选用"""
         try:
-            from core.renderer import _is_usable_font
+            from .renderer import _is_usable_font
         except (ImportError, ValueError):
-            from .core.renderer import _is_usable_font
+            from core.renderer import _is_usable_font
         out: List[str] = []
         try:
             d = self._fonts_data_dir()
@@ -627,9 +627,9 @@ class WebApiMixin:
         """删除字体后回退：当前自定义字体失效时，仅剩 1 个可用则默认用它，
         多个则用列表第一个；无可用则清空回自动。返回选中的文件名（无改动返回空串）。"""
         try:
-            from core.renderer import _resolve_custom_font
+            from .renderer import _resolve_custom_font
         except (ImportError, ValueError):
-            from .core.renderer import _resolve_custom_font
+            from core.renderer import _resolve_custom_font
         cfg = self.cfg_mgr.config
         try:
             src = str(cfg.get("font_source", "auto") or "auto").lower()
@@ -670,9 +670,9 @@ class WebApiMixin:
     async def _api_fonts_files(self):
         """列出持久化目录中的字体文件（可删除的只有这些，随包/系统字体只读）"""
         try:
-            from core.renderer import _is_usable_font
+            from .renderer import _is_usable_font
         except (ImportError, ValueError):
-            from .core.renderer import _is_usable_font
+            from core.renderer import _is_usable_font
         try:
             d = self._fonts_data_dir()
             files = []
@@ -706,9 +706,9 @@ class WebApiMixin:
                 return error_response("仅允许删除字体文件", status_code=400)
             # 先清缓存释放句柄
             try:
-                from core.renderer import clear_font_cache
+                from .renderer import clear_font_cache
             except (ImportError, ValueError):
-                from .core.renderer import clear_font_cache
+                from core.renderer import clear_font_cache
             try:
                 clear_font_cache()
             except Exception:
@@ -830,9 +830,9 @@ class WebApiMixin:
             try:
                 self.cfg_mgr.config["emoji_style"] = style
                 self.cfg_mgr.save({"emoji_style": style})
-                from core.renderer import configure_fonts as _cf
+                from .renderer import configure_fonts as _cf
             except (ImportError, ValueError):
-                from .core.renderer import configure_fonts as _cf
+                from core.renderer import configure_fonts as _cf
             try:
                 _cf(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
@@ -856,11 +856,11 @@ class WebApiMixin:
                 if cur == style:
                     self.cfg_mgr.config["emoji_style"] = "none"
                     self.cfg_mgr.save({"emoji_style": "none"})
-                    from core.renderer import configure_fonts as _cf2
+                    from .renderer import configure_fonts as _cf2
                 else:
-                    from core.renderer import configure_fonts as _cf2
+                    from .renderer import configure_fonts as _cf2
             except (ImportError, ValueError):
-                from .core.renderer import configure_fonts as _cf2
+                from core.renderer import configure_fonts as _cf2
             try:
                 _cf2(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
