@@ -45,13 +45,36 @@
 
   let _detectedPrefix = null;
 
-  async function tryFetchJson(url, options = {}) {
-    const res = await fetch(url, options);
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+  async function tryFetchJson(url, options = {}, timeoutMs = 25000) {
+    const ctrl = ("AbortController" in window) ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, timeoutMs) : null;
+    try {
+      const res = await fetch(url, { ...(options || {}), ...(ctrl ? { signal: ctrl.signal } : {}) });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+      }
+      return await res.json();
+    } catch (e) {
+      if (e && (e.name === "AbortError" || String(e && e.message || "").includes("aborted"))) {
+        throw new Error(`请求超时(${Math.round(timeoutMs / 1000)}s): ${url}`);
+      }
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return await res.json();
+  }
+
+  // 桥接调用也加超时：桥接 hung 住时直接走 fetch 兜底，不无限等待
+  function withBridgeTimeout(promise, ms, label) {
+    let timer = null;
+    const t = new Promise((_, rej) => {
+      timer = setTimeout(() => rej(new Error(`桥接超时(${Math.round(ms / 1000)}s): ${label}`)), ms);
+    });
+    const p = (promise && typeof promise.finally === "function")
+      ? promise.finally(() => { if (timer) clearTimeout(timer); })
+      : promise;
+    return Promise.race([p, t]);
   }
 
   // 后端 API 前缀：新 ID 优先；旧 astrbot_plugin_msg2img 仅做兜底探测（兼容旧版容器）
@@ -86,7 +109,7 @@
       const b = getBridge();
       if (b && typeof b.apiGet === "function") {
         try {
-          return await b.apiGet(endpoint, params);
+          return await withBridgeTimeout(b.apiGet(endpoint, params), 30000, endpoint);
         } catch (e) {
           console.warn(`[msg2img] bridge.apiGet(${endpoint}) 失败，回退 fetch:`, e);
         }
@@ -100,7 +123,7 @@
       const b = getBridge();
       if (b && typeof b.apiPost === "function") {
         try {
-          return await b.apiPost(endpoint, data);
+          return await withBridgeTimeout(b.apiPost(endpoint, data), 30000, endpoint);
         } catch (e) {
           console.warn(`[xbimg] bridge.apiPost(${endpoint}) 失败，回退 fetch:`, e);
         }
@@ -2106,6 +2129,7 @@ async def render_text_to_image(text: str):
     fetchFontFiles: fetchFontFiles,
     deleteFont: deleteFont,
     fetchCuratedFonts: fetchCuratedFonts,
+    fetchEmojiPacks: fetchEmojiPacks,
     installCuratedFont: installCuratedFont,
     applySelectedFont: applySelectedFont,
     downloadCustomUrl: downloadCustomUrl,

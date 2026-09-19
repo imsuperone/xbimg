@@ -573,8 +573,50 @@ def configure_fonts(config: Optional[Dict[str, Any]], data_dir: Optional[Path] =
     _rebuild_active_fonts()
 
 
+# emoji 占用统计缓存：style -> (ts, kb)，页面一次加载触发 4 次全盘 rglob，10s 内复用
+_EMOJI_STORAGE_CACHE: Dict[str, Any] = {}
+_EMOJI_STORAGE_TTL = 10.0
+
+
+def _emoji_storage_invalidate() -> None:
+    """下载/删除完成后失效占用缓存，下次查询重新统计"""
+    try:
+        _EMOJI_STORAGE_CACHE.clear()
+    except Exception:
+        pass
+
+
 def get_emoji_storage_kb(style: Optional[str] = None) -> float:
-    """计算 emoji 持久化目录占用（KB），可按样式精确过滤"""
+    """计算 emoji 持久化目录占用（KB），可按样式精确过滤（10s TTL 缓存）"""
+    try:
+        # 缓存键必须带目录：测试/多数据目录场景下同 style 不同目录互不串扰
+        try:
+            _dd = _data_subdir("emoji")
+            _dkey = str(_dd) if _dd is not None else ""
+        except Exception:
+            _dkey = ""
+        key = f"{style or ''}\0{_dkey}"
+        now = time.time()
+        hit = _EMOJI_STORAGE_CACHE.get(key)
+        if hit is not None:
+            try:
+                if now - float(hit[0]) < _EMOJI_STORAGE_TTL:
+                    return float(hit[1])
+            except Exception:
+                pass
+        total = _get_emoji_storage_kb_nocache(style)
+        try:
+            if len(_EMOJI_STORAGE_CACHE) > 16:
+                _EMOJI_STORAGE_CACHE.pop(next(iter(_EMOJI_STORAGE_CACHE)))
+            _EMOJI_STORAGE_CACHE[key] = (now, total)
+        except Exception:
+            pass
+        return total
+    except Exception:
+        return 0.0
+
+
+def _get_emoji_storage_kb_nocache(style: Optional[str] = None) -> float:
     try:
         d = _data_subdir("emoji")
         if d is None or not d.is_dir():
@@ -702,6 +744,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         except Exception:
             pass
         extra = "（已齐全）" if have <= pre_have else ""
+        _emoji_storage_invalidate()
         return {"ok": True, "downloaded": [f"iOS基础Emoji({have}/{len(base_emojis)}个常用{extra}，其余按需自动补全)"], "storage_kb": get_emoji_storage_kb("ios")}
 
     # android 或 windows（多直链容错，依次尝试；下载后校验体积，残包换源重试）
@@ -726,6 +769,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         break
     if ok:
         _EMOJI_FONT_CACHE.clear()
+        _emoji_storage_invalidate()
         return {"ok": True, "downloaded": [fname], "storage_kb": get_emoji_storage_kb(style)}
     return {"ok": False, "error": f"{fname} 下载失败: {err or '未知错误'}", "storage_kb": 0.0}
 
@@ -785,6 +829,7 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
                 except Exception:
                     pass
         clear_font_cache()
+        _emoji_storage_invalidate()
         return {"ok": True, "deleted": deleted, "storage_kb": get_emoji_storage_kb()}
     except Exception as e:
         return {"ok": False, "error": str(e)}

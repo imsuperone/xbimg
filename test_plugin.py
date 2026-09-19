@@ -1199,6 +1199,41 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             webapi_mod.error_response = orig_er
             webapi_mod.download_emoji_pack = orig_dl
 
+    def test_emoji_storage_ttl_cache(self):
+        """占用统计 10s 缓存：命中不扫盘，失效后重算"""
+        import shutil
+        import tempfile
+        import time as _t
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            R._emoji_storage_invalidate()
+            ed = tmp / "emoji"
+            ed.mkdir(parents=True, exist_ok=True)
+            (ed / "a.png").write_bytes(b"0" * 2048)
+            v1 = R.get_emoji_storage_kb("ios")
+            self.assertEqual(v1, 2.0)
+            (ed / "b.png").write_bytes(b"0" * 2048)
+            self.assertEqual(R.get_emoji_storage_kb("ios"), 2.0)  # 缓存命中
+            R._emoji_storage_invalidate()
+            self.assertEqual(R.get_emoji_storage_kb("ios"), 4.0)  # 失效重算
+            R._EMOJI_STORAGE_CACHE["ios"] = (_t.time() - 60, 999.0)  # 过期
+            self.assertEqual(R.get_emoji_storage_kb("ios"), 4.0)
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._emoji_storage_invalidate()
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re
