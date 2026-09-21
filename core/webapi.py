@@ -69,6 +69,51 @@ def _cdn_probe_host(host: str, timeout: float = 4.0) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)[:120]}
 
 
+def _read_query_param(name: str, default: str = "") -> str:
+    """读当前请求的 query 参数，三代兼容：
+    新版 AstrBot request.query → 旧版 request.args → 古董 Quart environ。
+    必须兼容的原因：新版 request 根本没有 .args，读不到轮询 job_id 会一直 404。
+    """
+    try:
+        if request is None:
+            return default
+    except Exception:
+        return default
+    try:
+        q = getattr(request, "query", None)
+        if q is not None:
+            try:
+                v = q.get(name, "")
+            except Exception:
+                v = ""
+            if v:
+                return str(v)
+    except Exception:
+        pass
+    try:
+        args = getattr(request, "args", None)
+        if args is not None:
+            try:
+                v = args.get(name, "")
+            except Exception:
+                v = ""
+            if v:
+                return str(v)
+    except Exception:
+        pass
+    try:
+        env = getattr(request, "environ", None) or {}
+        qs = str(env.get("QUERY_STRING", "") or "")
+        if qs:
+            from urllib.parse import parse_qs
+            vals = parse_qs(qs).get(name, [])
+            if vals:
+                return str(vals[0])
+    except Exception:
+        pass
+    return default
+
+
 class WebApiMixin:
     """WebApiMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
@@ -106,34 +151,12 @@ class WebApiMixin:
 
 
     def _read_nonce_from_request(self) -> Optional[str]:
-        """从当前请求读 nonce：Quart 兼容 args → environ QUERY_STRING；都没有则返回 None（调用方保兼容）"""
+        """从当前请求读 nonce：读不到返回 None（调用方按版本保兼容）"""
         try:
-            if request is None:
-                return None
+            v = _read_query_param("nonce", "")
+            return str(v) if v else None
         except Exception:
             return None
-        try:
-            args = getattr(request, "args", None)
-            if args is not None:
-                try:
-                    v = args.get("nonce", "")
-                except Exception:
-                    v = ""
-                if v:
-                    return str(v)
-        except Exception:
-            pass
-        try:
-            env = getattr(request, "environ", None) or {}
-            qs = str(env.get("QUERY_STRING", "") or "")
-            if qs:
-                from urllib.parse import parse_qs
-                vals = parse_qs(qs).get("nonce", [])
-                if vals:
-                    return str(vals[0])
-        except Exception:
-            pass
-        return None
 
     # ==========================================
     # WebUI 后端 API 接口
@@ -1071,26 +1094,7 @@ class WebApiMixin:
     async def _api_emoji_download_status(self):
         """查询 Emoji 后台下载进度：GET ?job_id=xxx"""
         try:
-            jid = ""
-            try:
-                if request is not None:
-                    args = getattr(request, "args", None)
-                    if args is not None:
-                        try:
-                            jid = str(args.get("job_id", "") or "")
-                        except Exception:
-                            jid = ""
-                    if not jid:
-                        try:
-                            from urllib.parse import parse_qs
-                            env = getattr(request, "environ", None) or {}
-                            vals = parse_qs(str(env.get("QUERY_STRING", "") or "")).get("job_id", [])
-                            if vals:
-                                jid = str(vals[0])
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            jid = _read_query_param("job_id", "")
             pub = self._job_public(jid) if jid else None
             if pub is None:
                 return error_response("任务不存在或已过期", status_code=404)

@@ -1542,6 +1542,56 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
             shutil.rmtree(srv_dir, ignore_errors=True)
 
+    def test_new_request_query_shape(self):
+        """新版 AstrBot 只有 request.query（无 args/environ）：轮询与 nonce 照读"""
+        import asyncio
+        import core.webapi as webapi_mod
+        from main import Msg2ImgPlugin
+        plugin = Msg2ImgPlugin(context=None, config=dict(DEFAULT_CONFIG))
+        orig_req = webapi_mod.request
+        orig_jr = webapi_mod.json_response
+        orig_er = webapi_mod.error_response
+
+        class NewQuery:
+            def __init__(self, d):
+                self._d = d
+
+            def get(self, k, default=""):
+                v = self._d.get(k, default)
+                return v if v else default
+
+        class NewReq:
+            query = None
+
+            def __init__(self, q):
+                self.query = NewQuery(q)
+
+            async def json(self, default=None):
+                return {}
+
+        webapi_mod.json_response = lambda d: d
+        webapi_mod.error_response = lambda msg, status_code=500: {"ok": False, "error": msg}
+        try:
+            # 轮询：能读到 job_id，不再 404
+            jid = plugin._new_download_job("emoji", "ios")
+            webapi_mod.request = NewReq({"job_id": jid})
+            st = asyncio.run(plugin._api_emoji_download_status())
+            self.assertTrue(st.get("ok"), st)
+            self.assertEqual(st.get("job_id"), jid)
+            # nonce：能读到
+            webapi_mod.request = NewReq({"nonce": "pv_abc"})
+            plugin._preview_nonces["pv_abc"] = 9999999999.0
+            self.assertEqual(plugin._read_nonce_from_request(), "pv_abc")
+            # 空 query：返回 None/404 而非抛异常
+            webapi_mod.request = NewReq({})
+            self.assertIsNone(plugin._read_nonce_from_request())
+            st2 = asyncio.run(plugin._api_emoji_download_status())
+            self.assertFalse(st2.get("ok"))
+        finally:
+            webapi_mod.request = orig_req
+            webapi_mod.json_response = orig_jr
+            webapi_mod.error_response = orig_er
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re
