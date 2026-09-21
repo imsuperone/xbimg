@@ -987,29 +987,108 @@ def _safe_font_filename(url: str) -> str:
     return name or "custom-font.ttf"
 
 
+# 同目标并发下载互斥（字典 + 全局守卫，避免两线程写同一 tmp 交错损坏）
+_DL_LOCKS: Dict[str, "threading.Lock"] = {}
+_DL_LOCKS_GUARD = threading.Lock()
+
+
+def _download_lock_for(dest: Path):
+    try:
+        key = str(dest)
+        with _DL_LOCKS_GUARD:
+            lk = _DL_LOCKS.get(key)
+            if lk is None:
+                lk = threading.Lock()
+                _DL_LOCKS[key] = lk
+                if len(_DL_LOCKS) > 64:
+                    try:
+                        _DL_LOCKS.pop(next(iter(_DL_LOCKS)))
+                    except Exception:
+                        pass
+            return lk
+    except Exception:
+        return threading.Lock()
+
+
 def _download_file(url: str, dest: Path) -> Tuple[bool, str]:
-    """标准库下载单个文件：超时 + 体积上限 + 原子落盘"""
+    """标准库下载单个文件：超时 + 体积上限 + 断点续传 + 原子落盘。
+
+    抖动链路上大文件（10MB+ 彩字）一次下完不现实：tmp 按 URL 哈希固定命名，
+    中断后下次从断点 Range 续传；服务器不支持 Range 则从头重下。
+    同目标并发由锁串行化；成功后清理同目标其他 URL 的残留分片。
+    """
+    import hashlib as _hl
+
+    try:
+        url_hash = _hl.sha1(str(url or "").encode("utf-8", "ignore")).hexdigest()[:8]
+    except Exception:
+        url_hash = "x"
+    tmp = dest.with_name(f"{dest.name}.{url_hash}.downloading")
+    lock = _download_lock_for(dest)
+    try:
+        with lock:
+            return _download_file_locked(url, dest, tmp)
+    except Exception as e:
+        return False, str(e)
+
+
+def _download_file_locked(url: str, dest: Path, tmp: Path) -> Tuple[bool, str]:
     try:
         import urllib.request
+        start = 0
+        try:
+            if tmp.is_file():
+                start = max(0, int(tmp.stat().st_size))
+        except Exception:
+            start = 0
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "*/*",
         }
+        if start > 0:
+            headers["Range"] = f"bytes={start}-"
         req = urllib.request.Request(url, headers=headers)
-        tmp = dest.with_suffix(dest.suffix + f".dl_{int(time.time()*1000)}")
-        total = 0
-        with urllib.request.urlopen(req, timeout=_FONT_DL_TIMEOUT) as resp:
-            with open(tmp, "wb") as f:
-                while True:
-                    chunk = resp.read(256 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > _FONT_DL_MAX_BYTES:
-                        raise ValueError("文件超过体积上限，已中止")
-                    f.write(chunk)
+        try:
+            resp = urllib.request.urlopen(req, timeout=_FONT_DL_TIMEOUT)
+        except Exception as e:
+            # 建连/握手失败：保留分片供下次续传（不删 tmp）
+            return False, str(e)
+        with resp:
+            try:
+                code = getattr(resp, "status", None) or resp.getcode()
+            except Exception:
+                code = 200
+            if code == 416:
+                # 分片已超长/服务端无此范围：删分片，下次从头来
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return False, "服务器拒绝断点续传，已清理请重试"
+            if code not in (200, 206):
+                return False, f"HTTP {code}"
+            if code == 200 and start > 0:
+                # 服务端无视 Range：分片内容不可续，截断重下
+                start = 0
+            total = start
+            try:
+                with open(tmp, "ab" if (code == 206 and start > 0) else "wb") as f:
+                    while True:
+                        chunk = resp.read(256 * 1024)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > _FONT_DL_MAX_BYTES:
+                            raise ValueError("文件超过体积上限，已中止")
+                        f.write(chunk)
+            except Exception as e:
+                # 传输中断：保留分片供续传
+                return False, str(e)
         if total < 1024:
-            tmp.unlink(missing_ok=True)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
             return False, "下载文件体积过小或为空"
         # 原子落盘前清缓存释放潜在读句柄
         try:
@@ -1022,12 +1101,17 @@ def _download_file(url: str, dest: Path) -> Tuple[bool, str]:
             except Exception:
                 pass
         os.replace(tmp, dest)
-        return True, ""
-    except Exception as e:
+        # 成功后清理同目标其他 URL 的残留分片
         try:
-            tmp.unlink(missing_ok=True)
+            for p in dest.parent.glob(f"{dest.name}.*.downloading"):
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
         except Exception:
             pass
+        return True, ""
+    except Exception as e:
         return False, str(e)
 
 

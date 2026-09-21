@@ -1476,6 +1476,72 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("error", r)
 
+    def test_font_download_resume(self):
+        """字体下载断点续传：残留分片 + 服务端 206，续传后内容完整且只传剩余部分"""
+        import functools
+        import hashlib
+        import http.server
+        import shutil
+        import socketserver
+        import tempfile
+        import threading
+        from core import renderer as R
+        payload = (b"0123456789ABCDEF" * 65536)[: 1024 * 1024]  # 1MB
+        srv_dir = Path(tempfile.mkdtemp(prefix="xbimg_srv_"))
+        (srv_dir / "f.ttf").write_bytes(payload)
+        seen = {"range": [], "sent": 0}
+
+        class H(http.server.SimpleHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.split("?")[0] != "/f.ttf":
+                    self.send_error(404)
+                    return
+                seen["range"].append(self.headers.get("Range"))
+                start, code = 0, 200
+                rg = self.headers.get("Range") or ""
+                if rg.startswith("bytes="):
+                    try:
+                        start = int(rg[len("bytes="):].split("-")[0])
+                        assert 0 < start < len(payload)
+                        code = 206
+                    except Exception:
+                        start, code = 0, 200
+                body = payload[start:]
+                self.send_response(code)
+                self.send_header("Content-Length", str(len(body)))
+                if code == 206:
+                    self.send_header(
+                        "Content-Range",
+                        f"bytes {start}-{len(payload)-1}/{len(payload)}")
+                self.end_headers()
+                self.wfile.write(body)
+                seen["sent"] += len(body)
+
+            def log_message(self, *a):
+                pass
+
+        httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=httpd.serve_forever,
+                         kwargs={"poll_interval": 0.05}, daemon=True).start()
+        tmp = Path(tempfile.mkdtemp(prefix="xbimg_resume_"))
+        try:
+            url = f"http://127.0.0.1:{httpd.server_address[1]}/f.ttf"
+            dest = tmp / "f.ttf"
+            part = dest.with_name(
+                f"{dest.name}."
+                f"{hashlib.sha1(url.encode()).hexdigest()[:8]}.downloading")
+            part.write_bytes(payload[: 256 * 1024])  # 模拟中断残留 256KB
+            ok, err = R._download_file(url, dest)
+            self.assertTrue(ok, err)
+            self.assertEqual(dest.read_bytes(), payload)
+            self.assertFalse(part.exists())
+            self.assertIn("bytes=262144-", seen["range"])
+            self.assertLess(seen["sent"], len(payload) * 1.5)
+        finally:
+            httpd.shutdown()
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(srv_dir, ignore_errors=True)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re
