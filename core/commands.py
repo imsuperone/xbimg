@@ -730,6 +730,9 @@ class CommandsMixin:
                 style_eff = grp_c.get("style", cfg.get("style", "ios"))
                 theme_eff = grp_c.get("theme_mode", cfg.get("theme_mode", "light"))
                 tname = _gname(target) if target else "全局"
+                _perf_g = self._perf_enabled()
+                _t0g = time.perf_counter() if _perf_g else 0.0
+                _perf_out_g = {} if _perf_g else None
                 test_content = (
                     f"# 🎨【{tname}】专属渲染效果测试\n"
                     "这是一段用于测试消息转图排版与美观度的标准文本。\n\n"
@@ -757,20 +760,37 @@ class CommandsMixin:
                         font_scale=eff_scale,
                         custom_font_path=str(grp_c.get("custom_font_path", "") or ""),
                         custom_bold_font_path=str(grp_c.get("custom_bold_font_path", "") or ""),
+                        perf_out=_perf_out_g,
                     )
                 except Exception as e:
                     yield event.plain_result(f"❌ 测试图生成失败: {e}")
                     return
                 chain_imgs = []
+                chain_pairs = []
+                if _perf_g:
+                    _t_saveg = time.perf_counter()
                 for _idx, _im in enumerate(img or []):
                     try:
                         img_filename = f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
                         img_path = self.cache_dir / img_filename
                         await asyncio.to_thread(_im.save, str(img_path), "PNG")
                         self._schedule_delete(img_path, 45)
+                        chain_pairs.append((_im, img_path))
                         chain_imgs.append(AstrImage.fromFileSystem(str(img_path)))
                     except Exception as e:
                         logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+                if _perf_g:
+                    try:
+                        _mo, _pf, _dr, _la = self._perf_vals(_perf_out_g)
+                        self._emit_perf_log(
+                            tname, (time.perf_counter() - _t0g) * 1000.0,
+                            0.0, _mo, _pf,
+                            [p[0] for p in chain_pairs], [p[1] for p in chain_pairs],
+                            draw_ms=_dr, layout_ms=_la,
+                            save_ms=(time.perf_counter() - _t_saveg) * 1000.0,
+                        )
+                    except Exception:
+                        pass
                 if not chain_imgs:
                     yield event.plain_result("❌ 测试图生成失败：图片为空。")
                     return
@@ -783,14 +803,29 @@ class CommandsMixin:
             if not self._test_cooldown_ok(event, "test"):
                 yield event.plain_result("⏳ 测试太频繁，请 15 秒后再试。")
                 return
+            _perf_t = self._perf_enabled()
+            _t0t = time.perf_counter() if _perf_t else 0.0
+            _t_modt = _t0t if _perf_t else 0.0
+            _perf_out_t = {} if _perf_t else None
             try:
                 # 测试文本同样过审查：block 直接拒绝，mosaic 则如实打出马赛克效果
                 _tmod, _teff, _tmosaic = await self._moderate_text(test_content)
             except Exception as e:
                 yield event.plain_result(f"❌ 测试图生成失败: {e}")
                 return
+            _mod_ms_t = (time.perf_counter() - _t_modt) * 1000.0 if _perf_t else 0.0
             if _tmod.is_violated and _tmod.action == "block":
                 self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                if _perf_t:
+                    try:
+                        _gid_t = self._extract_group_id(event)
+                        self._emit_perf_log(
+                            f"群{_gid_t}" if _gid_t else "私聊",
+                            (time.perf_counter() - _t0t) * 1000.0,
+                            _mod_ms_t, 0.0, 0.0, [], [], blocked=True,
+                        )
+                    except Exception:
+                        pass
                 yield event.plain_result("🚫 测试文本触发安全审查，已拦截不生成。")
                 return
             try:
@@ -800,20 +835,37 @@ class CommandsMixin:
             try:
                 imgs = await self._render_moderated(
                     _teff, _tmod, _tmosaic, font_scale=_tfs,
+                    perf_out=_perf_out_t,
                 )
             except Exception as e:
                 yield event.plain_result(f"❌ 测试图生成失败: {e}")
                 return
             test_imgs = []
+            test_pairs = []
+            _t_savet = time.perf_counter() if _perf_t else 0.0
             for _idx, _im in enumerate(imgs or []):
                 # 毫秒+序号+随机：同秒并发 test 不互相覆盖；45 秒后自动清理
                 try:
                     test_path = self.cache_dir / f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
                     await asyncio.to_thread(_im.save, str(test_path), "PNG")
                     self._schedule_delete(test_path, 45)
+                    test_pairs.append((_im, test_path))
                     test_imgs.append(AstrImage.fromFileSystem(str(test_path)))
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+            if _perf_t:
+                try:
+                    _gid_t2 = self._extract_group_id(event)
+                    _mo, _pf, _dr, _la = self._perf_vals(_perf_out_t)
+                    self._emit_perf_log(
+                        f"群{_gid_t2}" if _gid_t2 else "私聊",
+                        (time.perf_counter() - _t0t) * 1000.0, _mod_ms_t,
+                        _mo, _pf, [p[0] for p in test_pairs], [p[1] for p in test_pairs],
+                        draw_ms=_dr, layout_ms=_la,
+                        save_ms=(time.perf_counter() - _t_savet) * 1000.0,
+                    )
+                except Exception:
+                    pass
             if not test_imgs:
                 yield event.plain_result("❌ 测试图生成失败：图片为空。")
                 return

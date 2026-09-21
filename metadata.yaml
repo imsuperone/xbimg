@@ -10,7 +10,7 @@ desc: |
   - 🤖 独立 AI 审查：一键开关大模型双轨审查，支持 AstrBot 已接入模型与自定义 OpenAI 接口
   - 🎭 违规半马赛克：支持对违规内容进行创意“打一半马赛克/下半截马赛克”处理，保障群聊安全
   - 📱 全新全屏 WebUI：交互式仪表盘，单列全屏优雅排版，支持独立实时文本渲染测试台
-version: 1.0.39
+version: 1.0.40
 author: Light
 repo: https://github.com/imsuperone/xbimg
 support_platforms:
