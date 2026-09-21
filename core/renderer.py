@@ -822,7 +822,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
     if style == "android":
         furls = list(ANDROID_EMOJI_URLS)
     else:
-        furls = [WINDOWS_EMOJI_URL]
+        furls = list(WINDOWS_EMOJI_URLS)
     target = d / fname
     ok, err = False, ""
     for furl in furls:
@@ -1924,21 +1924,33 @@ def _parse_content_blocks(raw_text: str) -> List[LineBlock]:
 # 云端图源 Twemoji (CC-BY 4.0)，按需下载单个 72x72 PNG 并持久缓存
 # ==========================================
 _TWEMOJI_BASE = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72"
+# 同源镜像（内容一致，链路故障时轮换；404 表示文件真没有，无需换源）
+_TWEMOJI_BASES = [
+    _TWEMOJI_BASE,
+    "https://fastly.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72",
+    "https://gcore.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72",
+]
 _EMOJI_DL_TIMEOUT = 8
 _EMOJI_DL_MAX_BYTES = 2 * 1024 * 1024
 # Noto 全彩 Emoji 字体（Android 原生风格）
 # 注意：上游 noto-emoji 仓库已改为源码仓，旧 main 直链永久 404；
-# 改用 commit 锁定的 unicode16 版本（不可变，永久有效），jsdelivr 主 + raw 备用
+# 改用 commit 锁定的 unicode16 版本（不可变，永久有效），多镜像轮换
 ANDROID_EMOJI_FILE = "NotoColorEmoji.ttf"
 _NOTO_PIN_SHA = "124c7d40bb51bc026b5407dfffd34e1e6843e1a8"
 ANDROID_EMOJI_URLS = [
     f"https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
+    f"https://fastly.jsdelivr.net/gh/googlefonts/noto-emoji@{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
+    f"https://gcore.jsdelivr.net/gh/googlefonts/noto-emoji@{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
     f"https://raw.githubusercontent.com/googlefonts/noto-emoji/{_NOTO_PIN_SHA}/fonts/NotoColorEmoji.ttf",
 ]
 ANDROID_EMOJI_URL = ANDROID_EMOJI_URLS[0]
 # EmojiOne/Twemoji 全彩字体（跨平台标准矢量风格）
 WINDOWS_EMOJI_FILE = "EmojiOneColor.otf"
-WINDOWS_EMOJI_URL = "https://raw.githubusercontent.com/adobe-fonts/emojione-color/master/EmojiOneColor.otf"
+WINDOWS_EMOJI_URLS = [
+    "https://cdn.jsdelivr.net/gh/adobe-fonts/emojione-color@master/EmojiOneColor.otf",
+    "https://raw.githubusercontent.com/adobe-fonts/emojione-color/master/EmojiOneColor.otf",
+]
+WINDOWS_EMOJI_URL = WINDOWS_EMOJI_URLS[0]
 _EMOJI_MIN_FONT_BYTES = 1 * 1024 * 1024
 # 历史遗留别名（外部可能仍在 import，保留只读兼容）
 NOTO_EMOJI_FILE = ANDROID_EMOJI_FILE
@@ -2108,53 +2120,61 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
         client = _emoji_http_client()
         if client is None:
             return _fetch_remote_emoji_urllib(code, dest_dir, tmp)
-        try:
-            with client.stream("GET", f"{_TWEMOJI_BASE}/{code}.png") as resp:
-                if resp.status_code == 404:
-                    try:
-                        tmp.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return False  # CDN 可达只是没这个文件，不退避
-                resp.raise_for_status()
-                total = 0
-                with open(tmp, "wb") as f:
-                    for chunk in resp.iter_bytes(64 * 1024):
-                        if not chunk:
-                            continue
-                        total += len(chunk)
-                        if total > _EMOJI_DL_MAX_BYTES:
-                            raise ValueError("emoji 超体积")
-                        f.write(chunk)
-        except ValueError:
-            raise
-        except Exception as e:
+        # 多镜像轮换：404 表示文件真没有（直接返回不退避）；网络错换下一个镜像，
+        # 全部失败才全局退避（各镜像故障域独立，不要一个挂掉就全退）
+        _net_failed = False
+        for _base in _TWEMOJI_BASES:
             try:
-                import httpx as _hx
-                _is_http = isinstance(e, _hx.HTTPError)
-            except Exception:
-                _is_http = False
-            if _is_http or isinstance(e, (TimeoutError, OSError)):
-                _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
-                try:
-                    tmp.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                # 连接池异常则丢弃重建，避免坏连接常驻
-                try:
-                    global _EMOJI_HTTP_CLIENT
-                    if _EMOJI_HTTP_CLIENT is not None:
+                with client.stream("GET", f"{_base}/{code}.png") as resp:
+                    if resp.status_code == 404:
                         try:
-                            _EMOJI_HTTP_CLIENT.close()
+                            tmp.unlink(missing_ok=True)
                         except Exception:
                             pass
-                    _EMOJI_HTTP_CLIENT = None
+                        return False  # CDN 可达只是没这个文件，不退避
+                    resp.raise_for_status()
+                    total = 0
+                    with open(tmp, "wb") as f:
+                        for chunk in resp.iter_bytes(64 * 1024):
+                            if not chunk:
+                                continue
+                            total += len(chunk)
+                            if total > _EMOJI_DL_MAX_BYTES:
+                                raise ValueError("emoji 超体积")
+                            f.write(chunk)
+                os.replace(tmp, dest_dir / f"{code}.png")
+                return True
+            except ValueError:
+                raise
+            except Exception as e:
+                try:
+                    import httpx as _hx
+                    _is_http = isinstance(e, _hx.HTTPError)
                 except Exception:
-                    pass
-                return False
-            raise
-        os.replace(tmp, dest_dir / f"{code}.png")
-        return True
+                    _is_http = False
+                if not (_is_http or isinstance(e, (TimeoutError, OSError))):
+                    raise
+                _net_failed = True
+                continue
+        if _net_failed:
+            _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            # 连接池异常则丢弃重建，避免坏连接常驻
+            try:
+                global _EMOJI_HTTP_CLIENT
+                if _EMOJI_HTTP_CLIENT is not None:
+                    try:
+                        _EMOJI_HTTP_CLIENT.close()
+                    except Exception:
+                        pass
+                _EMOJI_HTTP_CLIENT = None
+            except Exception:
+                pass
+            return False
+        return False
     except Exception:
         try:
             if tmp is not None:

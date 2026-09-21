@@ -1728,6 +1728,27 @@ async def render_text_to_image(text: str):
         return;
       }
 
+      // 0.45 检测容器到各 CDN 的连通性（下载慢先看这里）
+      if (e.target.closest("#cdnCheckBtn")) {
+        e.preventDefault();
+        (async () => {
+          try {
+            showToast("正在检测下载链路…");
+            const res = await api.get("emoji/cdn_check");
+            const probes = (res && res.probes) || {};
+            const parts = Object.keys(probes).map((h) => {
+              const p = probes[h] || {};
+              const short = h.replace(".githubusercontent.com", "").replace("jsdelivr.net", "jsd");
+              return p.ok ? `${short}:${p.ms}ms` : `${short}:不通`;
+            });
+            showToast(parts.length ? ("🌐 " + parts.join(" · ")) : "无检测结果", 6000);
+          } catch(err) {
+            showToast("检测失败: " + err.message);
+          }
+        })();
+        return;
+      }
+
       // 0.5 清空全部 Emoji 缓存
       if (e.target.closest("#clearAllEmojiBtn")) {
         e.preventDefault();

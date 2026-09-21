@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.0.42" />
+  <link rel="stylesheet" href="./style.css?v=1.0.43" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.0.42</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.0.43</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -378,10 +378,13 @@
           </div>
 
           <div class="form-group" style="margin-top:16px;">
-            <div class="card-row-split" style="margin-bottom:8px;">
-              <label class="form-label" style="margin:0;">Emoji 样式包与缓存存储管理</label>
-              <button id="clearAllEmojiBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px;">🗑️ 一键清空全部 Emoji 缓存</button>
-            </div>
+              <div class="card-row-split" style="margin-bottom:8px;">
+                <label class="form-label" style="margin:0;">Emoji 样式包与缓存存储管理</label>
+                <div>
+                  <button id="cdnCheckBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px; margin-right:6px;">🌐 检测下载链路</button>
+                  <button id="clearAllEmojiBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px;">🗑️ 一键清空全部 Emoji 缓存</button>
+                </div>
+              </div>
             <div id="emojiPacksBox" class="font-files-list" style="max-height:200px;">
               <div class="font-files-empty">正在读取 Emoji 资源占用…</div>
             </div>
@@ -656,6 +659,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.0.42"></script>
+  <script src="./app.js?v=1.0.43"></script>
 </body>
 </html>

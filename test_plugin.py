@@ -1414,6 +1414,68 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._style_font_forget()
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_emoji_mirror_rotation(self):
+        """多镜像轮换：首源网络错换下一源；404 直接返回不换源"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_dd = R._FONT_DATA_DIR
+        orig_dead = R._EMOJI_REMOTE_DEAD_UNTIL
+        orig_cli = R._EMOJI_HTTP_CLIENT
+        seen = []
+        try:
+            R._FONT_DATA_DIR = tmp
+            (tmp / "emoji").mkdir(parents=True, exist_ok=True)
+
+            class FlakyClient:
+                def stream(self, method, url):
+                    seen.append(url)
+                    if "cdn.jsdelivr.net" in url:
+                        raise ConnectionError("mirror down")
+                    return _OkResp()
+
+            class _OkResp:
+                status_code = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def raise_for_status(self):
+                    pass
+
+                def iter_bytes(self, n):
+                    yield b"\x89PNG fake-bytes"
+
+            R._EMOJI_HTTP_CLIENT = FlakyClient()
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
+            # fake PNG 无法解码成图没关系：这里只验证落盘行为
+            ok = R._fetch_remote_emoji("1f600", tmp / "emoji")
+            # iter 内容非 PNG：落盘成功（解码是加载阶段的事）
+            self.assertTrue(ok)
+            self.assertTrue((tmp / "emoji" / "1f600.png").is_file())
+            self.assertTrue(any("cdn.jsdelivr.net" in u for u in seen))
+            self.assertTrue(any("fastly.jsdelivr.net" in u for u in seen))
+            self.assertEqual(R._EMOJI_REMOTE_DEAD_UNTIL, 0.0)  # 成功不退避
+        finally:
+            R._FONT_DATA_DIR = orig_dd
+            R._EMOJI_REMOTE_DEAD_UNTIL = orig_dead
+            R._EMOJI_HTTP_CLIENT = orig_cli
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_cdn_probe_closed_port(self):
+        """探针：本机闭合端口快速失败（无网络依赖）"""
+        try:
+            from core.webapi import _cdn_probe_host
+        except Exception:
+            self.skipTest("webapi 不可用")
+        r = _cdn_probe_host("127.0.0.1", timeout=1)
+        self.assertFalse(r["ok"])
+        self.assertIn("error", r)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re

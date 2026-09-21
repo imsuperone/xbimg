@@ -43,6 +43,32 @@ except (ImportError, ValueError):
     )
 
 
+def _cdn_probe_host(host: str, timeout: float = 4.0) -> Dict[str, Any]:
+    """探测到指定 CDN 主机的 TCP+TLS 连通性（纯标准库，无副作用，可单元测试）"""
+    import socket
+    import ssl
+    t0 = time.perf_counter()
+    try:
+        sock = socket.create_connection((host, 443), timeout=timeout)
+        try:
+            ctx = ssl.create_default_context()
+            tls = ctx.wrap_socket(sock, server_hostname=host)
+            try:
+                return {"ok": True, "ms": int((time.perf_counter() - t0) * 1000)}
+            finally:
+                try:
+                    tls.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+
+
 class WebApiMixin:
     """WebApiMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
@@ -139,6 +165,7 @@ class WebApiMixin:
         reg(f"/{pfx}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
         reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
         reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
+        reg(f"/{pfx}/emoji/cdn_check", self._api_emoji_cdn_check, ["GET"], "检测容器到各 CDN 的连通性")
         reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
         reg(f"/{pfx}/emoji/download_async", self._api_emoji_download_async, ["POST"], "后台下载 Emoji（立即返回任务）")
         reg(f"/{pfx}/emoji/download_status", self._api_emoji_download_status, ["GET"], "查询 Emoji 下载进度")
@@ -829,6 +856,24 @@ class WebApiMixin:
             return json_response({"ok": True, "packs": get_emoji_packs_status()})
         except Exception as e:
             return error_response(f"获取 Emoji 列表失败: {e}", status_code=500)
+
+
+
+    async def _api_emoji_cdn_check(self):
+        """自检容器到各下载 CDN 的连通性（TCP+TLS 握手计时）。
+
+        下载慢/失败时先看这里：若全部不通就是容器网络问题（DNS/代理/防火墙），
+        与插件逻辑无关；若部分通，下载会自动轮换到通的镜像。
+        """
+        try:
+            hosts = ["cdn.jsdelivr.net", "fastly.jsdelivr.net",
+                     "gcore.jsdelivr.net", "raw.githubusercontent.com"]
+            results = await asyncio.gather(
+                *(asyncio.to_thread(_cdn_probe_host, h) for h in hosts)
+            )
+            return json_response({"ok": True, "probes": dict(zip(hosts, results))})
+        except Exception as e:
+            return error_response(f"检测失败: {e}", status_code=500)
 
 
 
