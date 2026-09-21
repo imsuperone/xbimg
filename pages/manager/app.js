@@ -44,22 +44,43 @@
   }
 
   let _detectedPrefix = null;
+  let _lastLegError = "";
+  let _lastBridgeError = "";
+
+  function _elapsedMs(t0) {
+    try {
+      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+      return Math.max(0, Math.round(now - t0));
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  function _nowMs() {
+    try {
+      return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    } catch (e) {
+      return Date.now();
+    }
+  }
 
   async function tryFetchJson(url, options = {}, timeoutMs = 25000) {
+    const t0 = _nowMs();
     const ctrl = ("AbortController" in window) ? new AbortController() : null;
     const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, timeoutMs) : null;
     try {
       const res = await fetch(url, { ...(options || {}), ...(ctrl ? { signal: ctrl.signal } : {}) });
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+        throw new Error(`HTTP ${res.status}[${_elapsedMs(t0)}ms] ${url}: ${(errText || res.statusText || "").slice(0, 160)}`);
       }
       return await res.json();
     } catch (e) {
       if (e && (e.name === "AbortError" || String(e && e.message || "").includes("aborted"))) {
         throw new Error(`请求超时(${Math.round(timeoutMs / 1000)}s): ${url}`);
       }
-      throw e;
+      if (e && String(e.message || "").indexOf("HTTP ") === 0) throw e;
+      throw new Error(`网络错误[${_elapsedMs(t0)}ms]: ${url}: ${e && e.message ? e.message : e}`);
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -92,25 +113,36 @@
     if (_detectedPrefix) {
       try {
         return await tryFetchJson(`${_detectedPrefix}${urlSuffix}`, options || {});
-      } catch (e) {}
+      } catch (e) {
+        _lastLegError = `已知前缀失败(${_detectedPrefix}): ${e && e.message ? e.message : e}`;
+      }
     }
+    let firstErr = null;
     for (const p of API_PREFIXES) {
       try {
         const res = await tryFetchJson(`${p}${urlSuffix}`, options || {});
         _detectedPrefix = p;
         return res;
-      } catch (e) {}
+      } catch (e) {
+        if (!firstErr) firstErr = `[${p}] ${e && e.message ? e.message : e}`;
+      }
     }
-    throw new Error(`无法连接至插件后端 API (${urlSuffix})`);
+    _lastLegError = firstErr;
+    const bridgeInfo = _lastBridgeError ? `桥接:${_lastBridgeError}；` : "";
+    _lastBridgeError = "";
+    throw new Error(`无法连接至插件后端 API (${urlSuffix})：${bridgeInfo}${firstErr || "未知"}`);
   }
 
   const api = {
     async get(endpoint, params = {}) {
+      _lastBridgeError = "";
       const b = getBridge();
       if (b && typeof b.apiGet === "function") {
+        const t0 = _nowMs();
         try {
           return await withBridgeTimeout(b.apiGet(endpoint, params), 30000, endpoint);
         } catch (e) {
+          _lastBridgeError = `[${_elapsedMs(t0)}ms] ${e && e.message ? e.message : e}`;
           console.warn(`[msg2img] bridge.apiGet(${endpoint}) 失败，回退 fetch:`, e);
         }
       }
@@ -120,11 +152,14 @@
     },
 
     async post(endpoint, data = {}) {
+      _lastBridgeError = "";
       const b = getBridge();
       if (b && typeof b.apiPost === "function") {
+        const t0 = _nowMs();
         try {
           return await withBridgeTimeout(b.apiPost(endpoint, data), 30000, endpoint);
         } catch (e) {
+          _lastBridgeError = `[${_elapsedMs(t0)}ms] ${e && e.message ? e.message : e}`;
           console.warn(`[xbimg] bridge.apiPost(${endpoint}) 失败，回退 fetch:`, e);
         }
       }
@@ -1204,7 +1239,7 @@ async def render_text_to_image(text: str):
       try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
-    }catch(e){ showToast("下载失败: "+e.message); }
+    }catch(e){ showToast("下载失败: "+e.message, 8000); }
   }
   // POST 失败自动重试一次（面板桥接偶发抖动，删除本身幂等可重入）
   async function apiPostRetryOnce(endpoint, data) {
@@ -1235,7 +1270,7 @@ async def render_text_to_image(text: str):
       try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
-    }catch(e){ showToast("删除失败: "+e.message); }
+    }catch(e){ showToast("删除失败: "+e.message, 8000); }
   }
   async function fetchAiProviders(){
     const sel=document.getElementById("cfgAiAstrbotModel");
@@ -1769,7 +1804,7 @@ async def render_text_to_image(text: str):
             await fetchEmojiPacks();
             await fetchFontStatus(true);
           } catch(err) {
-            showToast("清空异常: " + err.message);
+            showToast("清空异常: " + err.message, 8000);
           }
         })();
         return;
