@@ -1304,6 +1304,58 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._emoji_storage_invalidate()
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_cmd_arg_multiline_rebuilt(self):
+        """AstrBot 按空白切分传参时，多行测试文本从原消息重建（不只剩首 token）"""
+        import asyncio
+        from main import Msg2ImgPlugin
+
+        multi = "# 标题行\n第二行文本🦄🌈\n- 第三行"
+        seen = {}
+
+        class _FakeEvent:
+            message_str = "/xbimg test " + multi
+
+            def __init__(self):
+                self.sent = []
+
+            def get_group_id(self):
+                return "123456"
+
+            def plain_result(self, text):
+                self.sent.append(("plain", text))
+                return text
+
+            def chain_result(self, chain):
+                self.sent.append(("chain", chain))
+                return chain
+
+        async def _collect(gen):
+            out = []
+            async for r in gen:
+                out.append(r)
+            return out
+
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["group_mode"] = "all"
+        cfg["enable_ai_moderation"] = False
+        cfg["moderation_mode"] = "keywords"
+        cfg["emoji_style"] = "none"
+        plugin = Msg2ImgPlugin(context=None, config=cfg)
+        orig_render = plugin._render_moderated
+
+        async def spy(eff_text, mod_res, mosaic_mode="none", **kw):
+            seen["text"] = eff_text
+            return await orig_render(eff_text, mod_res, mosaic_mode, **kw)
+
+        plugin._render_moderated = spy
+
+        async def _go():
+            # 模拟 AstrBot 切分：arg 只剩 "#"
+            return await _collect(plugin.cmd_xbimg(_FakeEvent(), sub="test", arg="#"))
+
+        asyncio.run(_go())
+        self.assertEqual(seen.get("text"), multi)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re

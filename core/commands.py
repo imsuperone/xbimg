@@ -72,6 +72,20 @@ class CommandsMixin:
         sub = sub.strip().lower()
         arg = arg.strip()
         cfg = self.cfg_mgr.config
+        # AstrBot 按空白切分传参：多行/带空格文本只剩首个 token（如 test 只剩 "#"）。
+        # 从原消息重建完整参数（仅当更长时覆盖，绝不截短已有值）。
+        try:
+            _full = str(getattr(event, "message_str", "") or "")
+            _m = re.match(r"^\s*/?xbimg\b", _full, flags=re.IGNORECASE)
+            if _m:
+                _rest = _full[_m.end():].strip()
+                _parts = _rest.split(None, 1)
+                if _parts and _parts[0].lower() == sub and len(_parts) > 1:
+                    _full_arg = _parts[1].strip()
+                    if len(_full_arg) > len(arg):
+                        arg = _full_arg
+        except Exception:
+            pass
 
         comp_map = {
             "compact": "⚡ 极小文件 (省流紧凑)",
@@ -147,7 +161,7 @@ class CommandsMixin:
                 "• /xbimg group list - 字体与词库列表\n"
                 "• /xbimg group reset [群号] - 单群恢复跟随全局\n"
                 "• /xbimg group test [群号] - 单群效果测试图\n"
-                "• /xbimg test [文本] - 立即生成测试效果图"
+                "• /xbimg test [文本] - 立即生成测试效果图（支持多行长文本）"
             )
             return
 
