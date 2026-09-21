@@ -912,10 +912,12 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             (ed / "2705.png").write_bytes(b"0" * 4096)
             (ed / "2705.png.downloading").write_bytes(b"0" * 700)  # 模拟中断残留
             self.assertEqual(R.get_emoji_storage_kb("ios"), round(4096 / 1024, 1))
-            # urlopen 直接抛错：不应留下新的 tmp
+            # urlopen 直接抛错：不应留下新的 tmp（强制走 urllib 兜底通道）
             def boom(req, timeout=None):
                 raise urllib.request.URLError("down")
             urllib.request.urlopen = boom
+            orig_http_client_fn = R._emoji_http_client
+            R._emoji_http_client = lambda: None
             R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
             self.assertFalse(R._fetch_remote_emoji("1f600", ed))
             leftovers = list(ed.glob("1f600*.png.downloading"))
@@ -925,7 +927,75 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._data_subdir = orig_subdir
             R._FONT_DATA_DIR = orig_dd
             R._EMOJI_REMOTE_DEAD_UNTIL = orig_dead
+            R._emoji_http_client = orig_http_client_fn
             urllib.request.urlopen = orig_urlopen
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_emoji_httpx_pool_reuse_and_backoff(self):
+        """httpx 共享池：复用同一 client；网络错退避+清 tmp；404 不退避"""
+        import shutil
+        import tempfile
+        import time as _t
+        from core import renderer as R
+        try:
+            import httpx as _hx
+        except Exception:
+            self.skipTest("无 httpx，跳过")
+        tmp = Path(tempfile.mkdtemp())
+        orig_dd = R._FONT_DATA_DIR
+        orig_dead = R._EMOJI_REMOTE_DEAD_UNTIL
+        orig_client = R._EMOJI_HTTP_CLIENT
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._EMOJI_HTTP_CLIENT = None
+            ed = tmp / "emoji"
+            ed.mkdir(parents=True, exist_ok=True)
+            c1 = R._emoji_http_client()
+            c2 = R._emoji_http_client()
+            self.assertIsNotNone(c1)
+            self.assertIs(c1, c2)  # 同一共享实例（连接复用）
+
+            class BoomClient:
+                def stream(self, *a, **k):
+                    raise _hx.ConnectError("down", request=None)
+
+            R._EMOJI_HTTP_CLIENT = BoomClient()
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
+            self.assertFalse(R._fetch_remote_emoji("1f600", ed))
+            self.assertGreater(R._EMOJI_REMOTE_DEAD_UNTIL, _t.time())
+            self.assertEqual(list(ed.glob("1f600*.png.downloading")), [])
+            self.assertIsNone(R._EMOJI_HTTP_CLIENT)  # 坏连接已丢弃
+
+            class NotFoundClient:
+                class _Resp:
+                    status_code = 404
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *a):
+                        return False
+
+                    def raise_for_status(self):
+                        pass
+
+                def stream(self, *a, **k):
+                    return self._Resp()
+
+            R._EMOJI_REMOTE_DEAD_UNTIL = 0.0
+            R._EMOJI_HTTP_CLIENT = NotFoundClient()
+            self.assertFalse(R._fetch_remote_emoji("1f600", ed))
+            self.assertEqual(R._EMOJI_REMOTE_DEAD_UNTIL, 0.0)  # 404 不退避
+        finally:
+            R._FONT_DATA_DIR = orig_dd
+            try:
+                if R._EMOJI_HTTP_CLIENT is not None and hasattr(R._EMOJI_HTTP_CLIENT, "close"):
+                    R._EMOJI_HTTP_CLIENT.close()
+            except Exception:
+                pass
+            R._EMOJI_HTTP_CLIENT = orig_client
+            R._EMOJI_REMOTE_DEAD_UNTIL = orig_dead
             shutil.rmtree(tmp, ignore_errors=True)
 
 

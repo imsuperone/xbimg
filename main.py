@@ -127,11 +127,13 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
                 return
             await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
-                text="预热Abc123中文测试",
+                # 带 3 个高频单字：顺手暖 emoji 通道（PNG/字体/cmap/覆盖判定），
+                # 首条真实消息不再付冷启动；后台线程执行，不阻塞事件循环
+                text="预热Abc123中文测试💰✨✅",
                 style=str(self.cfg_mgr.config.get("style", "ios")),
                 theme_mode=str(self.cfg_mgr.config.get("theme_mode", "light")),
                 star_background=False,
-                emoji_remote=False,
+                emoji_remote=True,
             )
         except Exception:
             pass

@@ -1928,51 +1928,127 @@ def _load_emoji_png(path: Path, size: int) -> Optional[Image.Image]:
         return None
 
 
+def _emoji_http_client():
+    """共享 httpx 同步客户端（连接复用 keep-alive，多 emoji 摊薄 TLS 握手）。
+
+    线程安全（httpx 同步 Client 支持多线程），缺 httpx 时返回 None 走 urllib 兜底。
+    """
+    global _EMOJI_HTTP_CLIENT
+    try:
+        if _EMOJI_HTTP_CLIENT is None:
+            import httpx as _hx
+            _EMOJI_HTTP_CLIENT = _hx.Client(
+                timeout=8.0, follow_redirects=True,
+                headers={"User-Agent": "astrbot-msg2img/1.3"},
+            )
+        return _EMOJI_HTTP_CLIENT
+    except Exception:
+        return None
+
+
+_EMOJI_HTTP_CLIENT = None
+
+
+def _fetch_remote_emoji_urllib(code: str, dest_dir: Path, tmp: Path) -> bool:
+    """urllib 兜底通道（无 httpx 环境），与旧行为一致"""
+    import time as _time
+    import urllib.error
+    import urllib.request
+    url = f"{_TWEMOJI_BASE}/{code}.png"
+    req = urllib.request.Request(url, headers={"User-Agent": "astrbot-msg2img/1.3"})
+    total = 0
+    try:
+        with urllib.request.urlopen(req, timeout=_EMOJI_DL_TIMEOUT) as resp:
+            with open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > _EMOJI_DL_MAX_BYTES:
+                        raise ValueError("emoji 超体积")
+                    f.write(chunk)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False  # CDN 可达只是没这个文件，不退避
+        raise
+    except (urllib.error.URLError, TimeoutError, OSError):
+        _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+    os.replace(tmp, dest_dir / f"{code}.png")
+    return True
+
+
 def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
     """从 Twemoji CDN 按需下载单个 emoji，成功返回 True；网络不可达时全局退避"""
     global _EMOJI_REMOTE_DEAD_UNTIL
     tmp = None
     try:
         import time as _time
-        import urllib.error
-        import urllib.request
         if _time.time() < _EMOJI_REMOTE_DEAD_UNTIL:
             return False
-        url = f"{_TWEMOJI_BASE}/{code}.png"
-        req = urllib.request.Request(url, headers={"User-Agent": "astrbot-msg2img/1.3"})
         # tmp 唯一命名：同 emoji 并发预取互不覆盖，失败只删自己的
         try:
             _uniq = f"{os.getpid()}_{threading.get_ident()}"
         except Exception:
             _uniq = str(os.getpid())
         tmp = dest_dir / f"{code}.{_uniq}.png.downloading"
-        total = 0
+        client = _emoji_http_client()
+        if client is None:
+            return _fetch_remote_emoji_urllib(code, dest_dir, tmp)
         try:
-            with urllib.request.urlopen(req, timeout=_EMOJI_DL_TIMEOUT) as resp:
+            with client.stream("GET", f"{_TWEMOJI_BASE}/{code}.png") as resp:
+                if resp.status_code == 404:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return False  # CDN 可达只是没这个文件，不退避
+                resp.raise_for_status()
+                total = 0
                 with open(tmp, "wb") as f:
-                    while True:
-                        chunk = resp.read(64 * 1024)
+                    for chunk in resp.iter_bytes(64 * 1024):
                         if not chunk:
-                            break
+                            continue
                         total += len(chunk)
                         if total > _EMOJI_DL_MAX_BYTES:
                             raise ValueError("emoji 超体积")
                         f.write(chunk)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
+        except ValueError:
+            raise
+        except Exception as e:
+            try:
+                import httpx as _hx
+                _is_http = isinstance(e, _hx.HTTPError)
+            except Exception:
+                _is_http = False
+            if _is_http or isinstance(e, (TimeoutError, OSError)):
+                _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
                 try:
                     tmp.unlink(missing_ok=True)
                 except Exception:
                     pass
-                return False  # CDN 可达只是没这个文件，不退避
+                # 连接池异常则丢弃重建，避免坏连接常驻
+                try:
+                    global _EMOJI_HTTP_CLIENT
+                    if _EMOJI_HTTP_CLIENT is not None:
+                        try:
+                            _EMOJI_HTTP_CLIENT.close()
+                        except Exception:
+                            pass
+                    _EMOJI_HTTP_CLIENT = None
+                except Exception:
+                    pass
+                return False
             raise
-        except (urllib.error.URLError, TimeoutError, OSError):
-            _EMOJI_REMOTE_DEAD_UNTIL = _time.time() + 600
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return False
         os.replace(tmp, dest_dir / f"{code}.png")
         return True
     except Exception:
