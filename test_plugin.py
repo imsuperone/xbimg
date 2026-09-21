@@ -522,11 +522,30 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         finally:
             _lg.disabled = _dis
 
+    @staticmethod
+    def _real_emoji_font_bytes():
+        """找一个本机真实含 😀 的彩字文件（seguiemj/NotoColorEmoji），找不到返回 None"""
+        import os
+        for cand in (
+            "C:/Windows/Fonts/seguiemj.ttf",
+            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+            "/usr/share/fonts/NotoColorEmoji.ttf",
+        ):
+            try:
+                if os.path.isfile(cand) and os.path.getsize(cand) > 1024 * 1024:
+                    return Path(cand).read_bytes()
+            except Exception:
+                continue
+        return None
+
     def test_android_emoji_download_fallback(self):
         """Android 表情包多直链容错：首源失败自动换源；残包体积校验"""
         import shutil
         import tempfile
         from core import renderer as R
+        font_bytes = self._real_emoji_font_bytes()
+        if not font_bytes:
+            self.skipTest("本机无可用彩色 emoji 字体，跳过")
         tmp = Path(tempfile.mkdtemp())
         orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
         orig_dl = R._download_file
@@ -541,7 +560,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             seen_urls.append(url)
             if "jsdelivr" in url:
                 return False, "cdn fail"
-            dest.write_bytes(b"0" * (2 * 1024 * 1024))
+            dest.write_bytes(font_bytes)
             return True, ""
 
         try:
@@ -1356,6 +1375,45 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         asyncio.run(_go())
         self.assertEqual(seen.get("text"), multi)
 
+    def test_emoji_font_validated_rejects_broken(self):
+        """残包不虚标：体积达标但 PIL 打不开 -> 未安装；删后重下好包 -> 已安装"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
+
+        def fake_subdir(name=""):
+            d = tmp / name if name else tmp
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        try:
+            R._FONT_DATA_DIR = tmp
+            R._data_subdir = fake_subdir
+            (tmp / "emoji").mkdir(parents=True, exist_ok=True)
+            # 2MB 垃圾：过体积门槛但不是字体
+            (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(b"0" * (2 * 1024 * 1024))
+            R._style_font_forget("android")
+            self.assertEqual(R._style_font_validated("android"), "")
+            self.assertFalse(R._singles_via_local_font("android"))
+            packs = {p["id"]: p for p in R.get_emoji_packs_status()}
+            self.assertFalse(packs["android"]["installed"])
+            # 换真彩字即恢复（用系统 emoji 字体，保证含 😀）
+            segoe = "C:/Windows/Fonts/seguiemj.ttf"
+            if os.path.isfile(segoe):
+                shutil.copy(segoe, tmp / "emoji" / R.ANDROID_EMOJI_FILE)
+                R._style_font_forget("android")
+                self.assertTrue(bool(R._style_font_validated("android")))
+                self.assertTrue(R._singles_via_local_font("android"))
+                packs = {p["id"]: p for p in R.get_emoji_packs_status()}
+                self.assertTrue(packs["android"]["installed"])
+        finally:
+            R._data_subdir = orig_subdir
+            R._FONT_DATA_DIR = orig_dd
+            R._style_font_forget()
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re
@@ -1391,8 +1449,11 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._FONT_DATA_DIR = tmp
             R._data_subdir = fake_subdir
             (tmp / "emoji").mkdir(parents=True, exist_ok=True)
-            # 占位彩字（仅体积达标即可，绘制走系统回退不断网）
-            (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(b"0" * (2 * 1024 * 1024))
+            # 占位彩字必须真实可用，否则有效性校验会如实拒绝
+            font_bytes = self._real_emoji_font_bytes()
+            if not font_bytes:
+                self.skipTest("本机无可用彩色 emoji 字体，跳过")
+            (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(font_bytes)
             R._fetch_remote_emoji = boom
             R._EMOJI_IMG_CACHE.clear()
             self.assertTrue(R._singles_via_local_font("android"))

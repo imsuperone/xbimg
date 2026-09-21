@@ -656,7 +656,77 @@ def _style_font_path(style: str) -> str:
     return ""
 
 
+# 样式彩字有效性结论缓存：style -> ((mtime, size), ok)，文件变化自动重验
+_STYLE_FONT_VALID: Dict[str, Any] = {}
+
+
+def _style_font_validated(style: str) -> str:
+    """已下载字体的有效路径：存在 + 体积达标 + 真实可加载（含代表字形）。
+
+    只看体积会把超时截断的残包误判为“已下载”（能过 1MB 门槛但 PIL 打不开），
+    导致绘制每次回退网络。结论按 (mtime, size) 缓存，文件替换自动重验。
+    """
+    try:
+        path = _style_font_path(style)
+    except Exception:
+        return ""
+    if not path:
+        return ""
+    try:
+        st = os.stat(path)
+        key = (st.st_mtime, st.st_size)
+    except Exception:
+        return ""
+    try:
+        hit = _STYLE_FONT_VALID.get(style)
+        if hit is not None and hit[0] == key:
+            return path if hit[1] else ""
+    except Exception:
+        pass
+    ok = False
+    try:
+        f = _load_font_file(path, 32)
+        if f is not None:
+            if str(style or "").lower() == "android":
+                ok = bool(_font_covers(f, "\U0001f600"))
+            else:
+                # windows 包格式复杂，只要求可加载，不强求彩字形覆盖
+                ok = True
+    except Exception:
+        ok = False
+    try:
+        if len(_STYLE_FONT_VALID) > 8:
+            _STYLE_FONT_VALID.pop(next(iter(_STYLE_FONT_VALID)))
+        _STYLE_FONT_VALID[style] = (key, ok)
+    except Exception:
+        pass
+    return path if ok else ""
+
+
+def _style_font_forget(style: str = "") -> None:
+    """删除/下载后清验证缓存（mtime 键本就会失效，这里是显式保险）"""
+    try:
+        if style:
+            _STYLE_FONT_VALID.pop(style, None)
+        else:
+            _STYLE_FONT_VALID.clear()
+    except Exception:
+        pass
+
+
 def _singles_via_local_font(emoji_style: str) -> bool:
+    """单字 emoji 是否可走本地彩字零网络绘制。
+
+    仅 android：要求字体真实可加载（含代表字形），残包不再虚标；
+    windows 彩字在 PIL 下未必真彩，仍走 PNG 优先保画质；
+    ios 无字体文件，只能 PNG。复杂簇（ZWJ/键帽）不受影响，仍走全彩图。
+    """
+    try:
+        if str(emoji_style or "").lower() != "android":
+            return False
+        return bool(_style_font_validated("android"))
+    except Exception:
+        return False
     """单字 emoji 是否可走本地彩字零网络绘制。
 
     仅 android：Noto CBDT 全彩字经 PIL embedded_color 绘制可靠；且 get_emoji_font
@@ -688,7 +758,7 @@ def get_emoji_packs_status() -> List[Dict[str, Any]]:
             storage = get_emoji_storage_kb("ios")
             out.append({"id": sid, "name": pack["name"], "desc": pack["desc"], "installed": has, "storage_kb": storage, "need_font": need_font})
         else:
-            has = bool(_style_font_path(sid))
+            has = bool(_style_font_validated(sid))
             storage = get_emoji_storage_kb(sid)
             out.append({"id": sid, "name": pack["name"], "desc": pack["desc"], "installed": has, "storage_kb": storage, "need_font": need_font})
     return out
@@ -769,6 +839,18 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         break
     if ok:
         _EMOJI_FONT_CACHE.clear()
+        _style_font_forget(style)
+        # 落盘后即验即报：残包直接失败并清理，不虚标“已下载”
+        try:
+            if not _style_font_validated(style):
+                try:
+                    target.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                _style_font_forget(style)
+                return {"ok": False, "error": f"{fname} 校验未通过（文件不完整），已清理请重试", "storage_kb": 0.0}
+        except Exception:
+            pass
         _emoji_storage_invalidate()
         return {"ok": True, "downloaded": [fname], "storage_kb": get_emoji_storage_kb(style)}
     return {"ok": False, "error": f"{fname} 下载失败: {err or '未知错误'}", "storage_kb": 0.0}
@@ -829,6 +911,7 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
                 except Exception:
                     pass
         clear_font_cache()
+        _style_font_forget("" if style == "all" else style)
         _emoji_storage_invalidate()
         return {"ok": True, "deleted": deleted, "storage_kb": get_emoji_storage_kb()}
     except Exception as e:
@@ -1098,7 +1181,10 @@ def download_curated_font(curated_id: str) -> Dict[str, Any]:
 
 _FONT_CACHE: Dict[Tuple, Any] = {}
 _EMOJI_FONT_CACHE: Dict[int, Tuple[Optional[ImageFont.FreeTypeFont], bool]] = {}
-_FONT_BYTES_CACHE: Dict[str, bytes] = {}
+# 字体字节缓存：键带 (mtime, size)，文件被下载覆盖后旧字节自动失效；
+# 上限 6 条（单文件可达数十 MB），防常驻膨胀
+_FONT_BYTES_CACHE: Dict[Tuple, bytes] = {}
+_FONT_BYTES_CACHE_LIMIT = 6
 # 打码去混淆规则：与 core/moderation._CONDENSE_RE 同构（审查命中、绘制定位双边对齐）
 _MOSAIC_CONDENSE_RE = re.compile(r"[\s\-_~`!@#$%^&*()+=|\\\[\]{};:'\",.<>?/]+")
 # 单群字体覆盖：(常规路径, 粗体路径)，按次渲染设置，线程/协程安全（ContextVar）。
@@ -1178,14 +1264,24 @@ def _load_font_file(path: str, size: int) -> Optional[ImageFont.FreeTypeFont]:
     try:
         if not path or not os.path.isfile(path):
             return None
-        data = _FONT_BYTES_CACHE.get(path)
+        try:
+            _st = os.stat(path)
+            _bkey = (path, _st.st_mtime_ns, _st.st_size)
+        except Exception:
+            return None
+        data = _FONT_BYTES_CACHE.get(_bkey)
         if data is None:
             try:
                 with open(path, "rb") as fp:
                     data = fp.read()
                 # 仅对小于 60MB 的字体文件缓存内存字节，避免过多消耗内存
                 if len(data) <= 60 * 1024 * 1024:
-                    _FONT_BYTES_CACHE[path] = data
+                    try:
+                        while len(_FONT_BYTES_CACHE) >= _FONT_BYTES_CACHE_LIMIT:
+                            _FONT_BYTES_CACHE.pop(next(iter(_FONT_BYTES_CACHE)))
+                    except Exception:
+                        pass
+                    _FONT_BYTES_CACHE[_bkey] = data
             except Exception:
                 return None
         if not data:
@@ -1520,9 +1616,15 @@ def _cmap_disk_save():
 def _file_cmap(path: str) -> Optional[frozenset]:
     """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。
     磁盘缓存命中时免 TTFont 全量解析（msyh 级别约省 1 秒冷启动）。
+    内存键带 (mtime, size)：文件被下载覆盖后旧结论自动失效，不会沿用残包结论。
     """
     try:
-        hit = _CMAP_CACHE.get(path)
+        st0 = os.stat(path)
+        ckey = (path, st0.st_mtime, st0.st_size)
+    except Exception:
+        ckey = None
+    try:
+        hit = _CMAP_CACHE.get(ckey) if ckey is not None else None
     except Exception:
         hit = None
     if hit is not None:
@@ -1540,7 +1642,8 @@ def _file_cmap(path: str) -> Optional[frozenset]:
     except Exception:
         res = None
     if res is not None:
-        _cache_put(_CMAP_CACHE, path, res, 64)
+        if ckey is not None:
+            _cache_put(_CMAP_CACHE, ckey, res, 64)
         return res
     try:
         if _TTFONT is not None and path and os.path.isfile(path):
@@ -1572,7 +1675,8 @@ def _file_cmap(path: str) -> Optional[frozenset]:
                     res = frozenset(codes)
     except Exception:
         res = None
-    _cache_put(_CMAP_CACHE, path, res, 64)
+    if ckey is not None:
+        _cache_put(_CMAP_CACHE, ckey, res, 64)
     if res is not None:
         try:
             st = os.stat(path)
