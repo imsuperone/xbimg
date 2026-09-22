@@ -136,6 +136,221 @@ class HandlersMixin:
         ) or ("missing " in msg and "required positional argument" in msg)
 
     @staticmethod
+    def _is_send_timeout_error(exc: BaseException) -> bool:
+        """是否为 OneBot/NapCat 发送超时（ActionFailed retcode=1200）。"""
+        try:
+            msg = str(exc)
+        except Exception:
+            return False
+        cls = type(exc).__name__
+        return (
+            "ActionFailed" in cls
+            or "retcode=1200" in msg
+            or ("Timeout" in msg and "sendMsg" in msg)
+        )
+
+    @staticmethod
+    def _text_hash(full_text: str) -> str:
+        try:
+            import hashlib
+            return hashlib.sha256(full_text.encode("utf-8")).hexdigest()[:32]
+        except Exception:
+            return ""
+
+    def _render_hash_slot(self) -> Dict[str, Any]:
+        d = getattr(self, "_render_hash_ts", None)
+        if not isinstance(d, dict):
+            d = {}
+            try:
+                self._render_hash_ts = d
+            except Exception:
+                pass
+        return d
+
+    def _cmd_reply_skip_slot(self) -> Dict[str, Any]:
+        d = getattr(self, "_cmd_reply_skip", None)
+        if not isinstance(d, dict):
+            d = {}
+            try:
+                self._cmd_reply_skip = d
+            except Exception:
+                pass
+        return d
+
+    def _mark_cmd_reply_skip(self, full_text: str) -> None:
+        """cmd 回执登记：on_decorating 直接放行纯文本，_transform 查表不再转图。"""
+        key = self._text_hash(full_text)
+        if not key:
+            return
+        slot = self._cmd_reply_skip_slot()
+        now = time.monotonic()
+        try:
+            dead = [k for k, t in slot.items() if now - t > 60.0]
+            for k in dead:
+                slot.pop(k, None)
+        except Exception:
+            pass
+        slot[key] = now
+
+    def _is_cmd_reply_skip(self, full_text: str) -> bool:
+        key = self._text_hash(full_text)
+        if not key:
+            return False
+        slot = self._cmd_reply_skip_slot()
+        ts = slot.get(key)
+        if ts is None:
+            return False
+        if time.monotonic() - ts > 60.0:
+            try:
+                slot.pop(key, None)
+            except Exception:
+                pass
+            return False
+        return True
+
+    def _claim_text_render(self, full_text: str) -> str:
+        """同文短窗去重：并发路径（on_decorating_result / _transform）只允许一处渲染。
+
+        认领成功返回 key（渲染失败须 _release_text_render 释放）；已被认领返回 ""。
+        """
+        key = self._text_hash(full_text)
+        if not key:
+            return "nohash"
+        slot = self._render_hash_slot()
+        now = time.monotonic()
+        try:
+            dead = [
+                k for k, v in slot.items()
+                if not isinstance(v, dict) or now - v.get("ts", 0.0) > 15.0
+            ]
+            for k in dead:
+                slot.pop(k, None)
+        except Exception:
+            pass
+        info = slot.get(key)
+        if isinstance(info, dict):
+            ts = float(info.get("ts", 0.0) or 0.0)
+            if now - ts < 10.0:
+                return ""
+        slot[key] = {"ts": now, "outcome": None}
+        return key
+
+    def _set_text_render_outcome(self, key: str, outcome: str) -> None:
+        if not key or key == "nohash":
+            return
+        try:
+            info = self._render_hash_slot().get(key)
+            if isinstance(info, dict):
+                info["outcome"] = outcome
+        except Exception:
+            pass
+
+    def _release_text_render(self, key: str) -> None:
+        if key and key != "nohash":
+            try:
+                self._render_hash_slot().pop(key, None)
+            except Exception:
+                pass
+
+    def _text_render_info(self, full_text: str) -> Optional[Dict[str, Any]]:
+        try:
+            info = self._render_hash_slot().get(self._text_hash(full_text))
+        except Exception:
+            return None
+        return info if isinstance(info, dict) else None
+
+    @staticmethod
+    def _image_segs_from_paths(img_paths: List[Any]) -> List[Dict[str, Any]]:
+        segs: List[Dict[str, Any]] = []
+        for p in img_paths or []:
+            try:
+                segs.append({"type": "image", "data": {"file": str(Path(p).resolve())}})
+            except Exception:
+                continue
+        return segs
+
+    @staticmethod
+    def _block_adapter_message(message: Any) -> Any:
+        """适配器路径 block 复用：剥离文本段，保留 at/reply/媒体，剥空则留空文本段。"""
+        if isinstance(message, str):
+            return " "
+        if not isinstance(message, list):
+            return " "
+        kept = [
+            seg for seg in message
+            if isinstance(seg, dict) and seg.get("type") in ("at", "reply", "image", "record", "video", "file")
+        ]
+        if not kept:
+            kept = [{"type": "text", "data": {"text": ""}}]
+        return kept
+
+    @staticmethod
+    def _shrink_images_for_retry(message: Any) -> bool:
+        """发送超时重试前：原地降质缩放消息中的本地图。返回是否修改了任何文件。"""
+        if not isinstance(message, list):
+            return False
+        changed = False
+        for seg in message:
+            if not isinstance(seg, dict) or seg.get("type") != "image":
+                continue
+            data = seg.get("data") or {}
+            file_ref = data.get("file") or data.get("url") or ""
+            if not isinstance(file_ref, str) or not file_ref:
+                continue
+            if file_ref.startswith(("http://", "https://", "base64://")):
+                continue
+            if file_ref.startswith("file://"):
+                path = Path(file_ref[7:])
+            else:
+                path = Path(file_ref)
+            if not path.is_file():
+                continue
+            try:
+                img = Image.open(path)
+                w, h = img.size
+                if w < 64 and h < 64:
+                    continue
+                scale = 0.75
+                nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                img = img.resize((nw, nh), Image.LANCZOS)
+                suffix = path.suffix.lower()
+                if suffix == ".png":
+                    img.save(path, format="PNG", compress_level=6)
+                else:
+                    img.save(path, format="JPEG", quality=72, subsampling=1)
+                changed = True
+            except Exception:
+                continue
+        return changed
+
+    async def _invoke_send_with_timeout_retry(self, fn, label: str, *args, **kwargs):
+        """ActionFailed(retcode=1200) 发送超时：本地图降质后原参重试 1 次。"""
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            if not self._is_send_timeout_error(e):
+                raise
+            _msg = kwargs.get("message")
+            if _msg is None:
+                for a in args:
+                    if isinstance(a, dict) and "message" in a:
+                        _msg = a.get("message")
+                        break
+                if _msg is None and len(args) >= 2 and not isinstance(args[1], dict):
+                    _msg = args[1]
+            if not self._shrink_images_for_retry(_msg):
+                logger.warning(
+                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，无本地图可降质，放弃重试"
+                )
+                raise
+            logger.warning(
+                f"[{PLUGIN_NAME}] {label} 发送超时({e})，已降质本地图重试一次"
+            )
+            return await fn(*args, **kwargs)
+
+    @staticmethod
     def _describe_callable(fn: Any, _depth: int = 0) -> str:
         """调用链点名：类型/qualname/模块/partial 链（最多 3 层），用于定位中间包装器"""
         try:
@@ -238,7 +453,9 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
                 try:
-                    return await orig_send_group(*args, **kwargs)
+                    return await self._invoke_send_with_timeout_retry(
+                        orig_send_group, "send_group_msg", *args, **kwargs
+                    )
                 except TypeError as e:
                     if not self._is_bind_error(e):
                         raise
@@ -255,7 +472,9 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
                             f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
                         )
-                        return await orig_send_group(**_rk)
+                        return await self._invoke_send_with_timeout_retry(
+                            orig_send_group, "send_group_msg(norm)", **_rk
+                        )
                     except TypeError as e2:
                         if not self._is_bind_error(e2):
                             raise
@@ -322,7 +541,9 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
                 try:
-                    return await orig_call_action(action, *args, **kwargs)
+                    return await self._invoke_send_with_timeout_retry(
+                        orig_call_action, f"call_action({action})", action, *args, **kwargs
+                    )
                 except TypeError as e:
                     if not self._is_bind_error(e):
                         raise
@@ -342,7 +563,9 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
                             f"已归一化为关键字重试 keys={sorted(_rk)}"
                         )
-                        return await orig_call_action(action, **_rk)
+                        return await self._invoke_send_with_timeout_retry(
+                            orig_call_action, f"call_action({action}/norm)", action, **_rk
+                        )
                     except TypeError as e2:
                         if not self._is_bind_error(e2):
                             raise
@@ -764,6 +987,9 @@ class HandlersMixin:
             if not full_text or (has_media and len(full_text) < 10):
                 return message
 
+            if self._is_cmd_reply_skip(full_text):
+                return message
+
             try:
                 min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
             except Exception:
@@ -786,6 +1012,36 @@ class HandlersMixin:
                 if not quick_hit:
                     return message
 
+            # 同文并发去重：on_decorating_result 已在渲染/已渲染 → 本路径不重复转图
+            _prior = self._text_render_info(full_text)
+            if _prior is not None and str(_prior.get("outcome") or "") in ("done", "blocked"):
+                _prior_paths = _prior.get("img_paths")
+                if _prior_paths:
+                    new_segs0 = [
+                        seg for seg in message
+                        if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                    ]
+                    new_segs0.extend(self._image_segs_from_paths(_prior_paths))
+                    return new_segs0
+                if str(_prior.get("outcome")) == "blocked":
+                    return self._block_adapter_message(message)
+                return message
+            _claim_tf = self._claim_text_render(full_text)
+            if not _claim_tf:
+                # 另一路径正在渲染/已处理：按 outcome 复用或保留原消息
+                _prior2 = self._text_render_info(full_text)
+                if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
+                    return self._block_adapter_message(message)
+                _p2 = _prior2.get("img_paths") if _prior2 else None
+                if _p2:
+                    new_segs1 = [
+                        seg for seg in message
+                        if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                    ]
+                    new_segs1.extend(self._image_segs_from_paths(_p2))
+                    return new_segs1
+                return message
+
             # 转为图片（群组单独字体大小与样式，超长分页多图）
             eff_scale = self._get_group_font_scale(gid, grp_custom)
             _perf = self._perf_enabled()
@@ -798,11 +1054,13 @@ class HandlersMixin:
             )
             _mod_ms = (time.perf_counter() - _t_mod) * 1000.0 if _perf else 0.0
             if render_trigger == "violation_only" and not mod_res.is_violated:
+                self._release_text_render(_claim_tf)
                 return message
             if mod_res.is_violated and mod_res.action == "block":
                 # 真拦截：记违规但不计总数；剥离文本段身体（保留 at/reply/媒体），
                 # 剥空则留一个空文本段，保证发送结构有效且无违规内容外泄
                 self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                self._set_text_render_outcome(_claim_tf, "blocked")
                 if _perf:
                     try:
                         _total_ms = (time.perf_counter() - _t0) * 1000.0
@@ -837,6 +1095,7 @@ class HandlersMixin:
                 elapsed_ms=_elapsed if imgs else None,
             )
             if not imgs:
+                self._release_text_render(_claim_tf)
                 return message
             if _perf:
                 _t_save = time.perf_counter()
@@ -854,7 +1113,16 @@ class HandlersMixin:
                 except Exception:
                     pass
             if not img_paths:
+                self._release_text_render(_claim_tf)
                 return message
+
+            try:
+                _info_tf = self._render_hash_slot().get(_claim_tf)
+                if isinstance(_info_tf, dict):
+                    _info_tf["outcome"] = "done"
+                    _info_tf["img_paths"] = list(img_paths)
+            except Exception:
+                pass
 
             # 保留前置 at / reply（与主路径一致，不再丢弃 Reply）
             new_segs = [
@@ -868,6 +1136,8 @@ class HandlersMixin:
         elif isinstance(message, str) and message.strip():
             # 纯文本字符串
             text = message.strip()
+            if self._is_cmd_reply_skip(text):
+                return message
             try:
                 min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
             except Exception:
@@ -884,6 +1154,25 @@ class HandlersMixin:
                 quick_hit2, _ = self.moderator.check_keywords(text, _qp2)
                 if not quick_hit2:
                     return message
+
+            _prior_s = self._text_render_info(text)
+            if _prior_s is not None and str(_prior_s.get("outcome") or "") in ("done", "blocked"):
+                if str(_prior_s.get("outcome")) == "blocked":
+                    return " "
+                _ps = _prior_s.get("img_paths")
+                if _ps:
+                    return self._image_segs_from_paths(_ps)
+                return message
+            _claim_tf2 = self._claim_text_render(text)
+            if not _claim_tf2:
+                _prior_s2 = self._text_render_info(text)
+                if _prior_s2 is not None and str(_prior_s2.get("outcome") or "") == "blocked":
+                    return " "
+                _p2s = _prior_s2.get("img_paths") if _prior_s2 else None
+                if _p2s:
+                    return self._image_segs_from_paths(_p2s)
+                return message
+
             eff_scale2 = self._get_group_font_scale(gid, grp_custom2)
             _perf2 = self._perf_enabled()
             _t0b = time.perf_counter()
@@ -894,9 +1183,11 @@ class HandlersMixin:
             )
             _mod_ms2 = (time.perf_counter() - _t_mod2) * 1000.0 if _perf2 else 0.0
             if render_trigger2 == "violation_only" and not mod_res2.is_violated:
+                self._release_text_render(_claim_tf2)
                 return message
             if mod_res2.is_violated and mod_res2.action == "block":
                 self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                self._set_text_render_outcome(_claim_tf2, "blocked")
                 if _perf2:
                     try:
                         _total_ms2 = (time.perf_counter() - _t0b) * 1000.0
@@ -921,6 +1212,7 @@ class HandlersMixin:
                 elapsed_ms=_elapsed2 if imgs2 else None,
             )
             if not imgs2:
+                self._release_text_render(_claim_tf2)
                 return message
             if _perf2:
                 _t_save2 = time.perf_counter()
@@ -938,7 +1230,15 @@ class HandlersMixin:
                 except Exception:
                     pass
             if img_paths:
+                try:
+                    _info_tf2 = self._render_hash_slot().get(_claim_tf2)
+                    if isinstance(_info_tf2, dict):
+                        _info_tf2["outcome"] = "done"
+                        _info_tf2["img_paths"] = list(img_paths)
+                except Exception:
+                    pass
                 return [{"type": "image", "data": {"file": str(p.resolve())}} for p in img_paths]
+            self._release_text_render(_claim_tf2)
 
         return message
 
@@ -976,6 +1276,12 @@ class HandlersMixin:
         if not full_text:
             return
 
+        # /xbimg 命令回执：登记跳过表后直接放行纯文本（避免 on_decorating 与
+        # _transform 对同一菜单文本双重渲染/双重发送）
+        if bool(getattr(event, "_xbimg_cmd_reply", False)):
+            self._mark_cmd_reply_skip(full_text)
+            return
+
         # 如果已有图片/音视频且没有明显的说明文本，不作处理
         if has_other_media and len(full_text) < 10:
             return
@@ -1009,6 +1315,47 @@ class HandlersMixin:
                 if not quick_hit:
                     return
 
+        # 同文并发去重：_transform 已渲染完成 → 复用图路径改写 chain，避免二次渲染
+        _prior_m = self._text_render_info(full_text)
+        if _prior_m is not None and str(_prior_m.get("outcome") or "") in ("done", "blocked"):
+            if str(_prior_m.get("outcome")) == "blocked":
+                event.stop_event()
+                return
+            _prior_m_paths = _prior_m.get("img_paths")
+            if _prior_m_paths:
+                new_chain0 = [
+                    comp for comp in result.chain
+                    if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
+                ]
+                for img_path in _prior_m_paths:
+                    try:
+                        new_chain0.append(AstrImage.fromFileSystem(str(img_path)))
+                    except Exception:
+                        pass
+                if link_mode == "extract_append" and urls_found:
+                    new_chain0.append(Plain("\n🔗 快捷直达链接：\n" + "\n".join(urls_found[:5])))
+                result.chain = new_chain0
+            return
+        _claim_m = self._claim_text_render(full_text)
+        if not _claim_m:
+            _prior_m2 = self._text_render_info(full_text)
+            if _prior_m2 is not None and str(_prior_m2.get("outcome") or "") == "blocked":
+                event.stop_event()
+                return
+            _p2m = _prior_m2.get("img_paths") if _prior_m2 else None
+            if _p2m:
+                new_chain1 = [
+                    comp for comp in result.chain
+                    if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
+                ]
+                for img_path in _p2m:
+                    try:
+                        new_chain1.append(AstrImage.fromFileSystem(str(img_path)))
+                    except Exception:
+                        pass
+                result.chain = new_chain1
+            return
+
         # 6-8. 先审查再渲染 + 落盘（群组单独字体大小与专属风格/主题，超长分页多图）
         eff_scale_main = self._get_group_font_scale(gid_main, grp_c_main)
         _perf_m = self._perf_enabled()
@@ -1021,9 +1368,11 @@ class HandlersMixin:
         _mod_ms_m = (time.perf_counter() - _t_mod_m) * 1000.0 if _perf_m else 0.0
         # 仅违规触发门控：无违规则不转图（审查之后、渲染之前，不付 PIL 成本）
         if render_trigger == "violation_only" and not mod_main.is_violated:
+            self._release_text_render(_claim_m)
             return
         if mod_main.is_violated and mod_main.action == "block":
             self.cfg_mgr.record_render(is_violated=True, count_total=False)
+            self._set_text_render_outcome(_claim_m, "blocked")
             logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=True")
             if _perf_m:
                 try:
@@ -1053,6 +1402,7 @@ class HandlersMixin:
         if violated_m:
             logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=False mosaic={mosaic_m}")
         if not imgs:
+            self._release_text_render(_claim_m)
             return
         if _perf_m:
             _t_savem = time.perf_counter()
@@ -1070,7 +1420,16 @@ class HandlersMixin:
             except Exception:
                 pass
         if not img_paths:
+            self._release_text_render(_claim_m)
             return
+
+        try:
+            _info_m = self._render_hash_slot().get(_claim_m)
+            if isinstance(_info_m, dict):
+                _info_m["outcome"] = "done"
+                _info_m["img_paths"] = list(img_paths)
+        except Exception:
+            pass
 
         # 8. 组装新消息链并替换
         new_chain = []

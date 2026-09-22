@@ -211,6 +211,10 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
 
     @filter.command("xbimg")
     async def cmd_xbimg(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
+        try:
+            event._xbimg_cmd_reply = True
+        except Exception:
+            pass
         async for item in super().cmd_xbimg(event, sub=sub, arg=arg):
             yield item
 
