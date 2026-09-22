@@ -1269,6 +1269,19 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             st = asyncio.run(_go())
             self.assertEqual(st.get("status"), "done")
             self.assertTrue(st["result"]["ok"])
+            # 路径参数形态同样可用（桥接推荐），等到完成避免悬空任务
+            async def _go2():
+                webapi_mod.request = Req({"style": "ios"})
+                started2 = await plugin._api_emoji_download_async()
+                for _ in range(100):
+                    st = await plugin._api_emoji_download_status_path(
+                        job_id=started2["job_id"])
+                    if st.get("status") != "running":
+                        return st
+                    await asyncio.sleep(0.05)
+                return {"ok": False, "error": "timeout"}
+            st2 = asyncio.run(_go2())
+            self.assertEqual(st2.get("status"), "done")
             # 非法参数 400 自报
             async def _bad():
                 webapi_mod.request = Req({"style": "xxx"})

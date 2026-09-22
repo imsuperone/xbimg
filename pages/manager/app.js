@@ -1190,13 +1190,15 @@ async def render_text_to_image(text: str):
     }
   }
   // 后台下载轮询：长任务不等 HTTP，前端 2s 查一次，最长约 6 分钟
+  // job_id 走路径参数（桥接对 query 支持不稳定，见 download_status 404 事故）
   async function pollDownloadJob(statusEndpoint, jobId, { intervalMs = 2000, maxRounds = 180 } = {}) {
     let transportFails = 0;
+    const path = `${statusEndpoint}/${encodeURIComponent(jobId)}`;
     for (let i = 0; i < maxRounds; i++) {
       await new Promise((r) => setTimeout(r, intervalMs));
       let s;
       try {
-        s = await api.get(statusEndpoint, { job_id: jobId });
+        s = await api.get(path);
       } catch (e) {
         // 状态查询本身抖动：连续 5 次失败才放弃（任务仍在后台跑）
         if (++transportFails >= 5) throw e;

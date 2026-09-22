@@ -191,10 +191,12 @@ class WebApiMixin:
         reg(f"/{pfx}/emoji/cdn_check", self._api_emoji_cdn_check, ["GET"], "检测容器到各 CDN 的连通性")
         reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
         reg(f"/{pfx}/emoji/download_async", self._api_emoji_download_async, ["POST"], "后台下载 Emoji（立即返回任务）")
-        reg(f"/{pfx}/emoji/download_status", self._api_emoji_download_status, ["GET"], "查询 Emoji 下载进度")
+        reg(f"/{pfx}/emoji/download_status", self._api_emoji_download_status, ["GET"], "查询 Emoji 下载进度（query）")
+        reg(f"/{pfx}/emoji/download_status/<job_id>", self._api_emoji_download_status_path, ["GET"], "查询 Emoji 下载进度（路径）")
         reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
         reg(f"/{pfx}/fonts/curated_install_async", self._api_fonts_curated_install_async, ["POST"], "后台安装精选字体")
-        reg(f"/{pfx}/fonts/curated_install_status", self._api_fonts_curated_install_status, ["GET"], "查询精选字体安装进度")
+        reg(f"/{pfx}/fonts/curated_install_status", self._api_fonts_curated_install_status, ["GET"], "查询精选字体安装进度（query）")
+        reg(f"/{pfx}/fonts/curated_install_status/<job_id>", self._api_fonts_curated_install_status_path, ["GET"], "查询精选字体安装进度（路径）")
         reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
         reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
@@ -1223,16 +1225,26 @@ class WebApiMixin:
         except Exception as e:
             return error_response(f"启动下载失败: {e}", status_code=500)
 
-    async def _api_emoji_download_status(self):
-        """查询 Emoji 后台下载进度：GET ?job_id=xxx"""
+    def _download_status_for(self, job_id: Any):
+        """按 job_id 查任务（路径参数与 query 参数共用逻辑）"""
         try:
-            jid = _read_query_param("job_id", "")
+            jid = str(job_id or "").strip()
+            if not jid:
+                jid = _read_query_param("job_id", "")
             pub = self._job_public(jid) if jid else None
             if pub is None:
                 return error_response("任务不存在或已过期", status_code=404)
             return json_response(pub)
         except Exception as e:
             return error_response(f"查询失败: {e}", status_code=500)
+
+    async def _api_emoji_download_status(self):
+        """查询 Emoji 后台下载进度：GET ?job_id=xxx（旧式，桥接对 query 支持不佳时用路径版）"""
+        return self._download_status_for(None)
+
+    async def _api_emoji_download_status_path(self, job_id: str = "", **kwargs):
+        """查询 Emoji 后台下载进度：GET download_status/<job_id>（桥接推荐形态）"""
+        return self._download_status_for(job_id)
 
     async def _api_fonts_curated_install_async(self):
         """后台安装精选字体：立即返回 job，前端轮询 curated_install_status"""
@@ -1252,7 +1264,11 @@ class WebApiMixin:
 
     async def _api_fonts_curated_install_status(self):
         """查询精选字体后台安装进度：GET ?job_id=xxx（与 emoji 共用任务表）"""
-        return await self._api_emoji_download_status()
+        return self._download_status_for(None)
+
+    async def _api_fonts_curated_install_status_path(self, job_id: str = "", **kwargs):
+        """查询精选字体后台安装进度：GET curated_install_status/<job_id>"""
+        return self._download_status_for(job_id)
 
 
 
