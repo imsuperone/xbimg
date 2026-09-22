@@ -30,6 +30,11 @@ except (ImportError, ValueError):
 class HandlersMixin:
     """HandlersMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
+    # 内存渲染缓存条目（_render_hash_ts）终态（done/blocked）最长存活秒数。
+    # 须大于落盘图 45s 即时清理窗口：文件活期内条目可复用，文件死后条目最多再活 15s，
+    # 即使文件↔内存同步删除钩子失效，也不会长期引用死路径。
+    _RENDER_INFO_TTL = 60.0
+
 
     # ==========================================
     # 消息入口优先拦截（针对 xbbot 等由 @event_message_type 驱动的业务插件）
@@ -253,18 +258,166 @@ class HandlersMixin:
                 pass
 
     def _text_render_info(self, full_text: str) -> Optional[Dict[str, Any]]:
+        """读取同文内存渲染缓存；终态条目超过 _RENDER_INFO_TTL 视为过期并删除。"""
         try:
-            info = self._render_hash_slot().get(self._text_hash(full_text))
+            key = self._text_hash(full_text)
+            slot = self._render_hash_slot()
+            info = slot.get(key)
+            if not isinstance(info, dict):
+                return None
+            if str(info.get("outcome") or "") in ("done", "blocked"):
+                if time.monotonic() - float(info.get("ts", 0.0) or 0.0) > self._RENDER_INFO_TTL:
+                    slot.pop(key, None)
+                    return None
+            return info
         except Exception:
             return None
-        return info if isinstance(info, dict) else None
+
+    @staticmethod
+    def _existing_paths(paths) -> List[Path]:
+        """命中校验基础件：过滤出仍然存在的本地文件路径"""
+        out: List[Path] = []
+        for p in paths or []:
+            try:
+                pp = Path(p)
+                if pp.is_file():
+                    out.append(pp)
+            except Exception:
+                continue
+        return out
+
+    def _alive_prior_paths(self, full_text: str) -> List[Path]:
+        """缓存命中校验：内存条目的 img_paths 必须仍然存在才算命中。
+        文件已被 45s 即时清理/周期清扫删除 → 视为 miss：
+        删除该内存条目（文件↔内存双向一致）并返回 []，调用方完整重跑
+        安全审查 → 打码 → 绘制 → 排版 → 落盘。进行中条目（outcome 未定）不动。"""
+        info = self._text_render_info(full_text)
+        if info is None:
+            return []
+        raw = info.get("img_paths") or []
+        alive = self._existing_paths(raw)
+        if alive:
+            if len(alive) != len(list(raw)):
+                try:
+                    info["img_paths"] = list(alive)
+                except Exception:
+                    pass
+            return alive
+        if str(info.get("outcome") or "") == "done":
+            try:
+                self._render_hash_slot().pop(self._text_hash(full_text), None)
+            except Exception:
+                pass
+        return []
+
+    def _forget_cached_path(self, path: Any) -> None:
+        """缓存文件删除后同步失效内存渲染条目（文件↔内存双向一致）：
+        从各条目 img_paths 剔除该路径，条目被清空则整条删除，
+        下次同文请求完整重跑渲染管线，不再复用死路径。"""
+        try:
+            target = Path(path)
+            t_s = str(target)
+            try:
+                t_r = str(target.resolve())
+            except Exception:
+                t_r = t_s
+        except Exception:
+            return
+        slot = self._render_hash_slot()
+        try:
+            for k in list(slot.keys()):
+                info = slot.get(k)
+                if not isinstance(info, dict):
+                    continue
+                paths = info.get("img_paths")
+                if not paths:
+                    continue
+                kept: List[Any] = []
+                hit = False
+                for p in list(paths):
+                    try:
+                        pp = Path(p)
+                        p_s, p_r = str(pp), str(pp.resolve())
+                    except Exception:
+                        kept.append(p)
+                        continue
+                    if p_s in (t_s, t_r) or p_r in (t_s, t_r):
+                        hit = True
+                        continue
+                    kept.append(p)
+                if not hit:
+                    continue
+                if kept:
+                    info["img_paths"] = kept
+                else:
+                    slot.pop(k, None)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _local_image_path(ref: Any) -> Optional[Path]:
+        """把 image 段引用解析为「可校验的本地绝对路径」。
+        远程 URL / base64 / file://+URL / 相对文件名（平台虚拟引用）返回 None，
+        表示无法确定本地性，调用方应原样保留该段，避免误杀正常图片。"""
+        try:
+            if not isinstance(ref, str) or not ref or "\x00" in ref:
+                return None
+            s = ref
+            if s.startswith("file://"):
+                s = s[7:]
+                if s.startswith(("http://", "https://", "base64://")):
+                    return None
+            if s.startswith(("http://", "https://", "base64://")):
+                return None
+            # file:///C:/path → /C:/path → C:/path（去掉盘符前多余斜杠）
+            if len(s) >= 3 and s[0] in "/\\" and s[2] == ":" and s[1].isalpha():
+                s = s[1:]
+            is_abs = s.startswith(("/", "\\")) or (
+                len(s) >= 3 and s[1] == ":" and s[0].isalpha()
+            )
+            if not is_abs:
+                return None
+            return Path(s)
+        except Exception:
+            return None
+
+    @classmethod
+    def _drop_dead_local_images(cls, message: Any) -> Any:
+        """发送前兜底：本地 image 段引用的文件已不存在时剥离，死路径不进发送链。
+        仅剥离可确认缺失的本地绝对路径；http/base64/虚拟引用原样保留；
+        全部剥空则降级为空白文本段（结构有效、不炸发送）。"""
+        if not isinstance(message, list):
+            return message
+        out: List[Any] = []
+        dropped = 0
+        for seg in message:
+            if isinstance(seg, dict) and seg.get("type") == "image":
+                data = seg.get("data") or {}
+                ref = data.get("file") or data.get("url") or ""
+                p = cls._local_image_path(ref)
+                if p is not None and not p.is_file():
+                    dropped += 1
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] 发送前兜底：丢弃失效缓存图 {p}"
+                    )
+                    continue
+            out.append(seg)
+        if not dropped:
+            return message
+        if not out:
+            out = [{"type": "text", "data": {"text": " "}}]
+        return out
 
     @staticmethod
     def _image_segs_from_paths(img_paths: List[Any]) -> List[Dict[str, Any]]:
         segs: List[Dict[str, Any]] = []
         for p in img_paths or []:
             try:
-                segs.append({"type": "image", "data": {"file": str(Path(p).resolve())}})
+                pp = Path(p)
+                if not pp.is_file():
+                    logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
+                    continue
+                segs.append({"type": "image", "data": {"file": str(pp.resolve())}})
             except Exception:
                 continue
         return segs
@@ -971,6 +1124,9 @@ class HandlersMixin:
         if not self._is_gid_allowed(gid):
             return message
 
+        # 发送前兜底：剥离引用已删除本地图的 image 段（死路径不进发送链）
+        message = self._drop_dead_local_images(message)
+
         if isinstance(message, list):
             # 提取纯文本
             plain_texts = []
@@ -1013,34 +1169,42 @@ class HandlersMixin:
                     return message
 
             # 同文并发去重：on_decorating_result 已在渲染/已渲染 → 本路径不重复转图
+            # 命中校验：缓存文件必须仍存在，失效即 miss → 删除内存条目后完整重跑
             _prior = self._text_render_info(full_text)
             if _prior is not None and str(_prior.get("outcome") or "") in ("done", "blocked"):
-                _prior_paths = _prior.get("img_paths")
-                if _prior_paths:
-                    new_segs0 = [
-                        seg for seg in message
-                        if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
-                    ]
-                    new_segs0.extend(self._image_segs_from_paths(_prior_paths))
-                    return new_segs0
                 if str(_prior.get("outcome")) == "blocked":
                     return self._block_adapter_message(message)
-                return message
+                _prior_paths = self._alive_prior_paths(full_text)
+                if _prior_paths:
+                    _segs0 = self._image_segs_from_paths(_prior_paths)
+                    if _segs0:
+                        new_segs0 = [
+                            seg for seg in message
+                            if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                        ]
+                        new_segs0.extend(_segs0)
+                        return new_segs0
+                # 缓存文件已失效/无法组装 → 视为 miss，往下完整重跑
             _claim_tf = self._claim_text_render(full_text)
             if not _claim_tf:
                 # 另一路径正在渲染/已处理：按 outcome 复用或保留原消息
                 _prior2 = self._text_render_info(full_text)
                 if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
                     return self._block_adapter_message(message)
-                _p2 = _prior2.get("img_paths") if _prior2 else None
+                _p2 = self._alive_prior_paths(full_text)
                 if _p2:
-                    new_segs1 = [
-                        seg for seg in message
-                        if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
-                    ]
-                    new_segs1.extend(self._image_segs_from_paths(_p2))
-                    return new_segs1
-                return message
+                    _segs1 = self._image_segs_from_paths(_p2)
+                    if _segs1:
+                        new_segs1 = [
+                            seg for seg in message
+                            if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                        ]
+                        new_segs1.extend(_segs1)
+                        return new_segs1
+                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                _claim_tf = self._claim_text_render(full_text)
+                if not _claim_tf:
+                    return message
 
             # 转为图片（群组单独字体大小与样式，超长分页多图）
             eff_scale = self._get_group_font_scale(gid, grp_custom)
@@ -1100,6 +1264,7 @@ class HandlersMixin:
             if _perf:
                 _t_save = time.perf_counter()
             img_paths = await self._save_render_images(imgs)
+            img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
             if _perf:
                 try:
                     _total_ms = (time.perf_counter() - _t0) * 1000.0
@@ -1159,19 +1324,26 @@ class HandlersMixin:
             if _prior_s is not None and str(_prior_s.get("outcome") or "") in ("done", "blocked"):
                 if str(_prior_s.get("outcome")) == "blocked":
                     return " "
-                _ps = _prior_s.get("img_paths")
+                _ps = self._alive_prior_paths(text)
                 if _ps:
-                    return self._image_segs_from_paths(_ps)
-                return message
+                    _segs_s = self._image_segs_from_paths(_ps)
+                    if _segs_s:
+                        return _segs_s
+                # 缓存文件已失效 → 视为 miss，往下完整重跑
             _claim_tf2 = self._claim_text_render(text)
             if not _claim_tf2:
                 _prior_s2 = self._text_render_info(text)
                 if _prior_s2 is not None and str(_prior_s2.get("outcome") or "") == "blocked":
                     return " "
-                _p2s = _prior_s2.get("img_paths") if _prior_s2 else None
+                _p2s = self._alive_prior_paths(text)
                 if _p2s:
-                    return self._image_segs_from_paths(_p2s)
-                return message
+                    _segs_s2 = self._image_segs_from_paths(_p2s)
+                    if _segs_s2:
+                        return _segs_s2
+                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                _claim_tf2 = self._claim_text_render(text)
+                if not _claim_tf2:
+                    return message
 
             eff_scale2 = self._get_group_font_scale(gid, grp_custom2)
             _perf2 = self._perf_enabled()
@@ -1217,6 +1389,7 @@ class HandlersMixin:
             if _perf2:
                 _t_save2 = time.perf_counter()
             img_paths = await self._save_render_images(imgs2)
+            img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
             if _perf2:
                 try:
                     _total_ms2 = (time.perf_counter() - _t0b) * 1000.0
@@ -1315,46 +1488,59 @@ class HandlersMixin:
                 if not quick_hit:
                     return
 
-        # 同文并发去重：_transform 已渲染完成 → 复用图路径改写 chain，避免二次渲染
+        # 同文并发去重：_transform 已渲染完成 → 复用图路径改写 chain，避免二次渲染。
+        # 命中校验：缓存文件必须仍存在，失效即 miss → 删除内存条目后完整重跑
+        #（安全审查 → 打码 → 绘制 → 排版 → 落盘），不再把死路径塞回消息链。
         _prior_m = self._text_render_info(full_text)
         if _prior_m is not None and str(_prior_m.get("outcome") or "") in ("done", "blocked"):
             if str(_prior_m.get("outcome")) == "blocked":
                 event.stop_event()
                 return
-            _prior_m_paths = _prior_m.get("img_paths")
+            _prior_m_paths = self._alive_prior_paths(full_text)
             if _prior_m_paths:
                 new_chain0 = [
                     comp for comp in result.chain
                     if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
                 ]
+                _hit0 = 0
                 for img_path in _prior_m_paths:
                     try:
                         new_chain0.append(AstrImage.fromFileSystem(str(img_path)))
+                        _hit0 += 1
                     except Exception:
                         pass
-                if link_mode == "extract_append" and urls_found:
-                    new_chain0.append(Plain("\n🔗 快捷直达链接：\n" + "\n".join(urls_found[:5])))
-                result.chain = new_chain0
-            return
+                if _hit0:
+                    if link_mode == "extract_append" and urls_found:
+                        new_chain0.append(Plain("\n🔗 快捷直达链接：\n" + "\n".join(urls_found[:5])))
+                    result.chain = new_chain0
+                    return
+            # 缓存文件已失效/无法组图 → 视为 miss，往下完整重跑（不 return）
         _claim_m = self._claim_text_render(full_text)
         if not _claim_m:
             _prior_m2 = self._text_render_info(full_text)
             if _prior_m2 is not None and str(_prior_m2.get("outcome") or "") == "blocked":
                 event.stop_event()
                 return
-            _p2m = _prior_m2.get("img_paths") if _prior_m2 else None
+            _p2m = self._alive_prior_paths(full_text)
             if _p2m:
                 new_chain1 = [
                     comp for comp in result.chain
                     if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
                 ]
+                _hit1 = 0
                 for img_path in _p2m:
                     try:
                         new_chain1.append(AstrImage.fromFileSystem(str(img_path)))
+                        _hit1 += 1
                     except Exception:
                         pass
-                result.chain = new_chain1
-            return
+                if _hit1:
+                    result.chain = new_chain1
+                    return
+            # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+            _claim_m = self._claim_text_render(full_text)
+            if not _claim_m:
+                return
 
         # 6-8. 先审查再渲染 + 落盘（群组单独字体大小与专属风格/主题，超长分页多图）
         eff_scale_main = self._get_group_font_scale(gid_main, grp_c_main)
@@ -1407,6 +1593,7 @@ class HandlersMixin:
         if _perf_m:
             _t_savem = time.perf_counter()
         img_paths = await self._save_render_images(imgs)
+        img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
         if _perf_m:
             try:
                 _sess = f"群{gid_main}" if gid_main else "私聊"
@@ -1469,7 +1656,17 @@ class HandlersMixin:
         async def _del():
             try:
                 await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                # loop 关闭/插件卸载取消：文件未删，不动内存缓存（交给周期清扫）
+                return
+            try:
                 path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            # 双向一致：文件删除后同步剔除内存渲染条目里的引用，
+            # 避免缓存命中复用已删除的死路径
+            try:
+                self._forget_cached_path(path)
             except Exception:
                 pass
         try:
@@ -1509,11 +1706,13 @@ class HandlersMixin:
                                 continue
                             yield p
 
+                deleted: List[Path] = []
                 cached_files = sorted(_sweep_names(), key=lambda p: p.stat().st_mtime)
                 for p in cached_files:
                     try:
                         if now - p.stat().st_mtime > 3600:  # 超过 1 小时清除
                             p.unlink(missing_ok=True)
+                            deleted.append(p)
                     except Exception:
                         pass
                 # 数量兜底：超过 300 张删最旧的（防止高频群聊打爆磁盘）
@@ -1521,6 +1720,13 @@ class HandlersMixin:
                 for p in remain[:-300]:
                     try:
                         p.unlink(missing_ok=True)
+                        deleted.append(p)
+                    except Exception:
+                        pass
+                # 双向一致：文件被清扫后同步失效引用它的内存渲染缓存条目
+                for p in deleted:
+                    try:
+                        self._forget_cached_path(p)
                     except Exception:
                         pass
             except Exception:
