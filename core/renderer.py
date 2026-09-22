@@ -2817,7 +2817,7 @@ def _draw_mixed_text(
             j2 = k2 + 1
             while j2 < len(measured) and measured[j2][1] is measured[k2][1]:
                 j2 += 1
-            draw.text((cur_x, y), "".join(m[0] for m in measured[k2:j2]), font=measured[k2][1], fill=fill)
+            _draw_text_run_cached(canvas, draw, cur_x, y, "".join(m[0] for m in measured[k2:j2]), measured[k2][1], fill, font_size)
             for bc, _bf, w in measured[k2:j2]:
                 char_positions.append((cur_x, w, y, bc))
                 cur_x += w
@@ -2908,27 +2908,51 @@ def _draw_star_sparkle(
         draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(255, 255, 255, min(255, alpha + 50)))
 
 
+_GRADIENT_CACHE: Dict[Tuple, Image.Image] = {}
+_GRADIENT_CACHE_LIMIT = 8
+_STAR_LAYER_CACHE: Dict[Tuple, Image.Image] = {}
+_STAR_LAYER_CACHE_LIMIT = 8
+
+
 def _fast_linear_gradient(
     width: int,
     height: int,
     start_color: Tuple[int, int, int],
     end_color: Tuple[int, int, int],
 ) -> Image.Image:
-    """极速生成平滑双向渐变底图（1D 生成后水平拉伸，< 4ms）"""
+    """极速生成平滑双向渐变底图（1D 生成后水平拉伸，< 4ms；同尺寸缓存）"""
+    try:
+        gkey = (int(width), int(height), tuple(start_color), tuple(end_color))
+    except Exception:
+        gkey = None
+    if gkey is not None:
+        hit = _GRADIENT_CACHE.get(gkey)
+        if hit is not None:
+            # 调用方可能就地 paste 修改画布，命中返回副本防串染
+            return hit.copy()
     if _np is not None:
         start = _np.array(start_color, dtype=_np.float32)
         end = _np.array(end_color, dtype=_np.float32)
         alpha = _np.linspace(0, 1, height, dtype=_np.float32)[:, None]
         col = (start * (1 - alpha) + end * alpha).astype(_np.uint8)
         col_img = Image.fromarray(col.reshape(height, 1, 3), "RGB")
-        return col_img.resize((width, height), Image.NEAREST).convert("RGBA")
-    # 无 numpy 兜底：逐行填充（慢，仅极简环境）
-    img = Image.new("RGB", (1, height))
-    px = img.load()
-    for y in range(height):
-        t = y / max(1, height - 1)
-        px[0, y] = tuple(int(round(s + (e - s) * t)) for s, e in zip(start_color, end_color))
-    return img.resize((width, height), Image.NEAREST).convert("RGBA")
+        out = col_img.resize((width, height), Image.NEAREST).convert("RGBA")
+    else:
+        # 无 numpy 兜底：逐行填充（慢，仅极简环境）
+        img = Image.new("RGB", (1, height))
+        px = img.load()
+        for y in range(height):
+            t = y / max(1, height - 1)
+            px[0, y] = tuple(int(round(s + (e - s) * t)) for s, e in zip(start_color, end_color))
+        out = img.resize((width, height), Image.NEAREST).convert("RGBA")
+    if gkey is not None:
+        try:
+            if len(_GRADIENT_CACHE) >= _GRADIENT_CACHE_LIMIT:
+                _GRADIENT_CACHE.pop(next(iter(_GRADIENT_CACHE)))
+            _GRADIENT_CACHE[gkey] = out
+        except Exception:
+            pass
+    return out
 
 
 # ==========================================
@@ -2986,6 +3010,95 @@ def _text_size(font: ImageFont.FreeTypeFont, s: str) -> Tuple[float, float]:
 
 # 单页内容高度上限（超出则分页输出多图，不再丢弃截断）；页数上限防病态超长 OOM
 MAX_CONTENT_PAGES = 10
+
+# 正文批量段位图缓存（同串+同字体+同字号+同色免重复 Font.render）
+_TEXT_RUN_CACHE: Dict[Tuple, Image.Image] = {}
+_TEXT_RUN_CACHE_LIMIT = 512
+
+
+def _draw_text_run_cached(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: Any,
+    font_size: int,
+) -> None:
+    """正文段 mask 缓存：与 ImageDraw.text 同路径 getmask2+draw_bitmap，像素等价"""
+    if not text:
+        return
+    try:
+        ix = int(x)
+        iy = int(y)
+        start = (math.modf(x)[0], math.modf(y)[0])
+        ink, fill_ink = draw._getink(fill)
+        if ink is None:
+            ink = fill_ink
+        mode = draw.fontmode
+        key = (text, _font_key(font), int(getattr(font, "size", font_size) or font_size),
+               ink, mode, start)
+    except Exception:
+        key = None
+        ix, iy, ink, mode, start = int(x), int(y), None, None, None
+    cached = _TEXT_RUN_CACHE.get(key) if key is not None else None
+    if cached is None:
+        try:
+            if ink is None or mode is None:
+                draw.text((x, y), text, font=font, fill=fill)
+                return
+            mask, offset = font.getmask2(
+                text, mode, None, None, None, 0, None, ink or 0, start, stroke_filled=True
+            )
+            cached = (mask, offset)
+            if key is not None:
+                try:
+                    if len(_TEXT_RUN_CACHE) >= _TEXT_RUN_CACHE_LIMIT:
+                        _TEXT_RUN_CACHE.pop(next(iter(_TEXT_RUN_CACHE)))
+                    _TEXT_RUN_CACHE[key] = cached
+                except Exception:
+                    pass
+        except Exception:
+            draw.text((x, y), text, font=font, fill=fill)
+            return
+    try:
+        mask, offset = cached
+        draw.draw.draw_bitmap((ix + offset[0], iy + offset[1]), mask, ink)
+    except Exception:
+        draw.text((x, y), text, font=font, fill=fill)
+
+
+def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
+                       emoji_style, emoji_remote=True):
+    """与 _prepare_layout 一致的轻量归一化（缓存键前置计算用，跳过昂贵排版）"""
+    text = str(text or "").strip()
+    style = str(style or "ios").lower()
+    if style not in ("ios", "android16"):
+        style = "ios"
+    theme_mode = str(theme_mode or "light").lower()
+    if theme_mode not in ("light", "dark"):
+        theme_mode = "light"
+    mosaic_half_pos = str(mosaic_half_pos or "bottom").lower()
+    if mosaic_half_pos not in ("top", "bottom", "random"):
+        mosaic_half_pos = "bottom"
+    try:
+        font_scale = int(font_scale)
+    except Exception:
+        font_scale = 100
+    font_scale = max(50, min(500, font_scale))
+    if emoji_style is None:
+        if isinstance(emoji_remote, str):
+            emoji_style = str(emoji_remote).lower()
+            if emoji_style not in ("none", "ios", "android", "windows"):
+                emoji_style = _EMOJI_STYLE
+        else:
+            emoji_style = _EMOJI_STYLE if _EMOJI_STYLE in ("none", "ios", "android", "windows") else ("android" if bool(emoji_remote) else "none")
+    else:
+        emoji_style = str(emoji_style).lower()
+        if emoji_style not in ("none", "ios", "android", "windows"):
+            emoji_style = "none"
+    return text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style
 
 
 def _render_cache_key(text: str, style: str, theme_mode: str, star_background: bool,
@@ -3305,6 +3418,28 @@ class MessageImageRenderer:
                     perf_out[_k] = 0.0
                 except Exception:
                     break
+        # 缓存键前置：命中直接返回，跳过昂贵排版+预取+绘制
+        try:
+            _nt, _ns, _ntm, _nmhp, _nfs, _nes = _norm_cache_params(
+                text, style, theme_mode, mosaic_half_pos, font_scale,
+                emoji_style, emoji_remote,
+            )
+            cache_key = _render_cache_key(
+                _nt, _ns, _ntm, star_background, star_density,
+                mosaic_mode, mosaic_type, _nmhp, violation_words,
+                _nfs, _nes,
+                page_max_h=page_max_h, card_max_width=card_max_width,
+                group_font=group_font,
+            )
+        except Exception:
+            cache_key = None
+        if cache_key is not None:
+            try:
+                hit = _RENDER_CACHE.get(cache_key)
+                if hit:
+                    return list(hit)
+            except Exception:
+                pass
         if perf_out is not None:
             _t_layout = time.perf_counter()
         ctx = cls._prepare_layout(
@@ -3318,16 +3453,6 @@ class MessageImageRenderer:
                 perf_out["layout_ms"] = (time.perf_counter() - _t_layout) * 1000.0
             except Exception:
                 pass
-        try:
-            cache_key = _render_cache_key(
-                ctx["text"], ctx["style"], ctx["theme_mode"], star_background, star_density,
-                mosaic_mode, mosaic_type, ctx["mosaic_half_pos"], violation_words,
-                ctx["font_scale"], ctx["emoji_style"],
-                page_max_h=page_max_h, card_max_width=card_max_width,
-                group_font=group_font,
-            )
-        except Exception:
-            cache_key = None
         if cache_key is not None:
             try:
                 hit = _RENDER_CACHE.get(cache_key)
@@ -3428,33 +3553,47 @@ class MessageImageRenderer:
         if star_background:
             star_counts = {"sparse": 18, "medium": 36, "dense": 60}
             count = star_counts.get(star_density, 36)
-            star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-            s_draw = ImageDraw.Draw(star_layer)
+            try:
+                _skey = (canvas_w, canvas_h, margin_x, margin_y, card_w, card_h,
+                         count, tuple(theme.star_colors), _stable_seed(text))
+            except Exception:
+                _skey = None
+            star_layer = _STAR_LAYER_CACHE.get(_skey) if _skey is not None else None
+            if star_layer is None:
+                star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+                s_draw = ImageDraw.Draw(star_layer)
 
-            rng = random.Random(_stable_seed(text))
-            for _ in range(count):
-                zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
-                if zone == "top":
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(8, max(margin_y + 12, 40))
-                elif zone == "bottom":
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(min(margin_y + card_h - 12, canvas_h - 40), canvas_h - 8)
-                elif zone == "left":
-                    sx = rng.uniform(8, max(margin_x + 12, 40))
-                    sy = rng.uniform(8, canvas_h - 8)
-                elif zone == "right":
-                    sx = rng.uniform(min(margin_x + card_w - 12, canvas_w - 40), canvas_w - 8)
-                    sy = rng.uniform(8, canvas_h - 8)
-                else:
-                    sx = rng.uniform(8, canvas_w - 8)
-                    sy = rng.uniform(8, canvas_h - 8)
+                rng = random.Random(_stable_seed(text))
+                for _ in range(count):
+                    zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
+                    if zone == "top":
+                        sx = rng.uniform(8, canvas_w - 8)
+                        sy = rng.uniform(8, max(margin_y + 12, 40))
+                    elif zone == "bottom":
+                        sx = rng.uniform(8, canvas_w - 8)
+                        sy = rng.uniform(min(margin_y + card_h - 12, canvas_h - 40), canvas_h - 8)
+                    elif zone == "left":
+                        sx = rng.uniform(8, max(margin_x + 12, 40))
+                        sy = rng.uniform(8, canvas_h - 8)
+                    elif zone == "right":
+                        sx = rng.uniform(min(margin_x + card_w - 12, canvas_w - 40), canvas_w - 8)
+                        sy = rng.uniform(8, canvas_h - 8)
+                    else:
+                        sx = rng.uniform(8, canvas_w - 8)
+                        sy = rng.uniform(8, canvas_h - 8)
 
-                s_radius = rng.uniform(2.8, 8.5)
-                s_color = rng.choice(theme.star_colors)
-                s_alpha = rng.randint(85, 200)
-                st_type = rng.choice(["sparkle", "cross", "diamond"])
-                _draw_star_sparkle(s_draw, sx, sy, s_radius, s_color, s_alpha, st_type)
+                    s_radius = rng.uniform(2.8, 8.5)
+                    s_color = rng.choice(theme.star_colors)
+                    s_alpha = rng.randint(85, 200)
+                    st_type = rng.choice(["sparkle", "cross", "diamond"])
+                    _draw_star_sparkle(s_draw, sx, sy, s_radius, s_color, s_alpha, st_type)
+                if _skey is not None:
+                    try:
+                        if len(_STAR_LAYER_CACHE) >= _STAR_LAYER_CACHE_LIMIT:
+                            _STAR_LAYER_CACHE.pop(next(iter(_STAR_LAYER_CACHE)))
+                        _STAR_LAYER_CACHE[_skey] = star_layer
+                    except Exception:
+                        pass
 
             canvas = Image.alpha_composite(canvas, star_layer)
 
