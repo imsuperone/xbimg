@@ -873,19 +873,6 @@ def _singles_via_local_font(emoji_style: str) -> bool:
         return bool(_style_font_validated("android"))
     except Exception:
         return False
-    """单字 emoji 是否可走本地彩字零网络绘制。
-
-    仅 android：Noto CBDT 全彩字经 PIL embedded_color 绘制可靠；且 get_emoji_font
-    本来就优先该文件。windows 彩字在 PIL 下未必真彩，仍走 PNG 优先保画质；
-    ios 无字体文件，只能 PNG。复杂簇（ZWJ/键帽）不受影响，仍走全彩图。
-    """
-    try:
-        if str(emoji_style or "").lower() != "android":
-            return False
-        return bool(_style_font_path("android"))
-    except Exception:
-        return False
-
 
 
 def get_emoji_packs_status() -> List[Dict[str, Any]]:
