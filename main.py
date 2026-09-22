@@ -122,9 +122,27 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
 
 
     async def _prewarm_render(self):
-        """后台预热一次渲染（字体/字形/度量缓存就绪），首条真实消息不再付冷启动费"""
+        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量缓存就绪），首条真实消息不再付冷启动费"""
         try:
             await asyncio.sleep(3)
+            if self._cache_stop_event is not None and self._cache_stop_event.is_set():
+                return
+            # 先补基础表情包（BASE_EMOJIS 并行落盘），菜单/常用消息不再现拉 CDN
+            def _warm_emoji():
+                try:
+                    from core.renderer import _data_subdir, _ensure_base_pngs
+                except Exception:
+                    try:
+                        from .core.renderer import _data_subdir, _ensure_base_pngs
+                    except Exception:
+                        return
+                try:
+                    d = _data_subdir("emoji")
+                    if d is not None:
+                        _ensure_base_pngs(d)
+                except Exception:
+                    pass
+            await asyncio.to_thread(_warm_emoji)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
             await asyncio.to_thread(

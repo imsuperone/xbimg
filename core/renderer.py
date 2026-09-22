@@ -2208,7 +2208,9 @@ _TWEMOJI_BASES = [
     "https://fastly.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72",
     "https://gcore.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72",
 ]
-_EMOJI_DL_TIMEOUT = 8
+_EMOJI_DL_TIMEOUT = 3
+# 预取等待预算：超时即放行绘制（后台继续下完），避免冷缓存把发送拖到秒级
+_EMOJI_PREFETCH_BUDGET_S = 0.5
 _EMOJI_DL_MAX_BYTES = 2 * 1024 * 1024
 # Noto 全彩 Emoji 字体（Android 原生风格）
 # 注意：上游 noto-emoji 仓库已改为源码仓，旧 main 直链永久 404；
@@ -2332,7 +2334,7 @@ def _emoji_http_client():
         if _EMOJI_HTTP_CLIENT is None:
             import httpx as _hx
             _EMOJI_HTTP_CLIENT = _hx.Client(
-                timeout=8.0, follow_redirects=True,
+                timeout=3.0, follow_redirects=True,
                 headers={"User-Agent": "astrbot-msg2img/1.3"},
             )
         return _EMOJI_HTTP_CLIENT
@@ -2520,19 +2522,21 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
 
 
 def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64,
-                           skip_singles: bool = False) -> int:
-    """批量预取文本中缺失的全彩 emoji 图（并行 IO）。
+                           skip_singles: bool = False,
+                           budget_s: float = _EMOJI_PREFETCH_BUDGET_S) -> Tuple[int, bool]:
+    """批量预取文本中缺失的全彩 emoji 图（并行 IO，带时间预算）。
 
-    绘制时缺图会逐个串行等待网络（最慢 8s 超时/个），预取后绘制零等待。
+    绘制时缺图会逐个串行等待网络（最慢 3s 超时/个），预取后绘制零等待。
     多字符簇必走图片通道；单个 emoji 仅在无系统字体直绘时才需图片。已缓存/已落盘跳过。
     skip_singles 为 True 时单字直接跳过（android 本地彩字已装，绘制零网络）。
-    返回本次新下载成功数。
+    返回 (本次新下载成功数, 是否在预算内取完全部 todo)。
+    预算耗时则不再阻塞本次绘制；未完成任务留在执行器里后台跑完，供下次渲染命中。
     """
     if not text:
-        return 0
+        return 0, True
     try:
         if time.time() < _EMOJI_REMOTE_DEAD_UNTIL:
-            return 0
+            return 0, True
     except Exception:
         pass
     try:
@@ -2575,26 +2579,33 @@ def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64,
             if len(todo) >= max_codes:
                 break
     except Exception:
-        return 0
+        return 0, True
     if not todo:
-        return 0
+        return 0, True
     try:
         data_dir = _data_subdir("emoji")
         if data_dir is None:
-            return 0
+            return 0, True
         import concurrent.futures as _cf
         done = 0
-        with _cf.ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(todo)))) as ex:
-            futs = {ex.submit(_fetch_remote_emoji, code, data_dir): code for code in todo}
-            for fut in _cf.as_completed(futs):
-                try:
-                    if fut.result():
-                        done += 1
-                except Exception:
-                    pass
-        return done
+        # 不 with：退出时不等全部完成；预算外任务后台续跑，下次渲染直接落盘命中
+        ex = _cf.ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(todo))))
+        futs = {ex.submit(_fetch_remote_emoji, code, data_dir): code for code in todo}
+        _done_set, not_done = _cf.wait(futs, timeout=max(0.0, float(budget_s)))
+        complete = not not_done
+        for fut in _done_set:
+            try:
+                if fut.result():
+                    done += 1
+            except Exception:
+                pass
+        try:
+            ex.shutdown(wait=False)
+        except Exception:
+            pass
+        return done, complete
     except Exception:
-        return 0
+        return 0, True
 
 
 def _get_emoji_image(cluster: str, size: int, allow_remote: bool = True) -> Optional[Image.Image]:
@@ -3324,8 +3335,9 @@ class MessageImageRenderer:
                     return list(hit)
             except Exception:
                 pass
-        # emoji 缺图并行预取（绘制时不再逐个串行等网络）
         # emoji 缺图并行预取（绘制时不再逐个串行等网络；键已在入口初始化）
+        # 带时间预算：超时则本次绘制关掉云端补全（本地/已下完的照常），后台续跑剩余
+        _pf_incomplete = False
         try:
             if ctx["emoji_remote_eff"]:
                 try:
@@ -3334,12 +3346,14 @@ class MessageImageRenderer:
                     _skip_1 = False
                 if perf_out is not None:
                     _t_pf = time.perf_counter()
-                    _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
+                    _, _pf_incomplete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
                     perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
                 else:
-                    _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
+                    _, _pf_incomplete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
         except Exception:
             pass
+        # 预算内没下完：本次禁止绘制路径串行拉网（否则每个缺图又是 3s 超时）
+        _draw_remote = ctx["emoji_remote_eff"] and not _pf_incomplete
         pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
         total = len(pages)
         if perf_out is not None:
@@ -3351,7 +3365,7 @@ class MessageImageRenderer:
                 mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
                 mosaic_half_pos=ctx["mosaic_half_pos"],
                 violation_words=violation_words,
-                emoji_remote_eff=ctx["emoji_remote_eff"],
+                emoji_remote_eff=_draw_remote,
                 emoji_style=ctx["emoji_style"],
                 perf_out=perf_out,
             )
