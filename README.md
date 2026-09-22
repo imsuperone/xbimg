@@ -4,7 +4,7 @@
 
 - 📦 项目主页：https://github.com/imsuperone/xbimg
 - 🔌 插件 ID：`astrbot_plugin_xbimg`
-- 📌 版本：`v1.1.6`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
+- 📌 版本：`v1.1.7`，要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`
 
 ---
 
@@ -14,7 +14,7 @@
 - 🤖 **Android 16 风格**：Material 3 Expressive 胶囊容器、大圆角排版，顶栏纯时间显示。
 - 📝 **Markdown 排版**：标题、列表、引用、代码块（含高亮）、链接、Emoji 混排自动美化。
 - ✨ **星空背景**：背景四周随机散落十字星芒与微光粒子，卡片内无噪点，`sparse / medium / dense` 三档密度。
-- 💾 **三档体积优化**：`low` 原画无损 PNG / `medium` 均衡 JPEG Q94 / `high` 极小 JPEG Q86，全程 4:4:4 无抽样，缓存 45 秒自动清理。
+- 💾 **三档体积优化**：`low` 原画无损 PNG / `medium` 均衡 JPEG Q94 / `high` 极小 JPEG Q86，全程 4:4:4 无抽样，缓存 90 秒自动清理。
 - 🔗 **链接策略**：`as_image` 直接转图 / `keep_text` 含链接保持纯文本可点击 / `extract_append` 转图后附带纯文本直达链接（自动剥离中英文尾部标点）。
 - 🛡️ **敏感词审查**：6 套内置词库，支持空格混淆命中，可全局切换 + 单群绑定。
 - 🤖 **AI 独立审查**：关键词未命中时可调用大模型复审，支持 `astrbot` 已接入模型与自定义 OpenAI 兼容接口，自定义提示词。

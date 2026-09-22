@@ -289,6 +289,9 @@ _FONT_EPOCH = 0
 # 相同文本渲染结果缓存（主链路与适配器钩子常对同一文本各渲染一次，命中直接复用）
 _RENDER_CACHE: Dict[Tuple, List[Image.Image]] = {}
 _RENDER_CACHE_LIMIT = 12
+# 排版结果缓存：同文同参数跳过分块/折行/度量（_FONT_EPOCH 变更自动作废）
+_LAYOUT_CACHE: Dict[Tuple, Dict[str, Any]] = {}
+_LAYOUT_CACHE_LIMIT = 32
 
 def _system_font_candidates() -> List[str]:
     """系统字体候选（目录扫描 + fc-list，开销大，进程内缓存；
@@ -1123,6 +1126,18 @@ def clear_font_cache():
     _EMOJI_FONT_CACHE.clear()
     _FONT_BYTES_CACHE.clear()
     _EMOJI_IMG_CACHE.clear()
+    try:
+        _EMOJI_MISS_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _LAYOUT_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _TEXT_ADV_CACHE.clear()
+    except Exception:
+        pass
     try:
         _COVER_CACHE.clear()
     except Exception:
@@ -1997,8 +2012,19 @@ def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
 
 
 def _text_advance(font: ImageFont.FreeTypeFont, s: str) -> float:
-    """整串推进宽度：逐字缓存 advance 求和（PIL 整串 getbbox/getlength 在长串上极慢），
-    缺字时逐字回退计量，与混排绘制一致"""
+    """整串推进宽度：整串 memo（同字体同串直接命中）→ 逐字缓存 advance 求和
+    （PIL 整串 getbbox/getlength 在长串上极慢），缺字时逐字回退计量，与混排绘制一致"""
+    try:
+        tkey = (_font_key(font), getattr(font, "size", 0), s)
+    except Exception:
+        tkey = None
+    if tkey is not None:
+        try:
+            hit = _TEXT_ADV_CACHE.get(tkey)
+            if hit is not None:
+                return hit
+        except Exception:
+            pass
     try:
         total = 0.0
         for c in s:
@@ -2006,14 +2032,20 @@ def _text_advance(font: ImageFont.FreeTypeFont, s: str) -> float:
                 total += _char_advance(font, c)
                 continue
             if not _font_covers(font, c):
-                return float(sum(_adv_text(font, c) for c in s))
+                total = float(sum(_adv_text(font, c2) for c2 in s))
+                break
             total += _char_advance(font, c)
+        if tkey is not None:
+            _cache_put(_TEXT_ADV_CACHE, tkey, total, 8192)
         return total
     except Exception:
         try:
             return _text_size(font, s)[0]
         except Exception:
             return 0.0
+
+
+_TEXT_ADV_CACHE: Dict[Tuple, float] = {}
 
 
 _INK_CACHE: Dict[Tuple, float] = {}
@@ -2239,6 +2271,34 @@ _NOTO_EMOJI_MIN_BYTES = _EMOJI_MIN_FONT_BYTES
 
 # CDN 不可达时退避（DNS 黑洞等只挡一次，10 分钟内不再尝试，避免消息延迟）
 _EMOJI_REMOTE_DEAD_UNTIL = 0.0
+# Twemoji 404 负缓存：code -> 过期时间戳。CDN 可达但文件真没有时不再反复打网。
+_EMOJI_MISS_CACHE: Dict[str, float] = {}
+_EMOJI_MISS_CACHE_TTL_S = 600.0
+_EMOJI_MISS_CACHE_LIMIT = 512
+
+
+def _emoji_miss_cached(code: str) -> bool:
+    """404 负缓存命中（过期自动清除）"""
+    try:
+        exp = _EMOJI_MISS_CACHE.get(code)
+        if exp is None:
+            return False
+        if time.time() >= float(exp):
+            _EMOJI_MISS_CACHE.pop(code, None)
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _emoji_mark_miss(code: str) -> None:
+    """记录 Twemoji 404（仅 CDN 可达且文件不存在；网络错误走全局退避，不进负缓存）"""
+    try:
+        if len(_EMOJI_MISS_CACHE) >= _EMOJI_MISS_CACHE_LIMIT:
+            _EMOJI_MISS_CACHE.pop(next(iter(_EMOJI_MISS_CACHE)), None)
+        _EMOJI_MISS_CACHE[code] = time.time() + _EMOJI_MISS_CACHE_TTL_S
+    except Exception:
+        pass
 
 
 def _data_subdir(name: str) -> Optional[Path]:
@@ -2343,6 +2403,24 @@ def _emoji_http_client():
 
 
 _EMOJI_HTTP_CLIENT = None
+# emoji 预取线程池：与 layout 并行提交，模块级复用（不随每次渲染重建）
+_PREFETCH_POOL = None
+_PREFETCH_POOL_LOCK = threading.Lock()
+
+
+def _submit_prefetch(text: str, skip_singles: bool = False):
+    """把缺图预取提交到共享线程池，返回 Future（调用方在 layout 后 result() 汇合）"""
+    global _PREFETCH_POOL
+    try:
+        with _PREFETCH_POOL_LOCK:
+            if _PREFETCH_POOL is None:
+                import concurrent.futures as _cf
+                _PREFETCH_POOL = _cf.ThreadPoolExecutor(
+                    max_workers=2, thread_name_prefix="xbimg-emoji-pf"
+                )
+            return _PREFETCH_POOL.submit(_prefetch_emoji_images, text, skip_singles=skip_singles)
+    except Exception:
+        return None
 
 
 def _fetch_remote_emoji_urllib(code: str, dest_dir: Path, tmp: Path) -> bool:
@@ -2370,6 +2448,7 @@ def _fetch_remote_emoji_urllib(code: str, dest_dir: Path, tmp: Path) -> bool:
                 tmp.unlink(missing_ok=True)
             except Exception:
                 pass
+            _emoji_mark_miss(code)
             return False  # CDN 可达只是没这个文件，不退避
         raise
     except (urllib.error.URLError, TimeoutError, OSError):
@@ -2391,6 +2470,8 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
         import time as _time
         if _time.time() < _EMOJI_REMOTE_DEAD_UNTIL:
             return False
+        if _emoji_miss_cached(code):
+            return False
         # tmp 唯一命名：同 emoji 并发预取互不覆盖，失败只删自己的
         try:
             _uniq = f"{os.getpid()}_{threading.get_ident()}"
@@ -2411,6 +2492,7 @@ def _fetch_remote_emoji(code: str, dest_dir: Path) -> bool:
                             tmp.unlink(missing_ok=True)
                         except Exception:
                             pass
+                        _emoji_mark_miss(code)
                         return False  # CDN 可达只是没这个文件，不退避
                     resp.raise_for_status()
                     total = 0
@@ -2557,13 +2639,18 @@ def _prefetch_emoji_images(text: str, max_workers: int = 6, max_codes: int = 64,
                 if code in seen:
                     continue
                 seen.add(code)
+                # 键归一化：内存图缓存按实际 font_size 存，任意 size 命中即视作已有
                 key_hit = False
                 try:
-                    if (code, 32) in _EMOJI_IMG_CACHE:
-                        key_hit = True
+                    for k in _EMOJI_IMG_CACHE:
+                        if k[0] == code and _EMOJI_IMG_CACHE[k] is not None:
+                            key_hit = True
+                            break
                 except Exception:
                     pass
                 if key_hit:
+                    continue
+                if _emoji_miss_cached(code):
                     continue
                 try:
                     if (EMOJI_ASSETS_DIR / f"{code}.png").is_file():
@@ -2643,6 +2730,8 @@ def _get_emoji_image(cluster: str, size: int, allow_remote: bool = True) -> Opti
         # 3. 云端按需补全（失败静默，降级字体绘制）
         if allow_remote:
             for code in codes:
+                if _emoji_miss_cached(code):
+                    continue
                 if _fetch_remote_emoji(code, data_dir):
                     im = _load_emoji_png(data_dir / f"{code}.png", size)
                     if im is not None:
@@ -3107,7 +3196,8 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
                       emoji_style: str, page_max_h: int = 3000,
                       card_max_width: int = 680,
                       group_font: Tuple[str, str] = ("", "")) -> tuple:
-    """渲染缓存键：文本哈希 + 全套渲染参数 + 当前分钟（顶栏时间参与输出）+ 字体代际"""
+    """渲染缓存键：文本哈希 + 全套渲染参数 + 字体代际。
+    不含墙钟分钟：顶栏时间陈旧可接受，换来跨分钟同参直接命中（避免每分钟强制重渲）。"""
     try:
         h = hashlib.md5(str(text or "").encode("utf-8", "ignore")).hexdigest()
     except Exception:
@@ -3116,10 +3206,6 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
         vw = tuple(violation_words or [])
     except Exception:
         vw = ()
-    try:
-        minute = time.strftime("%H:%M")
-    except Exception:
-        minute = ""
     try:
         epoch = int(_FONT_EPOCH)
     except Exception:
@@ -3134,7 +3220,7 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
         cmw = 640
     return (h, style, theme_mode, bool(star_background), str(star_density),
             mosaic_mode, mosaic_type, mosaic_half_pos, vw,
-            int(font_scale or 100), str(emoji_style), minute, epoch, pmh, cmw,
+            int(font_scale or 100), str(emoji_style), epoch, pmh, cmw,
             str((group_font or ("", ""))[0]), str((group_font or ("", ""))[1]))
 
 
@@ -3274,6 +3360,25 @@ class MessageImageRenderer:
         # 是否允许云端
         emoji_remote_eff = emoji_style != "none"
 
+        # 排版缓存：同文同参同字体代际直接复用（分块/自适应宽/折行/度量全跳过）
+        try:
+            _grp = _GROUP_FONT_OVERRIDE.get() or ("", "")
+            _lkey = (
+                hashlib.md5(text.encode("utf-8", "ignore")).hexdigest(),
+                style, theme_mode, mosaic_half_pos, font_scale, emoji_style,
+                int(page_max_h or 3000), int(card_max_width or 640),
+                str(_grp[0]), str(_grp[1]), int(_FONT_EPOCH),
+            )
+        except Exception:
+            _lkey = None
+        if _lkey is not None:
+            try:
+                _lhit = _LAYOUT_CACHE.get(_lkey)
+                if _lhit is not None:
+                    return dict(_lhit)
+            except Exception:
+                pass
+
         # 2. 动态自适应卡片宽度（支持字体百分比缩放自适应撑缩）
         blocks = _parse_content_blocks(text)
         if font_scale != 100:
@@ -3335,7 +3440,7 @@ class MessageImageRenderer:
         except Exception:
             page_max_h = 3000
         max_content = max(400, page_max_h - (card_inner_pad_y*2 + header_h + footer_gap + footer_block))
-        return {
+        ctx = {
             "text": text, "style": style, "theme": theme, "theme_mode": theme_mode,
             "mosaic_half_pos": mosaic_half_pos, "font_scale": font_scale,
             "emoji_style": emoji_style, "emoji_remote_eff": emoji_remote_eff,
@@ -3345,6 +3450,14 @@ class MessageImageRenderer:
             "inner_pad_x": inner_pad_x, "content_h": content_h, "card_h": card_h,
             "rendered_lines": rendered_lines, "max_content": max_content,
         }
+        if _lkey is not None:
+            try:
+                if len(_LAYOUT_CACHE) >= _LAYOUT_CACHE_LIMIT:
+                    _LAYOUT_CACHE.pop(next(iter(_LAYOUT_CACHE)), None)
+                _LAYOUT_CACHE[_lkey] = dict(ctx)
+            except Exception:
+                pass
+        return ctx
 
     @classmethod
     def render_pages(
@@ -3433,6 +3546,7 @@ class MessageImageRenderer:
             )
         except Exception:
             cache_key = None
+            _nt, _nes = None, None
         if cache_key is not None:
             try:
                 hit = _RENDER_CACHE.get(cache_key)
@@ -3440,6 +3554,19 @@ class MessageImageRenderer:
                     return list(hit)
             except Exception:
                 pass
+        # emoji 缺图预取与排版并行：先提交线程池，layout 跑完再汇合，
+        # prefetch_ms 只计阻塞等待（与 layout 重叠的时间不计入本次延迟）
+        _pf_fut = None
+        _pf_incomplete = False
+        try:
+            if _nes is not None and _nes != "none":
+                try:
+                    _skip_1 = _singles_via_local_font(_nes)
+                except Exception:
+                    _skip_1 = False
+                _pf_fut = _submit_prefetch(_nt or "", _skip_1)
+        except Exception:
+            _pf_fut = None
         if perf_out is not None:
             _t_layout = time.perf_counter()
         ctx = cls._prepare_layout(
@@ -3460,11 +3587,16 @@ class MessageImageRenderer:
                     return list(hit)
             except Exception:
                 pass
-        # emoji 缺图并行预取（绘制时不再逐个串行等网络；键已在入口初始化）
-        # 带时间预算：超时则本次绘制关掉云端补全（本地/已下完的照常），后台续跑剩余
-        _pf_incomplete = False
+        # 汇合预取（带时间预算：超时则本次绘制关掉云端补全，后台续跑剩余）
         try:
-            if ctx["emoji_remote_eff"]:
+            if _pf_fut is not None:
+                if perf_out is not None:
+                    _t_pf = time.perf_counter()
+                _, _pf_incomplete = _pf_fut.result(timeout=max(1.0, _EMOJI_PREFETCH_BUDGET_S + 1.0))
+                if perf_out is not None:
+                    perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
+            elif ctx["emoji_remote_eff"]:
+                # 归一化失败等回退：保持原串行预取路径
                 try:
                     _skip_1 = _singles_via_local_font(ctx["emoji_style"])
                 except Exception:
@@ -3553,17 +3685,27 @@ class MessageImageRenderer:
         if star_background:
             star_counts = {"sparse": 18, "medium": 36, "dense": 60}
             count = star_counts.get(star_density, 36)
+
+            def _q32(v: int) -> int:
+                return (int(v) // 32) * 32
+
             try:
-                _skey = (canvas_w, canvas_h, margin_x, margin_y, card_w, card_h,
-                         count, tuple(theme.star_colors), _stable_seed(text))
+                # 几何量化键（±16px 桶）+ 去文本种子：跨消息/跨页共享星空层
+                _skey = (_q32(canvas_w), _q32(canvas_h), _q32(card_w), _q32(card_h),
+                         margin_x, margin_y, count, tuple(theme.star_colors))
             except Exception:
                 _skey = None
             star_layer = _STAR_LAYER_CACHE.get(_skey) if _skey is not None else None
+            if star_layer is not None and star_layer.size != (canvas_w, canvas_h):
+                try:
+                    star_layer = star_layer.resize((canvas_w, canvas_h), Image.BILINEAR)
+                except Exception:
+                    star_layer = None
             if star_layer is None:
                 star_layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
                 s_draw = ImageDraw.Draw(star_layer)
 
-                rng = random.Random(_stable_seed(text))
+                rng = random.Random(_stable_seed(str(_skey) if _skey is not None else "stars"))
                 for _ in range(count):
                     zone = rng.choice(["top", "bottom", "left", "right", "corner", "bg"])
                     if zone == "top":
@@ -3590,7 +3732,8 @@ class MessageImageRenderer:
                 if _skey is not None:
                     try:
                         if len(_STAR_LAYER_CACHE) >= _STAR_LAYER_CACHE_LIMIT:
-                            _STAR_LAYER_CACHE.pop(next(iter(_STAR_LAYER_CACHE)))
+                            _STAR_LAYER_CACHE.pop(next(iter(_STAR_LAYER_CACHE)), None)
+                        # 存量化桶原图（resize 前尺寸），命中不符再缩放
                         _STAR_LAYER_CACHE[_skey] = star_layer
                     except Exception:
                         pass

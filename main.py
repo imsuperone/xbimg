@@ -122,9 +122,9 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
 
 
     async def _prewarm_render(self):
-        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量缓存就绪），首条真实消息不再付冷启动费"""
+        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量/星空层缓存就绪），首条真实消息不再付冷启动费"""
         try:
-            await asyncio.sleep(3)
+            await asyncio.sleep(0.5)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
             # 先补基础表情包（BASE_EMOJIS 并行落盘），菜单/常用消息不再现拉 CDN
@@ -145,13 +145,31 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             await asyncio.to_thread(_warm_emoji)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
+            _style = str(self.cfg_mgr.config.get("style", "ios"))
+            _theme = str(self.cfg_mgr.config.get("theme_mode", "light"))
+            # 富文本 + 星空：暖排版分支/星空层缓存/emoji 通道，首条真实消息零冷启动
+            _rich = (
+                "# 预热标题\n"
+                "预热Abc123中文测试💰✨✅\n"
+                "- 列表条目\n"
+                "> 引用行\n"
+                "```python\nprint('ok')\n```"
+            )
             await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
-                # 带 3 个高频单字：顺手暖 emoji 通道（PNG/字体/cmap/覆盖判定），
-                # 首条真实消息不再付冷启动；后台线程执行，不阻塞事件循环
+                text=_rich,
+                style=_style,
+                theme_mode=_theme,
+                star_background=True,
+                star_density=str(self.cfg_mgr.config.get("star_density", "medium")),
+                emoji_remote=True,
+            )
+            # 再暖一版无星空（覆盖 star_background=False 路径，渐变/投影缓存独立）
+            await asyncio.to_thread(
+                MessageImageRenderer.render_pages,
                 text="预热Abc123中文测试💰✨✅",
-                style=str(self.cfg_mgr.config.get("style", "ios")),
-                theme_mode=str(self.cfg_mgr.config.get("theme_mode", "light")),
+                style=_style,
+                theme_mode=_theme,
                 star_background=False,
                 emoji_remote=True,
             )

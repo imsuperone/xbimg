@@ -31,9 +31,9 @@ class HandlersMixin:
     """HandlersMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
     # 内存渲染缓存条目（_render_hash_ts）终态（done/blocked）最长存活秒数。
-    # 须大于落盘图 45s 即时清理窗口：文件活期内条目可复用，文件死后条目最多再活 15s，
+    # 须大于落盘图 90s 即时清理窗口：文件活期内条目可复用，文件死后条目最多再活 10s，
     # 即使文件↔内存同步删除钩子失效，也不会长期引用死路径。
-    _RENDER_INFO_TTL = 60.0
+    _RENDER_INFO_TTL = 100.0
 
 
     # ==========================================
@@ -288,7 +288,7 @@ class HandlersMixin:
 
     def _alive_prior_paths(self, full_text: str) -> List[Path]:
         """缓存命中校验：内存条目的 img_paths 必须仍然存在才算命中。
-        文件已被 45s 即时清理/周期清扫删除 → 视为 miss：
+        文件已被 90s 即时清理/周期清扫删除 → 视为 miss：
         删除该内存条目（文件↔内存双向一致）并返回 []，调用方完整重跑
         安全审查 → 打码 → 绘制 → 排版 → 落盘。进行中条目（outcome 未定）不动。"""
         info = self._text_render_info(full_text)
@@ -996,7 +996,7 @@ class HandlersMixin:
 
 
     async def _save_render_image(self, img) -> Optional[Path]:
-        """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：45 秒后自动清理）
+        """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：90 秒后自动清理）
 
         体积兜底：img_max_kb>0 且编码后超限，自动逐档降质重编码压到上限内
         （JPEG 降 quality/抽样，PNG 无损档只提高压缩比、画质不变）；
@@ -1072,8 +1072,8 @@ class HandlersMixin:
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}{suffix}"
             img_path = self.cache_dir / img_filename
             await asyncio.to_thread(img_path.write_bytes, data)
-            # 即时清理：45 秒后删除，避免堆积（必须在事件循环线程调度）
-            self._schedule_delete(img_path, 45)
+            # 即时清理：90 秒后删除，避免堆积（必须在事件循环线程调度）
+            self._schedule_delete(img_path, 90)
             return img_path
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 写入图片失败: {e}")
@@ -1647,8 +1647,8 @@ class HandlersMixin:
 
 
 
-    def _schedule_delete(self, path: Path, delay: int = 45):
-        """生成图片即时自动清理（默认 45 秒后删除，用完即删）"""
+    def _schedule_delete(self, path: Path, delay: int = 90):
+        """生成图片即时自动清理（默认 90 秒后删除，用完即删）"""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
