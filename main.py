@@ -86,7 +86,15 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体配置初始化异常: {e}")
 
-        # 冷启动线程预热：字体/cmap/度量/排版/星空/emoji 在首条消息前就绪
+        # 同步预载常用字号字体：保证首条消息 get_font 命中（避免与预热线程抢 GIL）
+        try:
+            from core.renderer import preload_font_sizes
+
+            preload_font_sizes()
+        except Exception as e:
+            logger.warning(f"[{PLUGIN_NAME}] 字体同步预载异常: {e}")
+
+        # 冷启动线程预热：cmap/度量/排版/星空/emoji 在首条消息前就绪
         try:
             _style = str(self.cfg_mgr.config.get("style", "ios"))
             _theme = str(self.cfg_mgr.config.get("theme_mode", "light"))

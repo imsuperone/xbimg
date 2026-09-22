@@ -1676,6 +1676,7 @@ _BLANK_PASSTHROUGH = frozenset(["\u200b", "\u200d", "\ufe0f", "\u00ad"])
 _COVER_CACHE: Dict[Tuple, bool] = {}
 _RESOLVE_CACHE: Dict[Tuple, Any] = {}
 _CMAP_CACHE: Dict[str, Optional[frozenset]] = {}
+_CMAP_PARSE_LOCK = threading.Lock()
 _UNCOVERED_LOG_AT: Dict[str, float] = {}
 _ADV_CACHE: Dict[Tuple, float] = {}
 
@@ -1910,6 +1911,7 @@ def _file_cmap(path: str) -> Optional[frozenset]:
     """文件级 cmap 码位集合（需 fonttools；多字重取并集）。不可用返回 None（仅用启发式）。
     磁盘缓存命中时免 TTFont 全量解析（msyh 级别约省 1 秒冷启动）。
     内存键带 (mtime, size)：文件被下载覆盖后旧结论自动失效，不会沿用残包结论。
+    锁内 double-check：预热线程与首条消息并发时只解析一次 TTFont。
     """
     try:
         st0 = os.stat(path)
@@ -1922,6 +1924,18 @@ def _file_cmap(path: str) -> Optional[frozenset]:
         hit = None
     if hit is not None:
         return hit
+    # miss 路径（磁盘读/TTFont）持锁，防并发重复解析
+    with _CMAP_PARSE_LOCK:
+        try:
+            hit = _CMAP_CACHE.get(ckey) if ckey is not None else None
+        except Exception:
+            hit = None
+        if hit is not None:
+            return hit
+        return _file_cmap_locked(path, ckey)
+
+
+def _file_cmap_locked(path: str, ckey) -> Optional[frozenset]:
     res = None
     try:
         if path and os.path.isfile(path):
@@ -4166,43 +4180,83 @@ class MessageImageRenderer:
         )
 
 
+def preload_font_sizes() -> None:
+    """同步预载常用字号字体（约数百 ms，__init__ 内调用保证首条消息 get_font 命中）。"""
+    for size in (11, 12, 13, 16, 18, 20, 24, 25, 26, 28, 30, 32, 36, 40, 48):
+        get_font(size, bold=False)
+        get_font(size, bold=True)
+
+
 def warm_render_pipeline(
     style: str = "ios",
     theme_mode: str = "light",
     star_density: str = "medium",
 ) -> None:
-    """__init__ 阶段线程预热：字体/cmap/度量/排版/星空/emoji 落盘一次性就绪。
-    无永久 done 标志（clear_font_cache 后可再次预热）；全程吞异常，失败由首条消息兜底。"""
-    try:
-        for size in (11, 12, 13, 16, 18, 20, 24, 25, 26, 28, 30, 32, 36, 40, 48):
-            get_font(size, bold=False)
-            get_font(size, bold=True)
-        for path in list(_ACTIVE_ORDERED[:4]):
-            if path:
-                try:
-                    _file_cmap(path)
-                except Exception:
-                    pass
-        sample = (
-            "# 预热标题\n"
-            "预热Abc123中文测试💰✨✅\n"
-            "- 列表条目\n"
-            "> 引用行\n"
-            "```python\nprint('ok')\n```"
-        )
-        MessageImageRenderer._prepare_layout(
+    """__init__ 线程预热：字体/cmap/度量/排版/星空/emoji 落盘一次性就绪。
+    无永久 done 标志（clear_font_cache 后可再次预热）；分段独立 try，单段失败不中断全程，结束打一行分段耗时。"""
+    import time as _time
+
+    t_all = _time.perf_counter()
+    t0 = t_all
+    sections: list = []
+    failed: list = []
+
+    def _sec(name: str, fn) -> None:
+        nonlocal t0
+        ts = _time.perf_counter()
+        try:
+            fn()
+            sections.append(f"{name} {_time.perf_counter() - ts:.0f}ms")
+        except Exception as e:
+            failed.append(name)
+            sections.append(f"{name} ERR {type(e).__name__}")
+            try:
+                logger.warning(f"[xbimg] 预热段 {name} 失败: {e}")
+            except Exception:
+                pass
+        finally:
+            t0 = _time.perf_counter()
+
+    _sec("fonts", preload_font_sizes)
+    _sec("cmap", lambda: [
+        _file_cmap(p) for p in list(_ACTIVE_ORDERED[:4]) if p
+    ])
+    sample = (
+        "# 预热标题\n"
+        "预热Abc123中文测试💰✨✅\n"
+        "- 列表条目\n"
+        "> 引用行\n"
+        "```python\nprint('ok')\n```"
+    )
+    _sec(
+        "layout",
+        lambda: MessageImageRenderer._prepare_layout(
             text=sample, style=style, theme_mode=theme_mode, emoji_remote=True
-        )
-        MessageImageRenderer.render_pages(
+        ),
+    )
+    _sec(
+        "render",
+        lambda: MessageImageRenderer.render_pages(
             text=sample,
             style=style,
             theme_mode=theme_mode,
             star_background=True,
             star_density=star_density,
             emoji_remote=True,
-        )
+        ),
+    )
+
+    def _emoji() -> None:
         d = _data_subdir("emoji")
         if d is not None:
             _ensure_base_pngs(d)
+
+    _sec("emoji", _emoji)
+    total_ms = (_time.perf_counter() - t_all) * 1000.0
+    tag = f" fail={','.join(failed)}" if failed else ""
+    try:
+        logger.info(
+            f"[xbimg] 预热完成 {total_ms:.0f}ms: {' · '.join(sections)}{tag}"
+        )
     except Exception:
         pass
