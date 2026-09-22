@@ -910,6 +910,44 @@ def get_emoji_packs_status() -> List[Dict[str, Any]]:
     return out
 
 
+# 高频基础表情（首屏常用，一次下好；包外按需自动补全并缓存）；
+# ios 与 windows 共用（两者都是 Twemoji PNG 管道，windows 无离线解包源）
+BASE_EMOJIS = [
+    # 笑脸
+    "1f600", "1f602", "1f603", "1f604", "1f605", "1f609", "1f60d",
+    "1f618", "1f61c", "1f622", "1f62d", "1f630", "1f62e", "1f60e",
+    "1f610", "1f914", "1f917",
+    # 手势
+    "1f44d", "1f44e", "1f44f", "1f450", "1f446", "1f447", "270a",
+    "270c", "1f44c", "1f4aa", "1f485",
+    # 心与符号
+    "2764", "1f495", "1f494", "1f49b", "2728", "2b50", "1f31f",
+    "274c", "2705", "26a0",
+    # 物件（含游戏/资产高频：钱袋货币骰子）
+    "1f389", "1f38a", "1f525", "1f4b0", "1f4b5", "1f4b8", "1f4a1",
+    "1f4a9", "1f4ac", "1f4f7", "23e9", "1f552", "1f6a7", "1f52e",
+    "1f3af", "1f3b0", "1f3b2", "1f3b3",
+]
+
+
+def _ensure_base_pngs(d: Path) -> Tuple[int, int, int]:
+    """补齐基础 PNG 包。返回 (补前现有数, 本次缺失数, 补后总数)。失败静默（按需再补）。"""
+    try:
+        missing = [c for c in BASE_EMOJIS if not (d / f"{c}.png").is_file()]
+        pre_have = len(BASE_EMOJIS) - len(missing)
+        if missing:
+            try:
+                import concurrent.futures as _cfut
+                with _cfut.ThreadPoolExecutor(max_workers=min(6, len(missing))) as _ex:
+                    list(_ex.map(lambda _c: _fetch_remote_emoji(_c, d), missing))
+            except Exception:
+                pass
+        have = sum(1 for code in BASE_EMOJIS if (d / f"{code}.png").is_file())
+        return pre_have, len(missing), have
+    except Exception:
+        return 0, 0, 0
+
+
 def download_emoji_pack(style: str) -> Dict[str, Any]:
     """下载指定 Emoji 样式资源"""
     style = (style or "").lower()
@@ -920,34 +958,8 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         return {"ok": False, "error": "持久化目录不可用"}
 
     if style == "ios":
-        # 常用基础包（首屏/高频表情，一次下好；包外表情仍按需自动补全并缓存）
-        base_emojis = [
-            # 笑脸
-            "1f600", "1f602", "1f603", "1f604", "1f605", "1f609", "1f60d",
-            "1f618", "1f61c", "1f622", "1f62d", "1f630", "1f62e", "1f60e",
-            "1f610", "1f914", "1f917",
-            # 手势
-            "1f44d", "1f44e", "1f44f", "1f450", "1f446", "1f447", "270a",
-            "270c", "1f44c", "1f4aa", "1f485",
-            # 心与符号
-            "2764", "1f495", "1f494", "1f49b", "2728", "2b50", "1f31f",
-            "274c", "2705", "26a0",
-            # 物件（含游戏/资产高频：钱袋货币骰子）
-            "1f389", "1f38a", "1f525", "1f4b0", "1f4b5", "1f4b8", "1f4a1",
-            "1f4a9", "1f4ac", "1f4f7", "23e9", "1f552", "1f6a7", "1f52e",
-            "1f3af", "1f3b0", "1f3b2", "1f3b3",
-        ]
-        # 缺失项并行补齐（单文件 urllib 无复用，并行大幅缩短总耗时；失败静默按需再补）
-        missing = [c for c in base_emojis if not (d / f"{c}.png").is_file()]
-        pre_have = len(base_emojis) - len(missing)
-        if missing:
-            try:
-                import concurrent.futures as _cfut
-                with _cfut.ThreadPoolExecutor(max_workers=min(6, len(missing))) as _ex:
-                    list(_ex.map(lambda _c: _fetch_remote_emoji(_c, d), missing))
-            except Exception:
-                pass
-        have = sum(1 for code in base_emojis if (d / f"{code}.png").is_file())
+        pre_have, _, have = _ensure_base_pngs(d)
+        total_base = len(BASE_EMOJIS)
         if not have:
             # 一个都没下来：不写 ready 标记，如实报错（否则会虚标“已下载”）
             try:
@@ -961,7 +973,7 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
             pass
         extra = "（已齐全）" if have <= pre_have else ""
         _emoji_storage_invalidate()
-        return {"ok": True, "downloaded": [f"iOS基础Emoji({have}/{len(base_emojis)}个常用{extra}，其余按需自动补全)"], "storage_kb": get_emoji_storage_kb("ios")}
+        return {"ok": True, "downloaded": [f"iOS基础Emoji({have}/{total_base}个常用{extra}，其余按需自动补全)"], "storage_kb": get_emoji_storage_kb("ios")}
 
     # android 或 windows（多直链容错，依次尝试；下载后校验体积，残包换源重试）
     fname = ANDROID_EMOJI_FILE if style == "android" else WINDOWS_EMOJI_FILE
@@ -1015,6 +1027,14 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
         except Exception:
             pass
         _emoji_storage_invalidate()
+        if style == "windows":
+            # windows 无离线解包源：顺手补一份基础 PNG，首屏不再现下
+            try:
+                _ensure_base_pngs(d)
+                _emoji_storage_invalidate()
+            except Exception:
+                pass
+            return {"ok": True, "downloaded": [fname, "基础表情图（首屏常用）"], "storage_kb": get_emoji_storage_kb(style)}
         return {"ok": True, "downloaded": [fname], "storage_kb": get_emoji_storage_kb(style)}
     return {"ok": False, "error": f"{fname} 下载失败: {err or '未知错误'}", "storage_kb": 0.0}
 
