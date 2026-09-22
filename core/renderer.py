@@ -406,7 +406,7 @@ _FONT_MIN_BYTES = 50 * 1024
 # Emoji 样式包（按需下载，默认不下载）
 EMOJI_PACKS = [
     {"id": "ios", "name": "iOS 最新", "desc": "苹果全彩 · 拟真", "need_font": False},
-    {"id": "android", "name": "Android 最新", "desc": "Noto 彩字 · 矢量", "need_font": True},
+    {"id": "android", "name": "Android 最新", "desc": "Noto 全彩 · 本地离线", "need_font": True},
     {"id": "windows", "name": "Windows 最新", "desc": "Segoe 风格 · 清晰", "need_font": True},
 ]
 
@@ -656,17 +656,129 @@ def _style_font_path(style: str) -> str:
     return ""
 
 
+# android 本地离线包标记：解包成功后写入，含解出数量
+ANDROID_PACK_READY = "android_pack.ready"
+ANDROID_PACK_MANIFEST = "android_pack.files"
+# 解包成功的最低门槛（单字形数量；正常 Noto 包数千个，远高于此）
+ANDROID_PACK_MIN_GLYPHS = 500
+# 不独立成图的码位：ZWJ/变体选择符/肤色/键帽符/地区指示符（单独出现无意义，随簇处理）
+_NON_SINGLETON_CPS = frozenset(
+    [0x200D, 0x200C, 0xFE0E, 0xFE0F, 0x20E3]
+    + list(range(0xFE00, 0xFE10))
+    + list(range(0x1F3FB, 0x1F400))
+    + list(range(0x1F1E6, 0x1F1FC))
+)
+
+
+def _extract_noto_pngs(font_path: str, dest_dir: Path) -> Tuple[int, str]:
+    """从 NotoColorEmoji.ttf 的 CBDT 表解出单字 PNG（文件名兼容 Twemoji 命名）。
+
+    背景：PIL 打不开 CBDT 位图字（invalid pixel size），字体文件本身永远画不出；
+    但表里躺着现成的 PNG 裸数据，解出来走已有 PNG 管道即得完整离线包。
+    返回 (解出数量, 错误信息)。只收录可独立成图的单码位，跳过 ZWJ/肤色等修饰位。
+    """
+    try:
+        if _TTFONT is None:
+            return 0, "缺少 fonttools，无法解包"
+        try:
+            ff = _TTFONT(str(font_path), lazy=True)
+        except Exception as e:
+            return 0, f"字体解析失败: {e}"
+        try:
+            try:
+                cmap = ff.getBestCmap()
+            except Exception:
+                cmap = {}
+            try:
+                strikes = ff["CBDT"].strikeData
+            except Exception:
+                return 0, "字体无 CBDT 位图包"
+            # 取字形最多的 strike（多尺寸时选最全的）
+            best = None
+            for st in strikes or []:
+                try:
+                    if best is None or len(st) > len(best):
+                        best = st
+                except Exception:
+                    continue
+            if not best:
+                return 0, "位图包为空"
+            inv: Dict[str, List[int]] = {}
+            for cp, gname in (cmap or {}).items():
+                try:
+                    inv.setdefault(str(gname), []).append(int(cp))
+                except Exception:
+                    continue
+            names: List[str] = []
+            done = 0
+            for gname, members in best.items():
+                try:
+                    cps = inv.get(str(gname)) or []
+                    picked = None
+                    for cp in cps:
+                        if cp in _NON_SINGLETON_CPS:
+                            continue
+                        try:
+                            if not is_emoji_char(chr(cp)):
+                                continue
+                        except Exception:
+                            continue
+                        picked = cp
+                        break
+                    if picked is None:
+                        continue
+                    raw = None
+                    try:
+                        raw = getattr(members, "imageData", None)
+                    except Exception:
+                        raw = None
+                    if not raw or bytes(raw[:8]) != b"\x89PNG\r\n\x1a\n":
+                        continue
+                    fname = f"{picked:x}.png"
+                    try:
+                        with open(dest_dir / fname, "wb") as f:
+                            f.write(bytes(raw))
+                        names.append(fname)
+                        done += 1
+                    except Exception:
+                        continue
+                    if done >= 4000:
+                        break
+                except Exception:
+                    continue
+            try:
+                with open(dest_dir / ANDROID_PACK_MANIFEST, "w", encoding="utf-8") as f:
+                    f.write("\n".join(names))
+                with open(dest_dir / ANDROID_PACK_READY, "w", encoding="utf-8") as f:
+                    f.write(str(done))
+            except Exception:
+                pass
+            return done, ""
+        finally:
+            try:
+                ff.close()
+            except Exception:
+                pass
+    except Exception as e:
+        return 0, f"解包异常: {e}"
+
+
 # 样式彩字有效性结论缓存：style -> ((mtime, size), ok)，文件变化自动重验
 _STYLE_FONT_VALID: Dict[str, Any] = {}
 
 
 def _style_font_validated(style: str) -> str:
-    """已下载字体的有效路径：存在 + 体积达标 + 真实可加载（含代表字形）。
+    """已下载字体的有效路径（分样式判定）。
 
-    只看体积会把超时截断的残包误判为“已下载”（能过 1MB 门槛但 PIL 打不开），
-    导致绘制每次回退网络。结论按 (mtime, size) 缓存，文件替换自动重验。
+    - android：以解包标记为准（PIL 打不开 CBDT 位图字，看体积/加载都是误判；
+      标记含解出数量，文件替换/删除后自动失效）。
+    - windows：文件存在 + 体积达标 + 可加载即算（包格式复杂，不强求字形覆盖）。
+    只看体积会把超时截断的残包误判为“已下载”，导致绘制每次回退网络。
     """
     try:
+        sid = str(style or "").lower()
+        if sid == "android":
+            return _android_pack_validated()
         path = _style_font_path(style)
     except Exception:
         return ""
@@ -686,12 +798,7 @@ def _style_font_validated(style: str) -> str:
     ok = False
     try:
         f = _load_font_file(path, 32)
-        if f is not None:
-            if str(style or "").lower() == "android":
-                ok = bool(_font_covers(f, "\U0001f600"))
-            else:
-                # windows 包格式复杂，只要求可加载，不强求彩字形覆盖
-                ok = True
+        ok = f is not None
     except Exception:
         ok = False
     try:
@@ -701,6 +808,45 @@ def _style_font_validated(style: str) -> str:
     except Exception:
         pass
     return path if ok else ""
+
+
+def _android_pack_validated() -> str:
+    """android 离线包有效性：字体文件存在 + 解包标记存在且数量达标（结论缓存）。"""
+    try:
+        path = _style_font_path("android")
+        if not path:
+            return ""
+        d = _data_subdir("emoji")
+        if d is None:
+            return ""
+        rp = d / ANDROID_PACK_READY
+        try:
+            st_f = os.stat(path)
+            st_r = os.stat(str(rp))
+            key = (st_f.st_mtime, st_f.st_size, st_r.st_mtime, st_r.st_size)
+        except Exception:
+            return ""
+        try:
+            hit = _STYLE_FONT_VALID.get("android")
+            if hit is not None and hit[0] == key:
+                return path if hit[1] else ""
+        except Exception:
+            pass
+        ok = False
+        try:
+            n = int(rp.read_text(encoding="utf-8").strip())
+            ok = n >= ANDROID_PACK_MIN_GLYPHS
+        except Exception:
+            ok = False
+        try:
+            if len(_STYLE_FONT_VALID) > 8:
+                _STYLE_FONT_VALID.pop(next(iter(_STYLE_FONT_VALID)))
+            _STYLE_FONT_VALID["android"] = (key, ok)
+        except Exception:
+            pass
+        return path if ok else ""
+    except Exception:
+        return ""
 
 
 def _style_font_forget(style: str = "") -> None:
@@ -840,6 +986,23 @@ def download_emoji_pack(style: str) -> Dict[str, Any]:
     if ok:
         _EMOJI_FONT_CACHE.clear()
         _style_font_forget(style)
+        if style == "android":
+            # 解包成本地 PNG 离线包（PIL 打不开 CBDT 位图字，字体只当解包源）；
+            # 解包不足量即失败并清理，不虚标
+            try:
+                n, emsg = _extract_noto_pngs(str(target), d)
+            except Exception as e:
+                n, emsg = 0, f"解包异常: {e}"
+            if n < ANDROID_PACK_MIN_GLYPHS:
+                for _p in (target, d / ANDROID_PACK_MANIFEST, d / ANDROID_PACK_READY):
+                    try:
+                        _p.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                _style_font_forget(style)
+                return {"ok": False, "error": f"{fname} 解包失败（仅解出 {n} 个，{emsg or '文件异常'}），已清理请重试", "storage_kb": 0.0}
+            _emoji_storage_invalidate()
+            return {"ok": True, "downloaded": [fname, f"离线表情图{n}个"], "storage_kb": get_emoji_storage_kb(style)}
         # 落盘后即验即报：残包直接失败并清理，不虚标“已下载”
         try:
             if not _style_font_validated(style):
@@ -890,6 +1053,30 @@ def delete_emoji_pack(style: str) -> Dict[str, Any]:
                             except Exception:
                                 clear_font_cache()
                                 time.sleep(0.05)
+            # 解包清单内的离线 PNG + 标记一并清除（按需缓存的 PNG 不在此列，不动）
+            if d and d.is_dir():
+                try:
+                    manifest = d / ANDROID_PACK_MANIFEST
+                    if manifest.is_file():
+                        try:
+                            listed = manifest.read_text(encoding="utf-8").split()
+                        except Exception:
+                            listed = []
+                        for _nm in listed[:5000]:
+                            try:
+                                _pp = d / _nm
+                                if _pp.is_file() and _pp.suffix.lower() == ".png":
+                                    _pp.unlink(missing_ok=True)
+                                    deleted.append(_nm)
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                for _mark in (ANDROID_PACK_MANIFEST, ANDROID_PACK_READY):
+                    try:
+                        (d / _mark).unlink(missing_ok=True)
+                    except Exception:
+                        pass
         if style in ("windows", "all"):
             for fname in (WINDOWS_EMOJI_FILE, "EmojiOneColor.otf"):
                 for sdir in search_dirs:
@@ -2311,6 +2498,16 @@ def ensure_emoji_assets(allow_remote: bool = True) -> Dict[str, Any]:
             ok = False
     if ok:
         _EMOJI_FONT_CACHE.clear()
+        _style_font_forget("android")
+        # 字体本身画不出（CBDT 位图字），顺手解包成本地 PNG 离线包
+        try:
+            n, emsg = _extract_noto_pngs(str(target), data_dir)
+            if n < ANDROID_PACK_MIN_GLYPHS:
+                return {"ok": False, "downloaded": [],
+                        "error": f"解包失败（仅解出 {n} 个，{emsg or '文件异常'}）"}
+        except Exception as e:
+            return {"ok": False, "downloaded": [], "error": f"解包异常: {e}"}
+        _emoji_storage_invalidate()
         return {"ok": True, "downloaded": [ANDROID_EMOJI_FILE], "error": ""}
     return {"ok": False, "downloaded": [], "error": f"{ANDROID_EMOJI_FILE} 下载失败: {err or '未知错误'}"}
 

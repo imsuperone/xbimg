@@ -549,6 +549,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         orig_subdir, orig_dd = R._data_subdir, R._FONT_DATA_DIR
         orig_dl = R._download_file
+        orig_extract = R._extract_noto_pngs
         seen_urls = []
 
         def fake_subdir(name=""):
@@ -567,17 +568,23 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._FONT_DATA_DIR = tmp
             R._data_subdir = fake_subdir
             R._download_file = flaky_dl
+            # 解包与本用例无关（主题是 URL 换源）：直接打桩成功
+            R._extract_noto_pngs = lambda *a, **k: (1800, "")
             R.clear_font_cache()
             res = R.download_emoji_pack("android")
             self.assertTrue(res["ok"])
             self.assertGreaterEqual(len(seen_urls), 2)
             self.assertTrue((tmp / "emoji" / R.ANDROID_EMOJI_FILE).is_file())
+            # 解包标记由解包步骤写（此处打桩跳过）：手动补标记再验状态
+            (tmp / "emoji" / R.ANDROID_PACK_READY).write_text("1800", encoding="utf-8")
+            R._style_font_forget("android")
             packs = {p["id"]: p for p in R.get_emoji_packs_status()}
             self.assertTrue(packs["android"]["installed"])
         finally:
             R._data_subdir = orig_subdir
             R._FONT_DATA_DIR = orig_dd
             R._download_file = orig_dl
+            R._extract_noto_pngs = orig_extract
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_android_prefers_color_image(self):
@@ -1389,7 +1396,7 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertEqual(seen.get("text"), multi)
 
     def test_emoji_font_validated_rejects_broken(self):
-        """残包不虚标：体积达标但 PIL 打不开 -> 未安装；删后重下好包 -> 已安装"""
+        """残包不虚标：无解包标记 -> 未安装；标记达标 -> 已安装"""
         import shutil
         import tempfile
         from core import renderer as R
@@ -1405,26 +1412,79 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             R._FONT_DATA_DIR = tmp
             R._data_subdir = fake_subdir
             (tmp / "emoji").mkdir(parents=True, exist_ok=True)
-            # 2MB 垃圾：过体积门槛但不是字体
+            # 2MB 垃圾：过体积门槛但无解包标记 -> 未安装
             (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(b"0" * (2 * 1024 * 1024))
             R._style_font_forget("android")
             self.assertEqual(R._style_font_validated("android"), "")
             self.assertFalse(R._singles_via_local_font("android"))
             packs = {p["id"]: p for p in R.get_emoji_packs_status()}
             self.assertFalse(packs["android"]["installed"])
-            # 换真彩字即恢复（用系统 emoji 字体，保证含 😀）
-            segoe = "C:/Windows/Fonts/seguiemj.ttf"
-            if os.path.isfile(segoe):
-                shutil.copy(segoe, tmp / "emoji" / R.ANDROID_EMOJI_FILE)
-                R._style_font_forget("android")
-                self.assertTrue(bool(R._style_font_validated("android")))
-                self.assertTrue(R._singles_via_local_font("android"))
-                packs = {p["id"]: p for p in R.get_emoji_packs_status()}
-                self.assertTrue(packs["android"]["installed"])
+            # 写入达标标记即恢复
+            (tmp / "emoji" / R.ANDROID_PACK_READY).write_text("1800", encoding="utf-8")
+            R._style_font_forget("android")
+            self.assertTrue(bool(R._style_font_validated("android")))
+            self.assertTrue(R._singles_via_local_font("android"))
+            packs = {p["id"]: p for p in R.get_emoji_packs_status()}
+            self.assertTrue(packs["android"]["installed"])
+            # 数量不达标仍视为未安装
+            (tmp / "emoji" / R.ANDROID_PACK_READY).write_text("3", encoding="utf-8")
+            R._style_font_forget("android")
+            self.assertEqual(R._style_font_validated("android"), "")
         finally:
             R._data_subdir = orig_subdir
             R._FONT_DATA_DIR = orig_dd
             R._style_font_forget()
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_extract_noto_pngs_unit(self):
+        """CBDT 解包：单字收录、修饰位跳过、非 PNG 跳过、写 manifest+标记"""
+        import shutil
+        import tempfile
+        from core import renderer as R
+        tmp = Path(tempfile.mkdtemp())
+        orig_tt = R._TTFONT
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+
+        class _FakeImg:
+            def __init__(self, data):
+                self.imageData = data
+
+        class _FakeCBDT:
+            strikeData = [{
+                "grin": _FakeImg(fake_png),
+                "A": _FakeImg(fake_png),
+                "zwj": _FakeImg(fake_png),
+                "junk": _FakeImg(b"not a png"),
+            }]
+
+        class _FakeFont:
+            def __init__(self, *a, **k):
+                pass
+
+            def getBestCmap(self):
+                return {0x41: "A", 0x1F600: "grin", 0x200D: "zwj",
+                        0x1F44D: "junk"}
+
+            def __getitem__(self, key):
+                assert key == "CBDT"
+                return _FakeCBDT()
+
+            def close(self):
+                pass
+
+        try:
+            R._TTFONT = _FakeFont
+            n, err = R._extract_noto_pngs("dummy.ttf", tmp)
+            self.assertEqual(err, "")
+            self.assertEqual(n, 1)
+            self.assertEqual((tmp / "1f600.png").read_bytes(), fake_png)
+            self.assertFalse((tmp / "41.png").exists())
+            self.assertFalse((tmp / "200d.png").exists())
+            manifest = (tmp / R.ANDROID_PACK_MANIFEST).read_text(encoding="utf-8")
+            self.assertIn("1f600.png", manifest)
+            self.assertEqual((tmp / R.ANDROID_PACK_READY).read_text(encoding="utf-8"), "1")
+        finally:
+            R._TTFONT = orig_tt
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_emoji_mirror_rotation(self):
@@ -1730,6 +1790,8 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             if not font_bytes:
                 self.skipTest("本机无可用彩色 emoji 字体，跳过")
             (tmp / "emoji" / R.ANDROID_EMOJI_FILE).write_bytes(font_bytes)
+            (tmp / "emoji" / R.ANDROID_PACK_READY).write_text("1800", encoding="utf-8")
+            R._style_font_forget("android")
             R._fetch_remote_emoji = boom
             R._EMOJI_IMG_CACHE.clear()
             self.assertTrue(R._singles_via_local_font("android"))
