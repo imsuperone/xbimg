@@ -227,6 +227,11 @@ class WebApiMixin:
             self.cfg_mgr.save(payload)
             self._group_cache_sig = None  # 群名单可能变化，清缓存
             try:
+                if "emoji_style" in payload:
+                    self._bump_emoji_style_gen()
+            except Exception:
+                pass
+            try:
                 configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception as e:
                 logger.warning(f"[{PLUGIN_NAME}] 字体配置同步异常: {e}")
@@ -831,6 +836,11 @@ class WebApiMixin:
             cid = str(payload.get("id", "") or "").strip()
             if not cid:
                 return error_response("缺少字体 ID", status_code=400)
+            # 先取消同字体后台安装任务，再删文件
+            try:
+                self._cancel_download_jobs("curated_font", cid)
+            except Exception:
+                pass
             res = await asyncio.to_thread(delete_curated_font, cid)
             picked = self._fallback_font_after_delete()
             try:
@@ -948,6 +958,14 @@ class WebApiMixin:
                 except Exception:
                     pass
                 return error_response(f"未知样式: {style or '空'}", status_code=400)
+            # 先取消相关后台下载任务，再删文件（否则任务完成会复活样式与文件）
+            try:
+                if style == "all":
+                    self._cancel_download_jobs("emoji", "")
+                else:
+                    self._cancel_download_jobs("emoji", style)
+            except Exception:
+                pass
             res = await asyncio.to_thread(delete_emoji_pack, style)
             # 若删除的是当前样式则切回 none
             try:
@@ -955,6 +973,7 @@ class WebApiMixin:
                 if cur == style:
                     self.cfg_mgr.config["emoji_style"] = "none"
                     self.cfg_mgr.save({"emoji_style": "none"})
+                    self._bump_emoji_style_gen()
                     from .renderer import configure_fonts as _cf2
                 else:
                     from .renderer import configure_fonts as _cf2
@@ -978,7 +997,7 @@ class WebApiMixin:
     _DOWNLOAD_JOB_LIMIT = 20
 
     @classmethod
-    def _new_download_job(cls, kind: str, target: str) -> str:
+    def _new_download_job(cls, kind: str, target: str, gen: int = 0) -> str:
         try:
             now = time.time()
             old = [k for k, v in cls._DOWNLOAD_JOBS.items()
@@ -990,7 +1009,8 @@ class WebApiMixin:
             jid = f"job_{int(now * 1000):x}_{os.urandom(4).hex()}"
             cls._DOWNLOAD_JOBS[jid] = {
                 "status": "running", "kind": kind, "target": target,
-                "detail": "下载中…", "ts": now,
+                "detail": "下载中…", "ts": now, "gen": gen,
+                "cancelled": False, "before": [],
             }
             return jid
         except Exception:
@@ -1029,9 +1049,100 @@ class WebApiMixin:
             out["result"] = job["result"]
         return out
 
+    @classmethod
+    def _cancel_download_jobs(cls, kind: str, target: str = "") -> int:
+        """取消运行中的下载任务（删除/切换导致其结果不再需要时调用）。
+
+        只打标记不杀线程：工作线程结束时会看到标记并清理自己写的文件、
+        跳过配置生效。返回被取消的数量。
+        """
+        n = 0
+        try:
+            for job in cls._DOWNLOAD_JOBS.values():
+                try:
+                    if not isinstance(job, dict):
+                        continue
+                    if job.get("status") != "running":
+                        continue
+                    if job.get("kind") != kind:
+                        continue
+                    if target and str(job.get("target", "")) != str(target):
+                        continue
+                    job["cancelled"] = True
+                    n += 1
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return n
+
+    def _job_is_cancelled(self, jid: str) -> bool:
+        try:
+            job = type(self)._DOWNLOAD_JOBS.get(jid)
+            return bool(isinstance(job, dict) and job.get("cancelled"))
+        except Exception:
+            return False
+
+    def _job_snapshot_before(self, jid: str, subdir: str) -> None:
+        """记录任务启动前目录快照，用于取消时只删本任务新增文件"""
+        try:
+            base = self.cfg_mgr.data_dir
+        except Exception:
+            return
+        try:
+            d = Path(base) / subdir
+            names = [p.name for p in d.iterdir()] if d.is_dir() else []
+            job = type(self)._DOWNLOAD_JOBS.get(jid)
+            if isinstance(job, dict):
+                job["before"] = names
+        except Exception:
+            pass
+
+    def _job_cleanup_new_files(self, jid: str, subdir: str) -> None:
+        """删除本任务新增的文件（取消时调用，不碰之前就存在的文件）"""
+        try:
+            base = self.cfg_mgr.data_dir
+        except Exception:
+            return
+        try:
+            job = type(self)._DOWNLOAD_JOBS.get(jid)
+            if not isinstance(job, dict):
+                return
+            before = set(job.get("before", []) or [])
+            try:
+                born = float(job.get("ts", 0) or 0)
+            except Exception:
+                born = 0.0
+            d = Path(base) / subdir
+            if not d.is_dir():
+                return
+            for p in d.iterdir():
+                try:
+                    if not p.is_file() or p.name in before:
+                        continue
+                    # 只有任务启动后创建的文件才删，防止误删用户文件
+                    try:
+                        if born and float(p.stat().st_mtime) < born - 1:
+                            continue
+                    except Exception:
+                        pass
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _bump_emoji_style_gen(self) -> None:
+        try:
+            self._emoji_style_gen = int(getattr(self, "_emoji_style_gen", 0) or 0) + 1
+        except Exception:
+            pass
+
     async def _run_download_job(self, jid: str, kind: str, target: str) -> None:
         """后台执行下载（网络部分放线程池，配置生效放事件循环，无历史包袱）"""
         try:
+            subdir = "emoji" if kind == "emoji" else "fonts"
+            self._job_snapshot_before(jid, subdir)
             if kind == "emoji":
                 res = await asyncio.to_thread(download_emoji_pack, target)
             elif kind == "curated_font":
@@ -1039,14 +1150,31 @@ class WebApiMixin:
             else:
                 self._finish_download_job(jid, False, f"未知任务类型: {kind}")
                 return
-            if res.get("ok"):
+            if self._job_is_cancelled(jid):
+                # 期间被删除/切换：清理本任务新增文件，不生效配置
                 try:
-                    if kind == "emoji":
+                    self._job_cleanup_new_files(jid, subdir)
+                except Exception:
+                    pass
+                self._finish_download_job(jid, False, "下载期间资源被删除，任务已取消")
+                return
+            if res.get("ok"):
+                if kind == "emoji":
+                    # 代际校验：中途用户改过样式则不再强行切回（删后复活的根因）
+                    try:
+                        job = type(self)._DOWNLOAD_JOBS.get(jid) or {}
+                        if int(job.get("gen", -1)) != int(getattr(self, "_emoji_style_gen", 0) or 0):
+                            self._finish_download_job(
+                                jid, True, "下载完成，但期间样式已变更，未自动切换", res)
+                            return
+                    except Exception:
+                        pass
+                    try:
                         self.cfg_mgr.config["emoji_style"] = target
                         self.cfg_mgr.save({"emoji_style": target})
                         configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-                except Exception as e:
-                    logger.warning(f"[{PLUGIN_NAME}] 下载后配置生效异常: {e}")
+                    except Exception as e:
+                        logger.warning(f"[{PLUGIN_NAME}] 下载后配置生效异常: {e}")
             detail = ""
             try:
                 if isinstance(res.get("downloaded"), list) and res["downloaded"]:
@@ -1067,7 +1195,11 @@ class WebApiMixin:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return None
-        jid = self._new_download_job(kind, target)
+        try:
+            gen = int(getattr(self, "_emoji_style_gen", 0) or 0)
+        except Exception:
+            gen = 0
+        jid = self._new_download_job(kind, target, gen=gen)
         try:
             loop.create_task(self._run_download_job(jid, kind, target))
             return jid

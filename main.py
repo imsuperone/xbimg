@@ -63,6 +63,8 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         self._preview_nonces: Dict[str, float] = {}
         # 测试指令冷却：name:gid -> 上次时间戳，防任意成员刷测试图
         self._test_cooldowns: Dict[str, float] = {}
+        # emoji 样式代际：每次用户显式改样式/删除即 +1，旧下载任务完成不再强行切回
+        self._emoji_style_gen: int = 0
         # 后台任务状态（__init__ 时往往没有 running loop，改为首次事件时懒启动）
         self._bg_started = False
         self._cache_stop_event: Optional[asyncio.Event] = None

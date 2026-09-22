@@ -1592,6 +1592,91 @@ class TestMsg2ImgPlugin(unittest.TestCase):
             webapi_mod.json_response = orig_jr
             webapi_mod.error_response = orig_er
 
+    def test_download_job_gen_and_cancel(self):
+        """后台任务代际与取消：中途改样式不再强切；删除取消后清新增文件"""
+        import asyncio
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import core.webapi as webapi_mod
+        from core.webapi import WebApiMixin
+
+        tmp = Path(tempfile.mkdtemp(prefix="xbimg_jobcancel_"))
+
+        class FakeCfg:
+            def __init__(self):
+                self.config = {"emoji_style": "none"}
+                self.data_dir = tmp
+
+            def save(self, d=None):
+                if d:
+                    self.config.update(d)
+
+        class FakeSelf(WebApiMixin):
+            def __init__(self):
+                self.cfg_mgr = FakeCfg()
+                self._emoji_style_gen = 0
+
+        orig_dl = webapi_mod.download_emoji_pack
+        orig_cf = webapi_mod.configure_fonts
+        webapi_mod.download_emoji_pack = lambda style: {"ok": True, "downloaded": [style], "storage_kb": 1.0}
+        webapi_mod.configure_fonts = lambda *a, **k: None
+        try:
+            async def _go():
+                s = FakeSelf()
+                # 代际：任务启动后用户改了样式，完成不再切回
+                jid = s._launch_download_job("emoji", "ios")
+                self.assertTrue(jid)
+                s._bump_emoji_style_gen()
+                for _ in range(100):
+                    await asyncio.sleep(0.02)
+                    if WebApiMixin._job_public(jid)["status"] != "running":
+                        break
+                pub = WebApiMixin._job_public(jid)
+                self.assertEqual(pub["status"], "done")
+                self.assertEqual(s.cfg_mgr.config["emoji_style"], "none")
+
+                # 取消：运行中删除，完成后清新增文件、不生效
+                (tmp / "emoji").mkdir(parents=True, exist_ok=True)
+                (tmp / "emoji" / "old.png").write_bytes(b"old")
+                import threading as _th
+                entered = _th.Event()
+                release = _th.Event()
+
+                def slow_dl(style):
+                    entered.set()
+                    release.wait(10)
+                    (tmp / "emoji" / "new.png").write_bytes(b"new")
+                    return {"ok": True, "downloaded": ["new.png"], "storage_kb": 1.0}
+
+                webapi_mod.download_emoji_pack = slow_dl
+                jid2 = s._launch_download_job("emoji", "android")
+                for _ in range(100):
+                    if entered.is_set():
+                        break
+                    await asyncio.sleep(0.05)
+                self.assertTrue(entered.is_set())
+                n = s._cancel_download_jobs("emoji", "android")
+                self.assertGreaterEqual(n, 1)
+                release.set()
+                for _ in range(200):
+                    await asyncio.sleep(0.02)
+                    st = WebApiMixin._job_public(jid2)["status"]
+                    if st != "running":
+                        break
+                pub2 = WebApiMixin._job_public(jid2)
+                self.assertNotEqual(pub2["status"], "running")
+                self.assertTrue((tmp / "emoji" / "old.png").is_file())
+                self.assertFalse((tmp / "emoji" / "new.png").exists())
+                self.assertEqual(s.cfg_mgr.config["emoji_style"], "none")
+
+            asyncio.run(_go())
+        finally:
+            webapi_mod.download_emoji_pack = orig_dl
+            webapi_mod.configure_fonts = orig_cf
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_lazy_imports_relative_first(self):
         """懒导入必须相对优先：core/ 包内 `from .core.X` 恒为 core.core（生产必 500）"""
         import re

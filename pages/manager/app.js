@@ -1205,7 +1205,9 @@ async def render_text_to_image(text: str):
       transportFails = 0;
       if (!s) continue;
       if (s.status === "done") return s;
-      if (s.status === "error") throw new Error(s.detail || s.error || "下载失败");
+      if (s.status === "error" || s.status === "cancelled") {
+        throw new Error(s.detail || s.error || "下载失败");
+      }
     }
     throw new Error("下载超时，任务仍在后台继续，可稍后在列表中查看是否已完成");
   }
