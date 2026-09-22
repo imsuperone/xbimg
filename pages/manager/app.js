@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.1.1
+// Version: 1.1.2
 // ==========================================================================
 (function () {
   "use strict";
@@ -580,6 +580,8 @@ async def render_text_to_image(text: str):
       min_length_threshold: minLen,
       link_mode: getRadioValue("linkMode", "as_image"),
       moderation_mode: getSegmentedValue("segModerationMode", "keywords"),
+      // 与 /xbimg mod 同步：mode 开则 keyword 总闸开（moderation.py 两者 AND）
+      enable_keywords_moderation: getSegmentedValue("segModerationMode", "keywords") !== "none",
       enable_ai_moderation: Boolean(document.getElementById("cfgEnableAiModeration")?.checked),
       violation_action: getRadioValue("violationAction", "mosaic_half"),
       mosaic_type: getSegmentedValue("segMosaicType", "pixel"),
@@ -665,6 +667,8 @@ async def render_text_to_image(text: str):
         return m;
       })(),
       emoji_style: getSegmentedValue("segEmojiStyle", "none"),
+      // 旧 bool 键与 style 同步，避免 config 里残留脏值
+      emoji_remote: getSegmentedValue("segEmojiStyle", "none") !== "none",
       perf_log: Boolean(document.getElementById("cfgPerfLog")?.checked),
       // group_font_scales 旧键只读不写（后端已迁移至 group_configs[].font_scale，读回退保留）
     };

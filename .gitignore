@@ -16,3 +16,6 @@ Thumbs.db
 
 # 本地 AI 上下文文档（不上传，详见 aidoc/ 目录说明）
 aidoc/
+
+# 本地单测（不上传）
+test_plugin.py
