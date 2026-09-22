@@ -16,6 +16,7 @@
 
 import asyncio
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,7 +28,7 @@ try:
     )
     from .core.config import ConfigManager, PLUGIN_NAME as _PN
     from .core.moderation import ContentModerator
-    from .core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download
+    from .core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download, warm_render_pipeline
     from .core.groups import GroupsMixin
     from .core.handlers import HandlersMixin
     from .core.commands import CommandsMixin
@@ -43,7 +44,7 @@ except (ImportError, ValueError):
     )
     from core.config import ConfigManager, PLUGIN_NAME as _PN
     from core.moderation import ContentModerator
-    from core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download
+    from core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download, warm_render_pipeline
     from core.groups import GroupsMixin
     from core.handlers import HandlersMixin
     from core.commands import CommandsMixin
@@ -85,6 +86,20 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体配置初始化异常: {e}")
 
+        # 冷启动线程预热：字体/cmap/度量/排版/星空/emoji 在首条消息前就绪
+        try:
+            _style = str(self.cfg_mgr.config.get("style", "ios"))
+            _theme = str(self.cfg_mgr.config.get("theme_mode", "light"))
+            _density = str(self.cfg_mgr.config.get("star_density", "medium"))
+            threading.Thread(
+                target=warm_render_pipeline,
+                args=(_style, _theme, _density),
+                name="xbimg-warm",
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.warning(f"[{PLUGIN_NAME}] 渲染管线预热启动异常: {e}")
+
         if _HAS_WEB_API:
             try:
                 self._register_web_apis()
@@ -124,7 +139,7 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
     async def _prewarm_render(self):
         """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量/星空层缓存就绪），首条真实消息不再付冷启动费"""
         try:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
             # 先补基础表情包（BASE_EMOJIS 并行落盘），菜单/常用消息不再现拉 CDN

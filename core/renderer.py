@@ -4164,3 +4164,45 @@ class MessageImageRenderer:
             font=warn_font,
             fill=(255, 255, 255),
         )
+
+
+def warm_render_pipeline(
+    style: str = "ios",
+    theme_mode: str = "light",
+    star_density: str = "medium",
+) -> None:
+    """__init__ 阶段线程预热：字体/cmap/度量/排版/星空/emoji 落盘一次性就绪。
+    无永久 done 标志（clear_font_cache 后可再次预热）；全程吞异常，失败由首条消息兜底。"""
+    try:
+        for size in (11, 12, 13, 16, 18, 20, 24, 25, 26, 28, 30, 32, 36, 40, 48):
+            get_font(size, bold=False)
+            get_font(size, bold=True)
+        for path in list(_ACTIVE_ORDERED[:4]):
+            if path:
+                try:
+                    _file_cmap(path)
+                except Exception:
+                    pass
+        sample = (
+            "# 预热标题\n"
+            "预热Abc123中文测试💰✨✅\n"
+            "- 列表条目\n"
+            "> 引用行\n"
+            "```python\nprint('ok')\n```"
+        )
+        MessageImageRenderer._prepare_layout(
+            text=sample, style=style, theme_mode=theme_mode, emoji_remote=True
+        )
+        MessageImageRenderer.render_pages(
+            text=sample,
+            style=style,
+            theme_mode=theme_mode,
+            star_background=True,
+            star_density=star_density,
+            emoji_remote=True,
+        )
+        d = _data_subdir("emoji")
+        if d is not None:
+            _ensure_base_pngs(d)
+    except Exception:
+        pass
