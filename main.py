@@ -88,8 +88,10 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
 
         # 同步预载常用字号字体：保证首条消息 get_font 命中（避免与预热线程抢 GIL）
         try:
-            from core.renderer import preload_font_sizes
-
+            try:
+                from .core.renderer import preload_font_sizes
+            except ImportError:
+                from core.renderer import preload_font_sizes
             preload_font_sizes()
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体同步预载异常: {e}")

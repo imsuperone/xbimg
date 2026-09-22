@@ -257,6 +257,26 @@ class HandlersMixin:
             except Exception:
                 pass
 
+    async def _await_inflight_claim(self, full_text: str, timeout: float = 10.0) -> str:
+        """同文已有认领但 outcome 未定时，等待其到达终态。
+
+        返回 "done" / "blocked" / "gone"（条目消失或超时，可重新认领）。
+        用于并发窗口第二条消息：不直接丢转图，等首条渲染完成后复用结果。
+        """
+        key = self._text_hash(full_text)
+        if not key:
+            return "gone"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            info = self._render_hash_slot().get(key)
+            if not isinstance(info, dict):
+                return "gone"
+            outcome = str(info.get("outcome") or "")
+            if outcome in ("done", "blocked"):
+                return outcome
+            await asyncio.sleep(0.05)
+        return "gone"
+
     def _text_render_info(self, full_text: str) -> Optional[Dict[str, Any]]:
         """读取同文内存渲染缓存；终态条目超过 _RENDER_INFO_TTL 视为过期并删除。"""
         try:
@@ -1187,7 +1207,7 @@ class HandlersMixin:
                 # 缓存文件已失效/无法组装 → 视为 miss，往下完整重跑
             _claim_tf = self._claim_text_render(full_text)
             if not _claim_tf:
-                # 另一路径正在渲染/已处理：按 outcome 复用或保留原消息
+                # 另一路径正在渲染/已处理：按 outcome 复用或等待其完成后复用
                 _prior2 = self._text_render_info(full_text)
                 if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
                     return self._block_adapter_message(message)
@@ -1201,7 +1221,22 @@ class HandlersMixin:
                         ]
                         new_segs1.extend(_segs1)
                         return new_segs1
-                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
+                _st_tf = await self._await_inflight_claim(full_text)
+                if _st_tf == "blocked":
+                    return self._block_adapter_message(message)
+                if _st_tf == "done":
+                    _p3 = self._alive_prior_paths(full_text)
+                    if _p3:
+                        _segs2 = self._image_segs_from_paths(_p3)
+                        if _segs2:
+                            new_segs2 = [
+                                seg for seg in message
+                                if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                            ]
+                            new_segs2.extend(_segs2)
+                            return new_segs2
+                # 条目已消失/超时 → 重新认领走完整渲染；仍失败则保留原消息
                 _claim_tf = self._claim_text_render(full_text)
                 if not _claim_tf:
                     return message
@@ -1340,7 +1375,17 @@ class HandlersMixin:
                     _segs_s2 = self._image_segs_from_paths(_p2s)
                     if _segs_s2:
                         return _segs_s2
-                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
+                _st_s = await self._await_inflight_claim(text)
+                if _st_s == "blocked":
+                    return " "
+                if _st_s == "done":
+                    _p3s = self._alive_prior_paths(text)
+                    if _p3s:
+                        _segs_s3 = self._image_segs_from_paths(_p3s)
+                        if _segs_s3:
+                            return _segs_s3
+                # 条目已消失/超时 → 重新认领走完整渲染；仍失败则保留原消息
                 _claim_tf2 = self._claim_text_render(text)
                 if not _claim_tf2:
                     return message
@@ -1537,7 +1582,29 @@ class HandlersMixin:
                 if _hit1:
                     result.chain = new_chain1
                     return
-            # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+            # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
+            _st_m = await self._await_inflight_claim(full_text)
+            if _st_m == "blocked":
+                event.stop_event()
+                return
+            if _st_m == "done":
+                _p3m = self._alive_prior_paths(full_text)
+                if _p3m:
+                    new_chain2 = [
+                        comp for comp in result.chain
+                        if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
+                    ]
+                    _hit2 = 0
+                    for img_path in _p3m:
+                        try:
+                            new_chain2.append(AstrImage.fromFileSystem(str(img_path)))
+                            _hit2 += 1
+                        except Exception:
+                            pass
+                    if _hit2:
+                        result.chain = new_chain2
+                        return
+            # 条目已消失/超时 → 重新认领走完整渲染；仍失败则保留原消息
             _claim_m = self._claim_text_render(full_text)
             if not _claim_m:
                 return
