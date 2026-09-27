@@ -3979,7 +3979,10 @@ class MessageImageRenderer:
                     violation_char_indices.add(ci)
 
         if not violation_char_indices:
-            cls._fallback_area_mosaic(card_surface, all_char_positions, mosaic_mode, mosaic_type, theme, card_w, mosaic_half_pos)
+            # 违规词表非空但本图未命中任何违规字符：
+            # 说明违规内容不在此图（分页拆词/关键词在其他页），本图无违规内容，
+            # 直接跳过打码 —— 不做区域回退，否则小页会被整块马赛克覆盖。
+            # violation_words 为空（AI 判定无具体词）的情况已在函数入口回退区域打码。
             return
 
         # 对每个违规字符施加马赛克（更精致：柔和像素/磨砂+主题色轻遮罩）
