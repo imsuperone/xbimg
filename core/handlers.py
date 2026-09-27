@@ -458,19 +458,57 @@ class HandlersMixin:
         return kept
 
     @staticmethod
+    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
+        """base64:// 图段原地降质：解码→缩放 0.75→按原格式重编码回 base64。
+
+        AstrBot aiocqhttp 适配器发送前把本地图统一转成 base64://，
+        超时降质若跳过它就永远"无本地图可降质"（对应线上 retcode=1200
+        放弃重试日志）。失败（解码/编码异常）返回 False 不动原段。
+        """
+        try:
+            import base64 as _b64
+            raw = _b64.b64decode(file_ref[9:])
+            if not raw:
+                return False
+            img = Image.open(io.BytesIO(raw))
+            img.load()
+            w, h = img.size
+            if w < 64 and h < 64:
+                return False
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            scale = 0.75
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+            buf = io.BytesIO()
+            if raw[:3] == b"\xff\xd8\xff":
+                img.save(buf, format="JPEG", quality=72, subsampling=1)
+            else:
+                img.save(buf, format="PNG", optimize=True)
+            data["file"] = "base64://" + _b64.b64encode(buf.getvalue()).decode("ascii")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
     def _shrink_images_for_retry(message: Any) -> bool:
-        """发送超时重试前：原地降质缩放消息中的本地图。返回是否修改了任何文件。"""
+        """发送超时重试前：原地降质缩放消息中的本地图/base64 内嵌图。返回是否修改了任何段。"""
         if not isinstance(message, list):
             return False
         changed = False
         for seg in message:
             if not isinstance(seg, dict) or seg.get("type") != "image":
                 continue
-            data = seg.get("data") or {}
+            data = seg.get("data")
+            if not isinstance(data, dict):
+                continue
             file_ref = data.get("file") or data.get("url") or ""
             if not isinstance(file_ref, str) or not file_ref:
                 continue
-            if file_ref.startswith(("http://", "https://", "base64://")):
+            if file_ref.startswith("base64://"):
+                if HandlersMixin._shrink_base64_image(data, file_ref):
+                    changed = True
+                continue
+            if file_ref.startswith(("http://", "https://")):
                 continue
             if file_ref.startswith("file://"):
                 path = Path(file_ref[7:])
