@@ -458,13 +458,33 @@ class HandlersMixin:
         return kept
 
     @staticmethod
-    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
-        """base64:// 图段原地降质：解码→缩放 0.75→按原格式重编码回 base64。
+    def _prepare_shrunk_image(img) -> Optional[Image.Image]:
+        """降质共用前处理：尺寸校验→展平 RGB→0.75 缩放（BILINEAR 比 LANCZOS 快数倍，
+        重试图只求送达，锐度次要）。不适用（过小/解码失败）返回 None。"""
+        try:
+            w, h = img.size
+            if w < 64 and h < 64:
+                return None
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGBA")
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[-1])
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            return img.resize(
+                (max(1, int(w * 0.75)), max(1, int(h * 0.75))), Image.BILINEAR
+            )
+        except Exception:
+            return None
 
-        AstrBot aiocqhttp 适配器发送前把本地图统一转成 base64://，
-        超时降质若跳过它就永远"无本地图可降质"（对应线上 retcode=1200
-        放弃重试日志）。失败（解码/编码异常）返回 False 不动原段。
-        """
+    @staticmethod
+    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
+        """base64:// 图段原地降质：解码→缩放 0.75→统一重编码 JPEG。
+
+        AstrBot aiocqhttp 适配器发送前把本地图统一转成 base64://。
+        输出统一 JPEG（比 PNG optimize 快数倍且更小，上传更快），
+        失败（解码/编码异常）返回 False 不动原段。"""
         try:
             import base64 as _b64
             raw = _b64.b64decode(file_ref[9:])
@@ -472,27 +492,23 @@ class HandlersMixin:
                 return False
             img = Image.open(io.BytesIO(raw))
             img.load()
-            w, h = img.size
-            if w < 64 and h < 64:
+            shrunk = HandlersMixin._prepare_shrunk_image(img)
+            if shrunk is None:
                 return False
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            scale = 0.75
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
             buf = io.BytesIO()
-            if raw[:3] == b"\xff\xd8\xff":
-                img.save(buf, format="JPEG", quality=72, subsampling=1)
-            else:
-                img.save(buf, format="PNG", optimize=True)
+            shrunk.save(buf, format="JPEG", quality=72, subsampling=1)
             data["file"] = "base64://" + _b64.b64encode(buf.getvalue()).decode("ascii")
             return True
         except Exception:
             return False
 
     @staticmethod
-    def _shrink_images_for_retry(message: Any) -> bool:
-        """发送超时重试前：原地降质缩放消息中的本地图/base64 内嵌图。返回是否修改了任何段。"""
-        if not isinstance(message, list):
+    def _shrink_oversized_images(message: Any, max_bytes: int) -> bool:
+        """发送前体积守卫：仅对超过 max_bytes 的图段原地降质（0.75 缩放）。
+
+        http 段与未超限段不动。由 _invoke_send_with_guard 经 asyncio.to_thread
+        调用，不阻塞事件循环。返回是否修改了任何段。"""
+        if not isinstance(message, list) or max_bytes <= 0:
             return False
         changed = False
         for seg in message:
@@ -505,6 +521,9 @@ class HandlersMixin:
             if not isinstance(file_ref, str) or not file_ref:
                 continue
             if file_ref.startswith("base64://"):
+                # base64 长度估算解码字节，超限才解码降质
+                if (len(file_ref) - 9) * 3 // 4 <= max_bytes:
+                    continue
                 if HandlersMixin._shrink_base64_image(data, file_ref):
                     changed = True
                 continue
@@ -514,52 +533,68 @@ class HandlersMixin:
                 path = Path(file_ref[7:])
             else:
                 path = Path(file_ref)
-            if not path.is_file():
-                continue
             try:
-                img = Image.open(path)
-                w, h = img.size
-                if w < 64 and h < 64:
+                if not path.is_file() or path.stat().st_size <= max_bytes:
                     continue
-                scale = 0.75
-                nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
-                if img.mode not in ("RGB", "L"):
-                    img = img.convert("RGB")
-                img = img.resize((nw, nh), Image.LANCZOS)
+                shrunk = HandlersMixin._prepare_shrunk_image(Image.open(path))
+                if shrunk is None:
+                    continue
                 suffix = path.suffix.lower()
                 if suffix == ".png":
-                    img.save(path, format="PNG", compress_level=6)
+                    shrunk.save(path, format="PNG", compress_level=6)
                 else:
-                    img.save(path, format="JPEG", quality=72, subsampling=1)
+                    shrunk.save(path, format="JPEG", quality=72, subsampling=1)
                 changed = True
             except Exception:
                 continue
         return changed
 
-    async def _invoke_send_with_timeout_retry(self, fn, label: str, *args, **kwargs):
-        """ActionFailed(retcode=1200) 发送超时：本地图降质后原参重试 1 次。"""
+    @staticmethod
+    def _extract_send_message(args, kwargs) -> Any:
+        """从 send_group_msg/call_action 调用参数中取出 message 段列表。"""
+        _msg = kwargs.get("message")
+        if _msg is not None:
+            return _msg
+        for a in args:
+            if isinstance(a, dict) and "message" in a:
+                return a.get("message")
+        if len(args) >= 2 and not isinstance(args[1], dict):
+            return args[1]
+        return None
+
+    def _send_shrink_limit_bytes(self) -> int:
+        """发送前预降质体积阈值（字节），0=关闭。"""
+        try:
+            kb = int(self.cfg_mgr.config.get("img_send_shrink_kb", 250))
+        except Exception:
+            kb = 250
+        return max(0, kb) * 1024
+
+    async def _invoke_send_with_guard(self, fn, label: str, *args, **kwargs):
+        """发送前置体积守卫 + 单次发送（超时不重发）。
+
+        - 图段超过 img_send_shrink_kb：先在工作线程降质再发，减小 NTQQ 上传耗时，
+          降低 retcode=1200 超时概率（大图更容易撞上 ack 超时窗口）。
+        - retcode=1200 超时只记日志、绝不自动重发：NapCat 超时时消息往往已实际
+          送达（仅是没等到 NTQQ 的 ack 事件），重发会造成同一张图发两次
+          （线上已复现双图，故移除旧的"降质后重试一次"逻辑）。"""
+        _msg = self._extract_send_message(args, kwargs)
+        if _msg is not None:
+            limit = self._send_shrink_limit_bytes()
+            if limit > 0:
+                try:
+                    await asyncio.to_thread(self._shrink_oversized_images, _msg, limit)
+                except Exception:
+                    pass
         try:
             return await fn(*args, **kwargs)
         except Exception as e:
-            if not self._is_send_timeout_error(e):
-                raise
-            _msg = kwargs.get("message")
-            if _msg is None:
-                for a in args:
-                    if isinstance(a, dict) and "message" in a:
-                        _msg = a.get("message")
-                        break
-                if _msg is None and len(args) >= 2 and not isinstance(args[1], dict):
-                    _msg = args[1]
-            if not self._shrink_images_for_retry(_msg):
+            if self._is_send_timeout_error(e):
                 logger.warning(
-                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，无本地图可降质，放弃重试"
+                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，"
+                    f"消息可能已实际送达，不自动重发以避免重复"
                 )
-                raise
-            logger.warning(
-                f"[{PLUGIN_NAME}] {label} 发送超时({e})，已降质本地图重试一次"
-            )
-            return await fn(*args, **kwargs)
+            raise
 
     @staticmethod
     def _describe_callable(fn: Any, _depth: int = 0) -> str:
@@ -664,7 +699,7 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
                 try:
-                    return await self._invoke_send_with_timeout_retry(
+                    return await self._invoke_send_with_guard(
                         orig_send_group, "send_group_msg", *args, **kwargs
                     )
                 except TypeError as e:
@@ -683,7 +718,7 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
                             f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
                         )
-                        return await self._invoke_send_with_timeout_retry(
+                        return await self._invoke_send_with_guard(
                             orig_send_group, "send_group_msg(norm)", **_rk
                         )
                     except TypeError as e2:
@@ -752,7 +787,7 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
                 try:
-                    return await self._invoke_send_with_timeout_retry(
+                    return await self._invoke_send_with_guard(
                         orig_call_action, f"call_action({action})", action, *args, **kwargs
                     )
                 except TypeError as e:
@@ -774,7 +809,7 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
                             f"已归一化为关键字重试 keys={sorted(_rk)}"
                         )
-                        return await self._invoke_send_with_timeout_retry(
+                        return await self._invoke_send_with_guard(
                             orig_call_action, f"call_action({action}/norm)", action, **_rk
                         )
                     except TypeError as e2:
