@@ -220,6 +220,21 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+.m3-accent-picker {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid var(--m3-sys-color-divider);
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.m3-accent-picker::-webkit-color-swatch-wrapper { padding: 2px; }
+.m3-accent-picker::-webkit-color-swatch { border: none; border-radius: 50%; }
+.m3-accent-picker::-moz-color-swatch { border: none; border-radius: 50%; }
+
 @media (prefers-reduced-motion: reduce) {
   .settings-section.active {
     animation: none;
@@ -260,10 +275,6 @@ body {
   border: 1px solid var(--m3-sys-color-divider);
   padding: 24px;
   box-shadow: var(--m3-shadow-card);
-}
-
-.expressive-card {
-  border-left: 6px solid var(--m3-sys-color-primary);
 }
 
 .card-title {
@@ -466,6 +477,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .seg-item:hover {

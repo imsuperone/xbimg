@@ -344,6 +344,46 @@ async def render_text_to_image(text: str):
     } catch (e) {}
   }
 
+  // ---- 主题色调色盘（覆盖 --m3-sys-color-primary，随配置持久化） ----
+  function applyAccentColor(hex, save) {
+    const v = typeof hex === "string" ? hex.trim() : "";
+    const ok = /^#[0-9a-fA-F]{6}$/.test(v);
+    if (ok) {
+      document.documentElement.style.setProperty("--m3-sys-color-primary", v);
+    } else {
+      document.documentElement.style.removeProperty("--m3-sys-color-primary");
+    }
+    try {
+      if (ok) localStorage.setItem("msg2img_accent", v);
+      else localStorage.removeItem("msg2img_accent");
+    } catch (e) {}
+    if (save) {
+      currentConfig.ui_accent_color = ok ? v : "";
+      triggerAutoSave();
+    }
+    const picker = document.getElementById("accentPicker");
+    if (picker) {
+      if (ok) {
+        picker.value = v;
+        picker.dataset.custom = "1";
+      } else {
+        delete picker.dataset.custom;
+        try {
+          const def = getComputedStyle(document.documentElement).getPropertyValue("--m3-sys-color-primary").trim() || "#7A5813";
+          picker.value = /^#[0-9a-fA-F]{6}$/.test(def) ? def : "#7A5813";
+        } catch (e) {}
+      }
+    }
+  }
+
+  function initAccentColor(cfgAccent) {
+    let v = typeof cfgAccent === "string" ? cfgAccent.trim() : "";
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) {
+      try { v = localStorage.getItem("msg2img_accent") || ""; } catch (e) { v = ""; }
+    }
+    applyAccentColor(v, false);
+  }
+
   // ---- 分段选择器助手 ----
   function setSegmentedValue(containerId, val) {
     const container = document.getElementById(containerId);
@@ -489,6 +529,8 @@ async def render_text_to_image(text: str):
 
     // 动态提示群聊范围状态
     updateGroupModeStatusUI(grpMode, cfg.group_list || "");
+    // 主题色：后端配置优先，其次本地记录
+    initAccentColor(cfg.ui_accent_color);
   }
 
   function collectConfigFromUI() {
@@ -549,6 +591,7 @@ async def render_text_to_image(text: str):
       custom_bold_font_path: cbfEl ? cbfEl.value.trim() : "",
       custom_font_url: cfUrlEl ? cfUrlEl.value.trim() : "",
       font_scale: fontScaleEl ? parseInt(fontScaleEl.value,10) || 100 : 100,
+      ui_accent_color: (()=>{ const p = document.getElementById("accentPicker"); return (p && p.dataset.custom) ? p.value : (currentConfig.ui_accent_color || ""); })(),
       img_compress_level: getSegmentedValue("segImgCompress", "balanced"),
       img_max_kb: (()=>{ const el = document.getElementById("cfgImgMaxKb"); if (!el || el.value === "") return 800; const v = parseInt(el.value,10); return isNaN(v) ? 800 : Math.min(5120, Math.max(0, v)); })(),
       page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 3000; return Math.min(3800, Math.max(800, v || 3000)); })(),
@@ -1079,13 +1122,16 @@ async def render_text_to_image(text: str):
       });
     });
   }
+  let _emojiReq = 0;
   async function fetchEmojiPacks() {
     const box=document.getElementById("emojiPacksBox");
     if(!box) return;
+    const _rid = ++_emojiReq;
     try{
       const res=await api.get("emoji/packs");
       const packs=res&&res.packs||[];
       const statusRes=await api.get("fonts/status").catch(()=>({fonts:{}}));
+      if (_rid !== _emojiReq) return;
       const curStyle=(statusRes&&statusRes.fonts&&statusRes.fonts.emoji_style)||"none";
       const totalKb=(statusRes&&statusRes.fonts&&statusRes.fonts.emoji_storage_kb)||0;
       const totalTxt=totalKb>=1024?(totalKb/1024).toFixed(1)+" MB":totalKb+" KB";
@@ -2072,6 +2118,12 @@ async def render_text_to_image(text: str):
   function startApp() {
     initTheme();
     bindGlobalDelegation();
+    const _picker = document.getElementById("accentPicker");
+    if (_picker) {
+      _picker.addEventListener("input", () => applyAccentColor(_picker.value, false));
+      _picker.addEventListener("change", () => applyAccentColor(_picker.value, true));
+      _picker.addEventListener("dblclick", () => applyAccentColor("", true));
+    }
     notifyReady();
 
     const inputEl = document.getElementById("previewInput");
