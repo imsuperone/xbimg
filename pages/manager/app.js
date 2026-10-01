@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.0
+// Version: 1.3.1
 // ==========================================================================
 (function () {
   "use strict";
@@ -363,17 +363,36 @@ async def render_text_to_image(text: str):
     return "#" + mixed.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
   }
 
+  // 取色派生的变量：主题色 + 容器色 + 页面底色（浅色只染底、卡片留白保对比）
+  const _ACCENT_VARS = ["--m3-sys-color-primary", "--m3-sys-color-primary-container", "--m3-sys-color-surface", "--m3-sys-color-surface-container", "--m3-sys-color-surface-container-high", "--m3-sys-color-surface-container-highest"];
+
   function applyAccentColor(hex, save) {
     const v = typeof hex === "string" ? hex.trim() : "";
     const ok = /^#[0-9a-fA-F]{6}$/.test(v);
     const root = document.documentElement;
     if (ok) {
-      root.style.setProperty("--m3-sys-color-primary", v);
       const dark = (root.getAttribute("data-theme") || "light") === "dark";
-      root.style.setProperty("--m3-sys-color-primary-container", dark ? mixHex(v, "#201800", 0.45) : mixHex(v, "#FFF8EE", 0.25));
+      const tinted = dark ? {
+        "--m3-sys-color-primary": v,
+        "--m3-sys-color-primary-container": mixHex(v, "#201800", 0.45),
+        "--m3-sys-color-surface": mixHex(v, "#131315", 0.12),
+        "--m3-sys-color-surface-container": mixHex(v, "#1C1D22", 0.16),
+        "--m3-sys-color-surface-container-high": mixHex(v, "#24252C", 0.16),
+        "--m3-sys-color-surface-container-highest": mixHex(v, "#2E3038", 0.16),
+      } : {
+        "--m3-sys-color-primary": v,
+        "--m3-sys-color-primary-container": mixHex(v, "#FFF8EE", 0.25),
+        "--m3-sys-color-surface": mixHex(v, "#F8F5EE", 0.08),
+        "--m3-sys-color-surface-container": mixHex(v, "#F1ECE3", 0.12),
+        "--m3-sys-color-surface-container-highest": mixHex(v, "#E7E1D7", 0.12),
+      };
+      for (const k in tinted) {
+        try { root.style.setProperty(k, tinted[k]); } catch (e) {}
+      }
     } else {
-      root.style.removeProperty("--m3-sys-color-primary");
-      root.style.removeProperty("--m3-sys-color-primary-container");
+      for (const k of _ACCENT_VARS) {
+        try { root.style.removeProperty(k); } catch (e) {}
+      }
     }
     try {
       if (ok) localStorage.setItem("msg2img_accent", v);
