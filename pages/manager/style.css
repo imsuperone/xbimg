@@ -228,26 +228,11 @@ body {
 /* ==========================================================================
    Main Workspace Wrap (Single Column Tab Architecture)
    ========================================================================== */
-.main-content-wrap, .main-content-grid {
+.main-content-wrap {
   display: block;
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
-}
-
-.settings-column {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.preview-column {
-  position: relative;
-}
-
-.preview-sticky-card {
-  position: sticky;
-  top: 24px;
 }
 
 /* ==========================================================================
@@ -834,11 +819,6 @@ body {
   transition: all 0.15s ease;
 }
 
-.curated-font-row.active {
-  border-color: var(--m3-sys-color-primary);
-  background: var(--m3-sys-color-primary-container);
-}
-
 .curated-font-row.ready {
   border-color: var(--m3-status-green);
 }
@@ -1020,10 +1000,6 @@ body {
 /* ==========================================================================
    排版微调：列间距收紧、移动端换行
    ========================================================================== */
-.settings-column {
-  gap: 16px;
-}
-
 @media (max-width: 640px) {
   body {
     padding: 12px;
@@ -1039,10 +1015,6 @@ body {
 
   .top-bar-actions {
     width: 100%;
-  }
-
-  .top-bar-actions .primary-btn {
-    flex: 1;
   }
 
   .group-fetch-row {
@@ -1122,6 +1094,10 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
 @media (max-width: 900px) {
   .mobile-float-preview-btn {
     display: inline-flex;
+  }
+  /* B-4: 移动端预览态工作区占满宽度，预览卡片优先展示 */
+  .main-content-wrap.mobile-view-preview {
+    max-width: 100%;
   }
 }
 

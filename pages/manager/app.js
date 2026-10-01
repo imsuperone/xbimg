@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.1.5
+// Version: 1.3.0
 // ==========================================================================
 (function () {
   "use strict";
@@ -334,6 +334,12 @@ async def render_text_to_image(text: str):
     const current = document.documentElement.getAttribute("data-theme") || "light";
     const next = current === "light" ? "dark" : "light";
     applyThemeMode(next);
+    // B-9: 无自定义色时取色器跟着主题走，否则深色下仍显示浅色默认值造成脱节
+    const picker = document.getElementById("accentPicker");
+    if (picker) {
+      if (picker.dataset.custom) applyAccentColor(picker.value, false);
+      else applyAccentColor("", false);
+    }
     showToast(`管理台界面已切换为${next === "dark" ? "深色暗黑" : "浅色明亮"}模式`);
   }
 
@@ -342,16 +348,32 @@ async def render_text_to_image(text: str):
       const saved = localStorage.getItem("msg2img_theme") || "light";
       applyThemeMode(saved);
     } catch (e) {}
+    // B-9: 初始化即把取色器对齐当前主题的默认 primary，避免首屏脱节
+    try {
+      const picker = document.getElementById("accentPicker");
+      if (picker && !picker.dataset.custom) applyAccentColor("", false);
+    } catch (e) {}
   }
 
-  // ---- 主题色调色盘（覆盖 --m3-sys-color-primary，随配置持久化） ----
+  // ---- 主题色调色盘（覆盖 primary 及派生的 container，随配置持久化） ----
+  function mixHex(hexA, hexB, ratio) {
+    const toRgb = (h) => [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16));
+    const a = toRgb(hexA), b = toRgb(hexB);
+    const mixed = a.map((v, i) => Math.round(v * ratio + b[i] * (1 - ratio)));
+    return "#" + mixed.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
+  }
+
   function applyAccentColor(hex, save) {
     const v = typeof hex === "string" ? hex.trim() : "";
     const ok = /^#[0-9a-fA-F]{6}$/.test(v);
+    const root = document.documentElement;
     if (ok) {
-      document.documentElement.style.setProperty("--m3-sys-color-primary", v);
+      root.style.setProperty("--m3-sys-color-primary", v);
+      const dark = (root.getAttribute("data-theme") || "light") === "dark";
+      root.style.setProperty("--m3-sys-color-primary-container", dark ? mixHex(v, "#201800", 0.45) : mixHex(v, "#FFF8EE", 0.25));
     } else {
-      document.documentElement.style.removeProperty("--m3-sys-color-primary");
+      root.style.removeProperty("--m3-sys-color-primary");
+      root.style.removeProperty("--m3-sys-color-primary-container");
     }
     try {
       if (ok) localStorage.setItem("msg2img_accent", v);
@@ -506,9 +528,8 @@ async def render_text_to_image(text: str):
     const grpListEl = document.getElementById("cfgGroupList");
     if (grpListEl) grpListEl.value = cfg.group_list || "";
 
-    // 刷新群选择胶囊高亮状态
+    // 刷新群选择胶囊高亮状态（内部同步重绘下方各群定制列表）
     updateGroupChipsSelection();
-    renderSelectedGroupsFontList();
 
     // 字体来源
     const fontSrc = cfg.font_source || "auto";
@@ -590,7 +611,7 @@ async def render_text_to_image(text: str):
       custom_font_path: cfEl ? cfEl.value.trim() : "",
       custom_bold_font_path: cbfEl ? cbfEl.value.trim() : "",
       custom_font_url: cfUrlEl ? cfUrlEl.value.trim() : "",
-      font_scale: fontScaleEl ? parseInt(fontScaleEl.value,10) || 100 : 100,
+      font_scale: fontScaleEl ? Math.max(50, Math.min(500, parseInt(fontScaleEl.value,10) || 100)) : 100,
       ui_accent_color: (()=>{ const p = document.getElementById("accentPicker"); return (p && p.dataset.custom) ? p.value : (currentConfig.ui_accent_color || ""); })(),
       img_compress_level: getSegmentedValue("segImgCompress", "balanced"),
       img_max_kb: (()=>{ const el = document.getElementById("cfgImgMaxKb"); if (!el || el.value === "") return 800; const v = parseInt(el.value,10); return isNaN(v) ? 800 : Math.min(5120, Math.max(0, v)); })(),
@@ -654,8 +675,10 @@ async def render_text_to_image(text: str):
   }
 
   let _isSaving = false;
+  let _saveDirty = false;
   async function saveConfig(silent = false) {
-    if (_isSaving) return;
+    // B-6: POST 期间的新编辑不再丢失——合并为一次追赶保存
+    if (_isSaving) { _saveDirty = true; return; }
     _isSaving = true;
 
     const hint = document.getElementById("autoSaveHint");
@@ -678,15 +701,19 @@ async def render_text_to_image(text: str):
       if (!silent) showToast("保存提示: " + e.message);
     } finally {
       _isSaving = false;
+      if (_saveDirty) { _saveDirty = false; saveConfig(silent); }
     }
   }
 
   async function refreshData() {
     await loadData();
-    await fetchFontStatus(true);
-    await fetchFontFiles();
-    await fetchCuratedFonts();
-    await fetchEmojiPacks();
+    // L-1/L-3: fonts/status 只取一次并复用；其余独立请求并行
+    const statusRes = await fetchFontStatus(true);
+    await Promise.all([
+      fetchFontFiles(),
+      fetchCuratedFonts(),
+      fetchEmojiPacks(statusRes),
+    ]);
     renderSelectedGroupsFontList();
     showToast("数据已刷新");
   }
@@ -696,7 +723,6 @@ async def render_text_to_image(text: str):
   // ==========================================
   async function fetchFontStatus(silent = false) {
     const pill = document.getElementById("fontStatusPill");
-    const hint = document.getElementById("fontFetchHint");
     const emojiHint = document.getElementById("emojiStorageHint");
     try {
       const res = await api.get("fonts/status");
@@ -709,14 +735,12 @@ async def render_text_to_image(text: str):
           pill.style.background = "var(--m3-status-green-bg)";
           pill.style.color = "var(--m3-status-green)";
         }
-        if (hint) hint.textContent = `常规 ${base} · 粗体 ${bold} · 共 ${f.active_count || 0} 个可用`;
       } else {
         if (pill) {
           pill.textContent = "❌ 缺中文字体 (中文将显示方框)";
           pill.style.background = "var(--m3-status-amber-bg)";
           pill.style.color = "var(--m3-status-amber)";
         }
-        if (hint) hint.textContent = "请选择一个精选字体下载，或从持久化目录选择";
         if (!silent) showToast("缺中文字体，请先选择字体下载");
       }
       if (emojiHint) {
@@ -726,9 +750,11 @@ async def render_text_to_image(text: str):
         const label = style==="none" ? "未启用" : style;
         emojiHint.textContent = `占用 ${txt} · 当前 ${label}`;
       }
+      return res;
     } catch (e) {
       if (pill) pill.textContent = "字体状态未知";
       if (!silent) showToast("查询字体状态: " + e.message);
+      return null;
     }
   }
 
@@ -825,23 +851,20 @@ async def render_text_to_image(text: str):
     }
     try {
       showToast("⬇️ 正在下载字体，请稍候…");
-      // 先将 URL 写入配置，使后端下载逻辑能读取到
+      // S-2: 文件名可从直链直接推导，先落定 UI 状态再单次保存；下载接口从服务端配置读取 URL
+      const fname = url.split("?")[0].split("/").pop();
+      const cfEl = document.getElementById("cfgCustomFont");
+      if (cfEl && fname) cfEl.value = fname;
+      setSegmentedValue("segFontSource", "custom");
+      const customBox = document.getElementById("customFontBox");
+      if (customBox) customBox.style.display = "block";
       const payload = collectConfigFromUI();
       payload.custom_font_url = url;
-      // 保存配置会触发后端 after-save 的自动下载任务，但为即时反馈直接调用下载接口
       await api.post("config", payload);
       currentConfig.custom_font_url = url;
       const res = await api.post("fonts/download");
       if (res && res.downloaded && res.downloaded.length) {
         showToast(`✅ 下载完成: ${res.downloaded.join(", ")}`);
-        // 下载后若为 custom 模式，自动切换到新文件
-        const fname = url.split("?")[0].split("/").pop();
-        const cfEl = document.getElementById("cfgCustomFont");
-        if (cfEl && fname) cfEl.value = fname;
-        setSegmentedValue("segFontSource", "custom");
-        const customBox = document.getElementById("customFontBox");
-        if (customBox) customBox.style.display = "block";
-        await api.post("config", collectConfigFromUI());
       } else if (res && res.ok) {
         showToast("✅ 已就绪");
       } else {
@@ -942,7 +965,8 @@ async def render_text_to_image(text: str):
         default: { name: "标准涉敏与违禁词库 (默认综合)", keywords: currentConfig.custom_keywords || "" }
       };
     }
-    return p;
+    // S-3: 返回深拷贝，各调用方互不干扰，不再依赖共享可变别名
+    try { return JSON.parse(JSON.stringify(p)); } catch (e) { return p; }
   }
 
   function populateKeywordPresets() {
@@ -1123,14 +1147,18 @@ async def render_text_to_image(text: str):
     });
   }
   let _emojiReq = 0;
-  async function fetchEmojiPacks() {
+  // existingStatus: 可选的已获取 fonts/status 响应（调用方已有时传入，避免冷加载重复请求；不传则自行获取，保持兼容）
+  async function fetchEmojiPacks(existingStatus = null) {
     const box=document.getElementById("emojiPacksBox");
     if(!box) return;
+    const seg=document.getElementById("segEmojiStyle");
+    // B-5: packs 加载完成前禁用样式切换，避免守卫因列表未就绪而误判回滚用户选择
+    if(seg) seg.querySelectorAll(".seg-item").forEach((b)=>{ b.disabled = true; });
     const _rid = ++_emojiReq;
     try{
       const res=await api.get("emoji/packs");
       const packs=res&&res.packs||[];
-      const statusRes=await api.get("fonts/status").catch(()=>({fonts:{}}));
+      const statusRes=existingStatus || await api.get("fonts/status").catch(()=>({fonts:{}}));
       if (_rid !== _emojiReq) return;
       const curStyle=(statusRes&&statusRes.fonts&&statusRes.fonts.emoji_style)||"none";
       const totalKb=(statusRes&&statusRes.fonts&&statusRes.fonts.emoji_storage_kb)||0;
@@ -1164,7 +1192,10 @@ async def render_text_to_image(text: str):
         box.appendChild(row);
       });
     }catch(e){
+      if (_rid !== _emojiReq) return;
       box.innerHTML=`<div class="font-files-empty">读取失败: ${escapeHtml(e.message)}</div>`;
+    }finally{
+      if (_rid === _emojiReq && seg) seg.querySelectorAll(".seg-item").forEach((b)=>{ b.disabled = false; });
     }
   }
   // 后台下载轮询：长任务不等 HTTP，前端 2s 查一次，最长约 6 分钟
@@ -1298,6 +1329,14 @@ async def render_text_to_image(text: str):
   // 主动拉取与勾选群聊功能
   // ==========================================
   let _isFetchingGroups = false;
+  // S-4: 拉群单入口（POST 主链路 + GET 兜底共用；成功路径与原来完全一致，超时由 api 层统一收敛）
+  async function fetchGroupsPayload() {
+    try {
+      return await api.post("groups/fetch");
+    } catch (e) {
+      return await api.get("groups");
+    }
+  }
   async function fetchGroups() {
     if (_isFetchingGroups) return;
     _isFetchingGroups = true;
@@ -1310,12 +1349,7 @@ async def render_text_to_image(text: str):
       if (btnEl) btnEl.disabled = true;
       if (hintEl) hintEl.textContent = "正在拉取机器人所有群聊...";
 
-      let res;
-      try {
-        res = await api.post("groups/fetch");
-      } catch (e) {
-        res = await api.get("groups");
-      }
+      let res = await fetchGroupsPayload();
 
       if (res && Array.isArray(res.groups)) {
         cachedGroups = res.groups;
@@ -1397,7 +1431,6 @@ async def render_text_to_image(text: str):
     }
     input.value = list.join(", ");
     updateGroupChipsSelection();
-    renderSelectedGroupsFontList();
     updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), input.value);
     triggerAutoSave(); // 实时即刻保存生效
   }
@@ -1466,12 +1499,29 @@ async def render_text_to_image(text: str):
   // 仅选择模板填入输入框（不自动触发生成）
   // ==========================================
   let _activeMosaicMode = "none";
+  let _mosaicUserPinned = false;
+
+  // B-7: 预览打码跟随当前违规处置配置（half/full/block/notice→half/full/none），模板显式选择优先
+  function resolvePreviewMosaicMode() {
+    if (_mosaicUserPinned && (_activeMosaicMode === "half" || _activeMosaicMode === "full")) return _activeMosaicMode;
+    const va = getRadioValue("violationAction", (currentConfig && currentConfig.violation_action) || "mosaic_half");
+    if (va === "mosaic_full") return "full";
+    if (va === "mosaic_half") return "half";
+    return "none";
+  }
 
   function applyPreset(tplKey) {
     const inputEl = document.getElementById("previewInput");
     if (PRESET_TEMPLATES[tplKey]) {
       if (inputEl) inputEl.value = PRESET_TEMPLATES[tplKey];
-      _activeMosaicMode = tplKey === "mosaic" ? "half" : "none";
+      if (tplKey === "mosaic") {
+        const va = getRadioValue("violationAction", (currentConfig && currentConfig.violation_action) || "mosaic_half");
+        _activeMosaicMode = va === "mosaic_full" ? "full" : "half";
+        _mosaicUserPinned = true;
+      } else {
+        _activeMosaicMode = "none";
+        _mosaicUserPinned = false;
+      }
 
       // 视觉高亮选中的选项胶囊
       document.querySelectorAll(".m3-chip").forEach((chip) => {
@@ -1506,6 +1556,7 @@ async def render_text_to_image(text: str):
     const starBgEl = document.getElementById("cfgStarBg");
     const themeMode = getSegmentedValue("segTheme", "light");
     const styleMode = getSegmentedValue("segStyle", "ios");
+    const mosaicMode = resolvePreviewMosaicMode();
 
     // 后端优先使用 text 明文；不再双发 text_base64（大文本体积减半）
     const payload = {
@@ -1514,7 +1565,7 @@ async def render_text_to_image(text: str):
       theme_mode: themeMode,
       star_background: starBgEl ? starBgEl.checked : true,
       star_density: getSegmentedValue("segStarDensity", "medium"),
-      mosaic_mode: _activeMosaicMode,
+      mosaic_mode: mosaicMode,
       mosaic_type: getSegmentedValue("segMosaicType", "pixel"),
       mosaic_half_pos: getSegmentedValue("segMosaicHalfPos", "bottom"),
       font_scale: parseInt(document.getElementById("cfgFontScale")?.value || "100",10) || 100,
@@ -1540,9 +1591,9 @@ async def render_text_to_image(text: str):
 
       if (res && res.image_base64) {
         if (previewImg) {
-          previewImg.onload = () => {
-            if (placeholder) placeholder.style.display = "none";
-            previewImg.style.display = "block";
+          previewImg.onerror = () => {
+            previewImg.style.display = "none";
+            if (placeholder) placeholder.style.display = "block";
           };
           previewImg.src = res.image_base64;
           if (placeholder) placeholder.style.display = "none";
@@ -1550,7 +1601,7 @@ async def render_text_to_image(text: str):
         }
         if (metaBox) metaBox.style.display = "flex";
         if (dimEl) dimEl.textContent = `${res.width} × ${res.height}`;
-        if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${_activeMosaicMode !== "none" ? " (半马赛克)" : ""}`;
+        if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${mosaicMode === "full" ? " (全打码)" : mosaicMode !== "none" ? " (半马赛克)" : ""}`;
         if (latEl) latEl.textContent = res.render_ms != null ? formatMs(res.render_ms) : `${elapsed}ms`;
         if (announce) showToast("✨ 预览图片生成成功");
       } else {
@@ -1965,14 +2016,6 @@ async def render_text_to_image(text: str):
         return;
       }
 
-      // 12. 应用选中持久化字体
-      if (e.target.closest("#applyFontBtn")) {
-        e.preventDefault();
-        e.stopPropagation();
-        applySelectedFont();
-        return;
-      }
-
       // 13. 自定义直链下载
       if (e.target.closest("#downloadCustomUrlBtn")) {
         e.preventDefault();
@@ -2035,9 +2078,12 @@ async def render_text_to_image(text: str):
 
     // 输入类即时保存
     document.addEventListener("input", function (e) {
+      // B-7: 手动改字时清除非显式固定的打码选择，避免模板残留导致预览与正文不符
+      if (e.target && e.target.id === "previewInput") {
+        if (!_mosaicUserPinned && _activeMosaicMode !== "none") _activeMosaicMode = "none";
+      }
       if (e.target && e.target.id === "cfgGroupList") {
         updateGroupChipsSelection();
-        renderSelectedGroupsFontList();
         updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), e.target.value);
         triggerAutoSave();
       }
@@ -2115,7 +2161,7 @@ async def render_text_to_image(text: str):
   };
 
   // ---- 页面初始化 ----
-  function startApp() {
+  async function startApp() {
     initTheme();
     bindGlobalDelegation();
     const _picker = document.getElementById("accentPicker");
@@ -2131,12 +2177,19 @@ async def render_text_to_image(text: str):
       inputEl.value = PRESET_TEMPLATES.normal;
     }
 
-    loadData();
-    fetchFontStatus(true);
-    fetchFontFiles();
-    fetchCuratedFonts();
-    fetchEmojiPacks();
-    fetchPresetUpdateStatus();
+    // B-1/L-2: 先等配置落定再首绘预览；400ms 仍保留为首绘节拍，但不再带着硬编码默认值渲染
+    try { await loadData(); } catch (e) {}
+    let _statusRes = null;
+    try {
+      const [st] = await Promise.all([
+        fetchFontStatus(true),
+        fetchFontFiles(),
+        fetchCuratedFonts(),
+        fetchPresetUpdateStatus(),
+      ]);
+      _statusRes = st || null;
+    } catch (e) {}
+    try { await fetchEmojiPacks(_statusRes); } catch (e) {}
 
     // 页面初次加载时，自动触发一次极速预览，让用户进页面立刻能看到效果
     setTimeout(() => {

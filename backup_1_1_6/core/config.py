@@ -22,7 +22,7 @@ PLUGIN_NAME = "astrbot_plugin_xbimg"
 
 DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
     "anti_nsfw_ultra": {
-        "name": "🔥 强力综合违禁与色情库 (日常/发情/SM/玩法/百合/日系谐音)",
+        "name": "🔥 强力综合违禁与色情库 (日常/AI发情/SM/玩法/百合/小白)",
         "keywords": (
             "色情,黄色,搞黄色,做爱,性交,房事,野战,车震,口交,深喉,吞精,颜射,口爆,射精,射在里面,内射,中出,精液,精子,浓精,精液狂飙,射爆,灌满,"
             "自慰,手淫,撸管,打飞机,飞机杯,扣逼,扣穴,手交,足交,乳交,舔逼,舔阴,舔穴,舔肛,毒龙钻,潮吹,喷水,绝顶,高潮,高潮抽搐,呻吟,娇喘,发情,发骚,"
@@ -42,15 +42,7 @@ DEFAULT_KEYWORD_PRESETS: Dict[str, Dict[str, str]] = {
             "充值漏洞,破解脚本,绑架勒索,撕票,下毒暗算,强夺奴隶,奴隶市场,奴隶逃跑,烙印惩罚,私设刑房,奴隶契约,"
             "抢银行,银行抢劫,银行劫案,银行,劫狱,越狱,监狱,奴隶,"
             "赌博,网络赌博,在线赌博,赌博网站,赌博平台,赌球,赌马,赌场,地下赌场,赌资,赌徒,"
-            "聚众赌博,开设赌场,六合彩,百家乐,轮盘赌,德州扑克,梭哈,老虎机,捕鱼机,"
-            "一库,一库一库,亚麻跌,亚咩爹,欧派,欧金金,阿黑颜,痴汉,痴女,电车痴汉,泡泡浴,风俗娘,歌舞伎町,"
-            "素人,熟女,人妻,未亡人,童贞,童贞毕业,寝取,凌辱,监禁,羞耻,暴露,野外露出,媚药,媚肉,淫纹,肉壶,淫靡,肉欲,官能,情色,"
-            "好色,变态,色情狂,暴露狂,偷窥狂,JK,女子高生,女子大生,制服,水手服,体操服,死库水,竞泳衣,兔女郎,女仆,猫娘,"
-            "丝袜,黑丝,白丝,肉丝,渔网袜,吊带袜,过膝袜,绝对领域,玉足,美腿,爆乳,贫乳,美乳,尻,美尻,素股,喉交,前列腺,"
-            "失禁,失神,喘息,母乳,喷乳,伪娘,男娘,扶她,人妖,时间停止,洗脑,淫妻,单男,淫荡人妻,寂寞人妻,出差人妻,邻家人妻,新婚人妻,"
-            "69式,后入,观音坐莲,老汉推车,女上位,骑乘位,传教士,站立位,口活,手活,胸推,臀推,袭胸,揉臀,拍臀,舔耳,咬耳,扇耳光,悬吊,"
-            "木马,三角木马,针刺,藤条,马鞭,猫尾,兔尾,尾巴肛塞,涎水,白浊,遗精,梦遗,早泄,阳痿,不举,一夜七次,梅开二度,白日宣淫,"
-            "群P,双飞,一王二后,三人行,野合,打野炮,炮友,炮机,床伴,偷情,通奸,红杏出墙,绿帽癖,按摩棒,电动棒,狼牙棒,颗粒套,超薄套"
+            "聚众赌博,开设赌场,六合彩,百家乐,轮盘赌,德州扑克,梭哈,老虎机,捕鱼机"
         ),
     },
     "default": {
@@ -139,6 +131,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "link_mode": "as_image",
     "enable_keywords_moderation": True,
     "moderation_mode": "keywords",
+    "enable_ai_moderation": False,
     "violation_action": "mosaic_half",
     "mosaic_type": "pixel",
     "active_keyword_preset": "default",
@@ -147,12 +140,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "custom_keywords": DEFAULT_KEYWORD_PRESETS["default"]["keywords"],
     "img_compress_level": "balanced",
     "img_max_kb": 800,
-    "img_send_shrink_kb": 250,
     "page_max_height": 3000,
     "img_max_width": 1080,
     "card_max_width": 640,
-    "ui_accent_color": "",
+    "custom_ai_prompt": "",
     "group_configs": {},
+    "ai_provider_mode": "astrbot",
+    "ai_astrbot_model": "",
+    "ai_api_base": "",
+    "ai_api_key": "",
+    "ai_model": "gpt-4o-mini",
     "group_mode": "whitelist",
     "group_list": "",
     "render_trigger": "always",
@@ -279,10 +276,13 @@ class ConfigManager:
             return
         try:
             if isinstance(raw_cfg, dict):
-                # 白名单归一：仅 DEFAULT_CONFIG 声明的键可覆盖，旧残留/AI 下线键直接丢弃
                 for k in DEFAULT_CONFIG:
                     if k in raw_cfg and raw_cfg[k] is not None:
                         self.config[k] = raw_cfg[k]
+                # 兼容历史行为：dict 侧的非默认键同样透传（旧逻辑是全量 update）
+                for k, v in raw_cfg.items():
+                    if k not in DEFAULT_CONFIG and v is not None:
+                        self.config[k] = v
             else:
                 # AstrBot 原生配置对象：按 key 逐个读取
                 for k in DEFAULT_CONFIG:
@@ -326,21 +326,24 @@ class ConfigManager:
                 except Exception:
                     logger.warning(f"[msg2img] config.json 已损坏且备份失败({e})，使用默认配置")
 
-    def _group_dict(self, key: str) -> Dict[str, Any]:
-        raw = self.config.get(key, {})
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw) if raw.strip() else {}
-            except Exception:
-                raw = {}
-        return raw if isinstance(raw, dict) else {}
-
     def _migrate_legacy_scales(self) -> None:
         """旧 group_font_scales 字典并入 group_configs[].font_scale（新位置已有则不覆盖）"""
-        raw_sc = self._group_dict("group_font_scales")
-        if not raw_sc:
+        raw_sc = self.config.get("group_font_scales", {})
+        if isinstance(raw_sc, str):
+            try:
+                raw_sc = json.loads(raw_sc) if raw_sc.strip() else {}
+            except Exception:
+                raw_sc = {}
+        if not isinstance(raw_sc, dict) or not raw_sc:
             return
-        raw_gc = self._group_dict("group_configs")
+        raw_gc = self.config.get("group_configs", {})
+        if isinstance(raw_gc, str):
+            try:
+                raw_gc = json.loads(raw_gc) if raw_gc.strip() else {}
+            except Exception:
+                raw_gc = {}
+        if not isinstance(raw_gc, dict):
+            raw_gc = {}
         moved = False
         for k, v in raw_sc.items():
             try:

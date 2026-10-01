@@ -49,9 +49,7 @@ except (ImportError, ValueError):
     from core.commands import CommandsMixin
     from core.webapi import WebApiMixin
 
-# 显式校验（assert 在 python -O 下会被抹掉，包名错配必须硬失败）
-if PLUGIN_NAME != _PN:
-    raise ImportError(f"[{PLUGIN_NAME}] 包名与 core.config 不一致: {PLUGIN_NAME!r} != {_PN!r}")
+assert PLUGIN_NAME == _PN
 
 
 class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin):
@@ -86,18 +84,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体配置初始化异常: {e}")
-
-        # 同步预载常用字号字体：保证首条消息 get_font 命中（避免与预热线程抢 GIL）
-        try:
-            try:
-                from .core.renderer import preload_font_sizes
-            except ImportError:
-                from core.renderer import preload_font_sizes
-            preload_font_sizes()
-        except Exception as e:
-            logger.warning(f"[{PLUGIN_NAME}] 字体同步预载异常: {e}")
-
-        # 预热只走 _prewarm_render 后台任务（星空/非星空双路径全覆盖），此处不再另起线程，避免双倍预热
 
         if _HAS_WEB_API:
             try:
@@ -136,9 +122,9 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
 
 
     async def _prewarm_render(self):
-        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量/星空层缓存就绪），首条真实消息不再付冷启动费"""
+        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量缓存就绪），首条真实消息不再付冷启动费"""
         try:
-            await asyncio.sleep(0)
+            await asyncio.sleep(3)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
             # 先补基础表情包（BASE_EMOJIS 并行落盘），菜单/常用消息不再现拉 CDN
@@ -159,31 +145,13 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             await asyncio.to_thread(_warm_emoji)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
-            _style = str(self.cfg_mgr.config.get("style", "ios"))
-            _theme = str(self.cfg_mgr.config.get("theme_mode", "light"))
-            # 富文本 + 星空：暖排版分支/星空层缓存/emoji 通道，首条真实消息零冷启动
-            _rich = (
-                "# 预热标题\n"
-                "预热Abc123中文测试💰✨✅\n"
-                "- 列表条目\n"
-                "> 引用行\n"
-                "```python\nprint('ok')\n```"
-            )
             await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
-                text=_rich,
-                style=_style,
-                theme_mode=_theme,
-                star_background=True,
-                star_density=str(self.cfg_mgr.config.get("star_density", "medium")),
-                emoji_remote=True,
-            )
-            # 再暖一版无星空（覆盖 star_background=False 路径，渐变/投影缓存独立）
-            await asyncio.to_thread(
-                MessageImageRenderer.render_pages,
+                # 带 3 个高频单字：顺手暖 emoji 通道（PNG/字体/cmap/覆盖判定），
+                # 首条真实消息不再付冷启动；后台线程执行，不阻塞事件循环
                 text="预热Abc123中文测试💰✨✅",
-                style=_style,
-                theme_mode=_theme,
+                style=str(self.cfg_mgr.config.get("style", "ios")),
+                theme_mode=str(self.cfg_mgr.config.get("theme_mode", "light")),
                 star_background=False,
                 emoji_remote=True,
             )
@@ -216,6 +184,16 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
                     continue
         except Exception:
             pass
+        # 关闭 AI 审查共享连接池
+        try:
+            from .core.moderation import close_shared_client
+            await close_shared_client()
+        except Exception:
+            try:
+                from core.moderation import close_shared_client as _csc2
+                await _csc2()
+            except Exception:
+                pass
 
 
 

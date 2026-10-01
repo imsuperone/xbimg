@@ -4,9 +4,10 @@
 import asyncio
 import io
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from PIL import Image
 
@@ -26,75 +27,13 @@ except (ImportError, ValueError):
     from core.renderer import MessageImageRenderer
 
 
-class _PerfTrack:
-    """六处性能计时样板共用体（with 语句）：同一样本、同日志格式，关闭时只计时不打日志。
-
-    with self._perf_track(session) as pt:
-        ...审查...; pt.after_moderate()
-        ...渲染(perf_out=pt.perf_out)...
-        pt.before_save(); ...落盘...
-        pt.set_result(imgs, paths)  # 或 pt.set_blocked()
-    退出时按 state 发一行 _emit_perf_log（与原来逐处手写完全同格式）；
-    全程无结果（渲染为空等直接返回）则不打日志，与原来一致。
-    """
-
-    def __init__(self, owner: Any, session: str) -> None:
-        self._owner = owner
-        self._session = session
-        self.on = bool(owner._perf_enabled())
-        self.t0 = time.perf_counter()
-        self._t_mod = self.t0
-        self._t_save = 0.0
-        self.mod_ms = 0.0
-        self.perf_out: Optional[Dict] = {} if self.on else None
-        self._blocked = False
-        self._result: Optional[Tuple[Any, Any]] = None
-
-    def __enter__(self) -> "_PerfTrack":
-        return self
-
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        if exc_type is not None or not self.on:
-            return False
-        try:
-            if self._blocked:
-                self._owner._emit_perf_log(
-                    self._session, (time.perf_counter() - self.t0) * 1000.0,
-                    self.mod_ms, 0.0, 0.0, [], [], blocked=True)
-            elif self._result is not None:
-                imgs, paths = self._result
-                mo, pf, dr, la = self._owner._perf_vals(self.perf_out)
-                self._owner._emit_perf_log(
-                    self._session, (time.perf_counter() - self.t0) * 1000.0,
-                    self.mod_ms, mo, pf, imgs, paths,
-                    draw_ms=dr, layout_ms=la,
-                    save_ms=(time.perf_counter() - self._t_save) * 1000.0)
-        except Exception:
-            pass
-        return False
-
-    def after_moderate(self) -> None:
-        if self.on:
-            self.mod_ms = (time.perf_counter() - self._t_mod) * 1000.0
-
-    def before_save(self) -> None:
-        if self.on:
-            self._t_save = time.perf_counter()
-
-    def set_blocked(self) -> None:
-        self._blocked = True
-
-    def set_result(self, imgs: Any, paths: Any) -> None:
-        self._result = (imgs, paths)
-
-
 class HandlersMixin:
     """HandlersMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
     # 内存渲染缓存条目（_render_hash_ts）终态（done/blocked）最长存活秒数。
-    # 须大于落盘图 90s 即时清理窗口：文件活期内条目可复用，文件死后条目最多再活 10s，
+    # 须大于落盘图 45s 即时清理窗口：文件活期内条目可复用，文件死后条目最多再活 15s，
     # 即使文件↔内存同步删除钩子失效，也不会长期引用死路径。
-    _RENDER_INFO_TTL = 100.0
+    _RENDER_INFO_TTL = 60.0
 
 
     # ==========================================
@@ -203,17 +142,16 @@ class HandlersMixin:
 
     @staticmethod
     def _is_send_timeout_error(exc: BaseException) -> bool:
-        """是否为 OneBot/NapCat 发送超时（ActionFailed retcode=1200）。
-
-        必须见到超时标记才认定：仅类名含 ActionFailed 可能是业务拒发，
-        误判会导致超时日志掩盖真实错误。"""
+        """是否为 OneBot/NapCat 发送超时（ActionFailed retcode=1200）。"""
         try:
             msg = str(exc)
         except Exception:
             return False
+        cls = type(exc).__name__
         return (
-            "retcode=1200" in msg
-            or "timeout" in msg.lower()
+            "ActionFailed" in cls
+            or "retcode=1200" in msg
+            or ("Timeout" in msg and "sendMsg" in msg)
         )
 
     @staticmethod
@@ -286,14 +224,9 @@ class HandlersMixin:
         slot = self._render_hash_slot()
         now = time.monotonic()
         try:
-            # 认领清扫只淘汰未决条目：终态 done/blocked 由 _RENDER_INFO_TTL
-            # 续命复用（落盘图 90s 活期内可复用），这里提前清会打断同文复用
             dead = [
                 k for k, v in slot.items()
-                if not isinstance(v, dict) or (
-                    str(v.get("outcome") or "") not in ("done", "blocked")
-                    and now - v.get("ts", 0.0) > 15.0
-                )
+                if not isinstance(v, dict) or now - v.get("ts", 0.0) > 15.0
             ]
             for k in dead:
                 slot.pop(k, None)
@@ -323,26 +256,6 @@ class HandlersMixin:
                 self._render_hash_slot().pop(key, None)
             except Exception:
                 pass
-
-    async def _await_inflight_claim(self, full_text: str, timeout: float = 10.0) -> str:
-        """同文已有认领但 outcome 未定时，等待其到达终态。
-
-        返回 "done" / "blocked" / "gone"（条目消失或超时，可重新认领）。
-        用于并发窗口第二条消息：不直接丢转图，等首条渲染完成后复用结果。
-        """
-        key = self._text_hash(full_text)
-        if not key:
-            return "gone"
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            info = self._render_hash_slot().get(key)
-            if not isinstance(info, dict):
-                return "gone"
-            outcome = str(info.get("outcome") or "")
-            if outcome in ("done", "blocked"):
-                return outcome
-            await asyncio.sleep(0.05)
-        return "gone"
 
     def _text_render_info(self, full_text: str) -> Optional[Dict[str, Any]]:
         """读取同文内存渲染缓存；终态条目超过 _RENDER_INFO_TTL 视为过期并删除。"""
@@ -375,7 +288,7 @@ class HandlersMixin:
 
     def _alive_prior_paths(self, full_text: str) -> List[Path]:
         """缓存命中校验：内存条目的 img_paths 必须仍然存在才算命中。
-        文件已被 90s 即时清理/周期清扫删除 → 视为 miss：
+        文件已被 45s 即时清理/周期清扫删除 → 视为 miss：
         删除该内存条目（文件↔内存双向一致）并返回 []，调用方完整重跑
         安全审查 → 打码 → 绘制 → 排版 → 落盘。进行中条目（outcome 未定）不动。"""
         info = self._text_render_info(full_text)
@@ -496,17 +409,14 @@ class HandlersMixin:
         return out
 
     @staticmethod
-    def _image_segs_from_paths(img_paths: List[Any], _prevalidated: bool = False) -> List[Dict[str, Any]]:
-        """img_paths 转 image 段。_prevalidated=True 时调用方已用 _alive_prior_paths
-        做过存活校验，不再二次 stat（单次校验即返回可用 Path）。"""
+    def _image_segs_from_paths(img_paths: List[Any]) -> List[Dict[str, Any]]:
         segs: List[Dict[str, Any]] = []
         for p in img_paths or []:
             try:
-                pp = p if isinstance(p, Path) else Path(p)
-                if not _prevalidated:
-                    if not pp.is_file():
-                        logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
-                        continue
+                pp = Path(p)
+                if not pp.is_file():
+                    logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
+                    continue
                 segs.append({"type": "image", "data": {"file": str(pp.resolve())}})
             except Exception:
                 continue
@@ -528,152 +438,70 @@ class HandlersMixin:
         return kept
 
     @staticmethod
-    def _prepare_shrunk_image(img) -> Optional[Image.Image]:
-        """降质共用前处理：尺寸校验→展平 RGB→0.75 缩放（BILINEAR 比 LANCZOS 快数倍，
-        重试图只求送达，锐度次要）。不适用（过小/解码失败）返回 None。"""
-        try:
-            w, h = img.size
-            if w < 64 and h < 64:
-                return None
-            if img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGBA")
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[-1])
-                img = bg
-            elif img.mode != "RGB":
-                img = img.convert("RGB")
-            return img.resize(
-                (max(1, int(w * 0.75)), max(1, int(h * 0.75))), Image.BILINEAR
-            )
-        except Exception:
-            return None
-
-    @staticmethod
-    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
-        """base64:// 图段原地降质：解码→缩放 0.75→统一重编码 JPEG。
-
-        AstrBot aiocqhttp 适配器发送前把本地图统一转成 base64://。
-        输出统一 JPEG（比 PNG optimize 快数倍且更小，上传更快），
-        失败（解码/编码异常）返回 False 不动原段。"""
-        try:
-            import base64 as _b64
-            raw = _b64.b64decode(file_ref[9:])
-            if not raw:
-                return False
-            img = Image.open(io.BytesIO(raw))
-            img.load()
-            shrunk = HandlersMixin._prepare_shrunk_image(img)
-            if shrunk is None:
-                return False
-            buf = io.BytesIO()
-            shrunk.save(buf, format="JPEG", quality=72, subsampling=1)
-            data["file"] = "base64://" + _b64.b64encode(buf.getvalue()).decode("ascii")
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def _shrink_oversized_images(message: Any, max_bytes: int) -> bool:
-        """发送前体积守卫：仅对超过 max_bytes 的图段原地降质（0.75 缩放）。
-
-        http 段与未超限段不动。由 _invoke_send_with_guard 经 asyncio.to_thread
-        调用，不阻塞事件循环。返回是否修改了任何段。"""
-        if not isinstance(message, list) or max_bytes <= 0:
+    def _shrink_images_for_retry(message: Any) -> bool:
+        """发送超时重试前：原地降质缩放消息中的本地图。返回是否修改了任何文件。"""
+        if not isinstance(message, list):
             return False
         changed = False
         for seg in message:
             if not isinstance(seg, dict) or seg.get("type") != "image":
                 continue
-            data = seg.get("data")
-            if not isinstance(data, dict):
-                continue
+            data = seg.get("data") or {}
             file_ref = data.get("file") or data.get("url") or ""
             if not isinstance(file_ref, str) or not file_ref:
                 continue
-            if file_ref.startswith("base64://"):
-                # base64 长度估算解码字节，超限才解码降质
-                if (len(file_ref) - 9) * 3 // 4 <= max_bytes:
-                    continue
-                if HandlersMixin._shrink_base64_image(data, file_ref):
-                    changed = True
-                continue
-            if file_ref.startswith(("http://", "https://")):
+            if file_ref.startswith(("http://", "https://", "base64://")):
                 continue
             if file_ref.startswith("file://"):
                 path = Path(file_ref[7:])
             else:
                 path = Path(file_ref)
+            if not path.is_file():
+                continue
             try:
-                if not path.is_file() or path.stat().st_size <= max_bytes:
+                img = Image.open(path)
+                w, h = img.size
+                if w < 64 and h < 64:
                     continue
-                shrunk = HandlersMixin._prepare_shrunk_image(Image.open(path))
-                if shrunk is None:
-                    continue
-                # 原子发布：先写 sibling 临时文件再 os.replace，避免并发发送读到半截图
-                tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-                try:
-                    suffix = path.suffix.lower()
-                    if suffix == ".png":
-                        shrunk.save(tmp, format="PNG", compress_level=6)
-                    else:
-                        shrunk.save(tmp, format="JPEG", quality=72, subsampling=1)
-                    os.replace(str(tmp), str(path))
-                finally:
-                    try:
-                        tmp.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                scale = 0.75
+                nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                img = img.resize((nw, nh), Image.LANCZOS)
+                suffix = path.suffix.lower()
+                if suffix == ".png":
+                    img.save(path, format="PNG", compress_level=6)
+                else:
+                    img.save(path, format="JPEG", quality=72, subsampling=1)
                 changed = True
             except Exception:
                 continue
         return changed
 
-    @staticmethod
-    def _extract_send_message(args, kwargs) -> Any:
-        """从 send_group_msg/call_action 调用参数中取出 message 段列表。"""
-        _msg = kwargs.get("message")
-        if _msg is not None:
-            return _msg
-        for a in args:
-            if isinstance(a, dict) and "message" in a:
-                return a.get("message")
-        if len(args) >= 2 and not isinstance(args[1], dict):
-            return args[1]
-        return None
-
-    def _send_shrink_limit_bytes(self) -> int:
-        """发送前预降质体积阈值（字节），0=关闭。"""
-        try:
-            kb = int(self.cfg_mgr.config.get("img_send_shrink_kb", 250))
-        except Exception:
-            kb = 250
-        return max(0, kb) * 1024
-
-    async def _invoke_send_with_guard(self, fn, label: str, *args, **kwargs):
-        """发送前置体积守卫 + 单次发送（超时不重发）。
-
-        - 图段超过 img_send_shrink_kb：先在工作线程降质再发，减小 NTQQ 上传耗时，
-          降低 retcode=1200 超时概率（大图更容易撞上 ack 超时窗口）。
-        - retcode=1200 超时只记日志、绝不自动重发：NapCat 超时时消息往往已实际
-          送达（仅是没等到 NTQQ 的 ack 事件），重发会造成同一张图发两次
-          （线上已复现双图，故移除旧的"降质后重试一次"逻辑）。"""
-        _msg = self._extract_send_message(args, kwargs)
-        if _msg is not None:
-            limit = self._send_shrink_limit_bytes()
-            if limit > 0:
-                try:
-                    await asyncio.to_thread(self._shrink_oversized_images, _msg, limit)
-                except Exception:
-                    pass
+    async def _invoke_send_with_timeout_retry(self, fn, label: str, *args, **kwargs):
+        """ActionFailed(retcode=1200) 发送超时：本地图降质后原参重试 1 次。"""
         try:
             return await fn(*args, **kwargs)
         except Exception as e:
-            if self._is_send_timeout_error(e):
+            if not self._is_send_timeout_error(e):
+                raise
+            _msg = kwargs.get("message")
+            if _msg is None:
+                for a in args:
+                    if isinstance(a, dict) and "message" in a:
+                        _msg = a.get("message")
+                        break
+                if _msg is None and len(args) >= 2 and not isinstance(args[1], dict):
+                    _msg = args[1]
+            if not self._shrink_images_for_retry(_msg):
                 logger.warning(
-                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，"
-                    f"消息可能已实际送达，不自动重发以避免重复"
+                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，无本地图可降质，放弃重试"
                 )
-            raise
+                raise
+            logger.warning(
+                f"[{PLUGIN_NAME}] {label} 发送超时({e})，已降质本地图重试一次"
+            )
+            return await fn(*args, **kwargs)
 
     @staticmethod
     def _describe_callable(fn: Any, _depth: int = 0) -> str:
@@ -778,7 +606,7 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
                 try:
-                    return await self._invoke_send_with_guard(
+                    return await self._invoke_send_with_timeout_retry(
                         orig_send_group, "send_group_msg", *args, **kwargs
                     )
                 except TypeError as e:
@@ -797,7 +625,7 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
                             f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
                         )
-                        return await self._invoke_send_with_guard(
+                        return await self._invoke_send_with_timeout_retry(
                             orig_send_group, "send_group_msg(norm)", **_rk
                         )
                     except TypeError as e2:
@@ -866,7 +694,7 @@ class HandlersMixin:
                 except Exception as e:
                     logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
                 try:
-                    return await self._invoke_send_with_guard(
+                    return await self._invoke_send_with_timeout_retry(
                         orig_call_action, f"call_action({action})", action, *args, **kwargs
                     )
                 except TypeError as e:
@@ -888,7 +716,7 @@ class HandlersMixin:
                             f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
                             f"已归一化为关键字重试 keys={sorted(_rk)}"
                         )
-                        return await self._invoke_send_with_guard(
+                        return await self._invoke_send_with_timeout_retry(
                             orig_call_action, f"call_action({action}/norm)", action, **_rk
                         )
                     except TypeError as e2:
@@ -972,7 +800,7 @@ class HandlersMixin:
 
 
     def _perf_enabled(self) -> bool:
-        """性能日志开关（关闭时不打日志；耗时统计本身常开，零开销）。
+        """性能日志开关（关闭时调用方不计时，零开销）。
 
         兼容原生配置侧可能落下的字符串/数字形态（"true"/"1"/1 等）。
         """
@@ -1168,7 +996,7 @@ class HandlersMixin:
 
 
     async def _save_render_image(self, img) -> Optional[Path]:
-        """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：90 秒后自动清理）
+        """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：45 秒后自动清理）
 
         体积兜底：img_max_kb>0 且编码后超限，自动逐档降质重编码压到上限内
         （JPEG 降 quality/抽样，PNG 无损档只提高压缩比、画质不变）；
@@ -1244,8 +1072,8 @@ class HandlersMixin:
             img_filename = f"t2i_{int(time.time() * 1000)}_{os.urandom(3).hex()}{suffix}"
             img_path = self.cache_dir / img_filename
             await asyncio.to_thread(img_path.write_bytes, data)
-            # 即时清理：90 秒后删除，避免堆积（必须在事件循环线程调度）
-            self._schedule_delete(img_path, 90)
+            # 即时清理：45 秒后删除，避免堆积（必须在事件循环线程调度）
+            self._schedule_delete(img_path, 45)
             return img_path
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 写入图片失败: {e}")
@@ -1285,120 +1113,6 @@ class HandlersMixin:
         return ok
 
 
-
-    def _perf_track(self, session: str) -> "_PerfTrack":
-        """性能计时器工厂（commands 侧复用同一 helper，零跨模块导入）"""
-        return _PerfTrack(self, session)
-
-    @staticmethod
-    def _link_append_text(full_text: str, link_mode: str) -> str:
-        """extract_append 附加文本（三路径共用同一文案/截断规则）"""
-        if link_mode != "extract_append":
-            return ""
-        try:
-            urls = _clean_urls(_URL_PATTERN.findall(full_text or ""))
-        except Exception:
-            return ""
-        if not urls:
-            return ""
-        return "\n🔗 快捷直达链接：\n" + "\n".join(urls[:5])
-
-    async def _pipeline_text_to_images(
-        self, full_text: str, *, gid: str, grp_custom: Dict[str, Any],
-        render_trigger: str, session: str,
-    ) -> Tuple[str, List[Path]]:
-        """三路径共用渲染管线（适配器 list/str 分支 + on_decorating_result）。
-
-        同文认领/缓存复用 → 审查 → 渲染 → 落盘 → 记账一次写对，
-        调用方只做输入提取与输出组装。返回 (status, paths)：
-        blocked=违规拦截（无图），ready=paths 为单次校验存活图，
-        miss=无需处理（调用方原样放行）。
-        """
-        # 命中复用：缓存文件必须仍存在，失效即 miss 往下完整重跑
-        _prior = self._text_render_info(full_text)
-        if _prior is not None and str(_prior.get("outcome") or "") in ("done", "blocked"):
-            if str(_prior.get("outcome")) == "blocked":
-                return ("blocked", [])
-            _pp = self._alive_prior_paths(full_text)
-            if _pp and self._image_segs_from_paths(_pp, _prevalidated=True):
-                return ("ready", _pp)
-            # 缓存文件已失效/无法组装 → 视为 miss，往下完整重跑
-        _claim = self._claim_text_render(full_text)
-        if not _claim:
-            # 另一路径正在渲染/已处理：按 outcome 复用或等待其完成后复用
-            _prior2 = self._text_render_info(full_text)
-            if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
-                return ("blocked", [])
-            _p2 = self._alive_prior_paths(full_text)
-            if _p2 and self._image_segs_from_paths(_p2, _prevalidated=True):
-                return ("ready", _p2)
-            # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
-            _st = await self._await_inflight_claim(full_text)
-            if _st == "blocked":
-                return ("blocked", [])
-            if _st == "done":
-                _p3 = self._alive_prior_paths(full_text)
-                if _p3 and self._image_segs_from_paths(_p3, _prevalidated=True):
-                    return ("ready", _p3)
-            # 条目已消失/超时 → 重新认领走完整渲染；仍失败则调用方保留原消息
-            _claim = self._claim_text_render(full_text)
-            if not _claim:
-                return ("miss", [])
-
-        # 完整渲染（群组单独字体大小与样式，超长分页多图）
-        with self._perf_track(session) as _pt:
-            eff_scale = self._get_group_font_scale(gid, grp_custom)
-            # 先审查：仅违规时转图且无违规 → 直接返回，不付 PIL 渲染成本
-            mod_res, eff_text, mosaic_mode = await self._moderate_text(
-                full_text, keyword_preset=grp_custom.get("keyword_preset"),
-            )
-            _pt.after_moderate()
-            if render_trigger == "violation_only" and not mod_res.is_violated:
-                self._release_text_render(_claim)
-                return ("miss", [])
-            if mod_res.is_violated and mod_res.action == "block":
-                # 真拦截：记违规但不计总数；调用方剥离文本保留结构
-                self.cfg_mgr.record_render(is_violated=True, count_total=False)
-                self._set_text_render_outcome(_claim, "blocked")
-                logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=True")
-                _pt.set_blocked()
-                return ("blocked", [])
-            imgs = await self._render_moderated(
-                eff_text, mod_res, mosaic_mode,
-                font_scale=eff_scale,
-                style=grp_custom.get("style"),
-                theme_mode=grp_custom.get("theme_mode"),
-                custom_font_path=str(grp_custom.get("custom_font_path", "") or ""),
-                custom_bold_font_path=str(grp_custom.get("custom_bold_font_path", "") or ""),
-                perf_out=_pt.perf_out,
-            )
-            _elapsed = int((time.perf_counter() - _pt.t0) * 1000)
-            violated, mosaic = mod_res.is_violated, mosaic_mode != "none"
-            self.cfg_mgr.record_render(
-                is_violated=violated, is_mosaic=mosaic,
-                elapsed_ms=_elapsed if imgs else None,
-            )
-            if violated:
-                logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=False mosaic={mosaic}")
-            if not imgs:
-                self._release_text_render(_claim)
-                return ("miss", [])
-            _pt.before_save()
-            img_paths = await self._save_render_images(imgs)
-            img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
-            _pt.set_result(imgs, img_paths)
-            if not img_paths:
-                self._release_text_render(_claim)
-                return ("miss", [])
-
-            try:
-                _info = self._render_hash_slot().get(_claim)
-                if isinstance(_info, dict):
-                    _info["outcome"] = "done"
-                    _info["img_paths"] = list(img_paths)
-            except Exception:
-                pass
-            return ("ready", list(img_paths))
 
     async def _transform_onebot_message(self, gid: str, message: Any) -> Any:
         """将 OneBot 协议格式的文本消息转图（与主路径同策略：链接模式/审查/统计）"""
@@ -1444,41 +1158,145 @@ class HandlersMixin:
                 if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text":
                     return message
 
-            # 仅违规时转图：关键词预检未命中直接返回（省一次完整审查）
+            # 仅违规时转图：AI 关闭时关键词预检未命中直接返回（省一次完整审查）；
+            # AI 开启时跳过预检，直接走完整审查（关键词只扫一遍）
             render_trigger = str(cfg.get("render_trigger", "always") or "always")
             grp_custom = self._get_group_custom_config(gid)
-            if render_trigger == "violation_only":
+            if render_trigger == "violation_only" and not bool(cfg.get("enable_ai_moderation", False)):
                 _qp = grp_custom.get("keyword_preset") if isinstance(grp_custom, dict) else None
                 quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
                 if not quick_hit:
                     return message
 
-            # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（输出组装见下）
-            link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
-            status, payload = await self._pipeline_text_to_images(
-                full_text, gid=gid, grp_custom=grp_custom,
-                render_trigger=render_trigger, session=f"群{gid}",
+            # 同文并发去重：on_decorating_result 已在渲染/已渲染 → 本路径不重复转图
+            # 命中校验：缓存文件必须仍存在，失效即 miss → 删除内存条目后完整重跑
+            _prior = self._text_render_info(full_text)
+            if _prior is not None and str(_prior.get("outcome") or "") in ("done", "blocked"):
+                if str(_prior.get("outcome")) == "blocked":
+                    return self._block_adapter_message(message)
+                _prior_paths = self._alive_prior_paths(full_text)
+                if _prior_paths:
+                    _segs0 = self._image_segs_from_paths(_prior_paths)
+                    if _segs0:
+                        new_segs0 = [
+                            seg for seg in message
+                            if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                        ]
+                        new_segs0.extend(_segs0)
+                        return new_segs0
+                # 缓存文件已失效/无法组装 → 视为 miss，往下完整重跑
+            _claim_tf = self._claim_text_render(full_text)
+            if not _claim_tf:
+                # 另一路径正在渲染/已处理：按 outcome 复用或保留原消息
+                _prior2 = self._text_render_info(full_text)
+                if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
+                    return self._block_adapter_message(message)
+                _p2 = self._alive_prior_paths(full_text)
+                if _p2:
+                    _segs1 = self._image_segs_from_paths(_p2)
+                    if _segs1:
+                        new_segs1 = [
+                            seg for seg in message
+                            if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                        ]
+                        new_segs1.extend(_segs1)
+                        return new_segs1
+                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                _claim_tf = self._claim_text_render(full_text)
+                if not _claim_tf:
+                    return message
+
+            # 转为图片（群组单独字体大小与样式，超长分页多图）
+            eff_scale = self._get_group_font_scale(gid, grp_custom)
+            _perf = self._perf_enabled()
+            _t0 = time.perf_counter()
+            _t_mod = _t0 if _perf else 0.0
+            _perf_out: Optional[Dict] = {} if _perf else None
+            # 先审查：仅违规时转图且无违规 → 直接返回，不付 PIL 渲染成本
+            mod_res, eff_text, mosaic_mode = await self._moderate_text(
+                full_text, keyword_preset=grp_custom.get("keyword_preset"),
             )
-            if status == "blocked":
-                return self._block_adapter_message(message)
-            if status == "ready":
-                _segs = self._image_segs_from_paths(payload, _prevalidated=True)
-                if _segs:
-                    # 保留前置 at/reply 与原文媒体（与主路径一致），再附链接
-                    new_segs = [
-                        seg for seg in message
-                        if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
-                    ]
-                    new_segs.extend(_segs)
-                    new_segs.extend(
-                        seg for seg in message
-                        if isinstance(seg, dict) and seg.get("type") in ("image", "record", "video", "file")
+            _mod_ms = (time.perf_counter() - _t_mod) * 1000.0 if _perf else 0.0
+            if render_trigger == "violation_only" and not mod_res.is_violated:
+                self._release_text_render(_claim_tf)
+                return message
+            if mod_res.is_violated and mod_res.action == "block":
+                # 真拦截：记违规但不计总数；剥离文本段身体（保留 at/reply/媒体），
+                # 剥空则留一个空文本段，保证发送结构有效且无违规内容外泄
+                self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                self._set_text_render_outcome(_claim_tf, "blocked")
+                if _perf:
+                    try:
+                        _total_ms = (time.perf_counter() - _t0) * 1000.0
+                        self._emit_perf_log(f"群{gid}", _total_ms, _mod_ms, 0.0, 0.0, [], [], blocked=True)
+                    except Exception:
+                        pass
+                kept = [
+                    seg for seg in message
+                    if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+                ]
+                media = [
+                    seg for seg in message
+                    if isinstance(seg, dict) and seg.get("type") in ("image", "record", "video", "file")
+                ]
+                kept.extend(media)
+                if not kept:
+                    kept = [{"type": "text", "data": {"text": ""}}]
+                return kept
+            imgs = await self._render_moderated(
+                eff_text, mod_res, mosaic_mode,
+                font_scale=eff_scale,
+                style=grp_custom.get("style"),
+                theme_mode=grp_custom.get("theme_mode"),
+                custom_font_path=str(grp_custom.get("custom_font_path", "") or ""),
+                custom_bold_font_path=str(grp_custom.get("custom_bold_font_path", "") or ""),
+                perf_out=_perf_out,
+            )
+            _elapsed = int((time.perf_counter() - _t0) * 1000)
+            violated, mosaic = mod_res.is_violated, mosaic_mode != "none"
+            self.cfg_mgr.record_render(
+                is_violated=violated, is_mosaic=mosaic,
+                elapsed_ms=_elapsed if imgs else None,
+            )
+            if not imgs:
+                self._release_text_render(_claim_tf)
+                return message
+            if _perf:
+                _t_save = time.perf_counter()
+            img_paths = await self._save_render_images(imgs)
+            img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
+            if _perf:
+                try:
+                    _total_ms = (time.perf_counter() - _t0) * 1000.0
+                    _mo, _pf, _dr, _la = self._perf_vals(_perf_out)
+                    self._emit_perf_log(
+                        f"群{gid}", _total_ms, _mod_ms, _mo, _pf,
+                        imgs, img_paths,
+                        draw_ms=_dr, layout_ms=_la,
+                        save_ms=(time.perf_counter() - _t_save) * 1000.0,
                     )
-                    _link = self._link_append_text(full_text, link_mode)
-                    if _link:
-                        new_segs.append({"type": "text", "data": {"text": _link}})
-                    return new_segs
-            return message
+                except Exception:
+                    pass
+            if not img_paths:
+                self._release_text_render(_claim_tf)
+                return message
+
+            try:
+                _info_tf = self._render_hash_slot().get(_claim_tf)
+                if isinstance(_info_tf, dict):
+                    _info_tf["outcome"] = "done"
+                    _info_tf["img_paths"] = list(img_paths)
+            except Exception:
+                pass
+
+            # 保留前置 at / reply（与主路径一致，不再丢弃 Reply）
+            new_segs = [
+                seg for seg in message
+                if isinstance(seg, dict) and seg.get("type") in ("at", "reply")
+            ]
+            for img_path in img_paths:
+                new_segs.append({"type": "image", "data": {"file": str(img_path.resolve())}})
+            return new_segs
 
         elif isinstance(message, str) and message.strip():
             # 纯文本字符串
@@ -1496,24 +1314,104 @@ class HandlersMixin:
                     return message
             render_trigger2 = str(cfg.get("render_trigger", "always") or "always")
             grp_custom2 = self._get_group_custom_config(gid)
-            if render_trigger2 == "violation_only":
+            if render_trigger2 == "violation_only" and not bool(cfg.get("enable_ai_moderation", False)):
                 _qp2 = grp_custom2.get("keyword_preset") if isinstance(grp_custom2, dict) else None
                 quick_hit2, _ = self.moderator.check_keywords(text, _qp2)
                 if not quick_hit2:
                     return message
 
-            # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（输出组装见下）
-            status_s, payload_s = await self._pipeline_text_to_images(
-                text, gid=gid, grp_custom=grp_custom2,
-                render_trigger=render_trigger2, session=f"群{gid}",
+            _prior_s = self._text_render_info(text)
+            if _prior_s is not None and str(_prior_s.get("outcome") or "") in ("done", "blocked"):
+                if str(_prior_s.get("outcome")) == "blocked":
+                    return " "
+                _ps = self._alive_prior_paths(text)
+                if _ps:
+                    _segs_s = self._image_segs_from_paths(_ps)
+                    if _segs_s:
+                        return _segs_s
+                # 缓存文件已失效 → 视为 miss，往下完整重跑
+            _claim_tf2 = self._claim_text_render(text)
+            if not _claim_tf2:
+                _prior_s2 = self._text_render_info(text)
+                if _prior_s2 is not None and str(_prior_s2.get("outcome") or "") == "blocked":
+                    return " "
+                _p2s = self._alive_prior_paths(text)
+                if _p2s:
+                    _segs_s2 = self._image_segs_from_paths(_p2s)
+                    if _segs_s2:
+                        return _segs_s2
+                # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+                _claim_tf2 = self._claim_text_render(text)
+                if not _claim_tf2:
+                    return message
+
+            eff_scale2 = self._get_group_font_scale(gid, grp_custom2)
+            _perf2 = self._perf_enabled()
+            _t0b = time.perf_counter()
+            _t_mod2 = _t0b if _perf2 else 0.0
+            _perf_out2: Optional[Dict] = {} if _perf2 else None
+            mod_res2, eff_text2, mosaic_mode2 = await self._moderate_text(
+                text, keyword_preset=grp_custom2.get("keyword_preset"),
             )
-            if status_s == "blocked":
+            _mod_ms2 = (time.perf_counter() - _t_mod2) * 1000.0 if _perf2 else 0.0
+            if render_trigger2 == "violation_only" and not mod_res2.is_violated:
+                self._release_text_render(_claim_tf2)
+                return message
+            if mod_res2.is_violated and mod_res2.action == "block":
+                self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                self._set_text_render_outcome(_claim_tf2, "blocked")
+                if _perf2:
+                    try:
+                        _total_ms2 = (time.perf_counter() - _t0b) * 1000.0
+                        self._emit_perf_log(f"群{gid}", _total_ms2, _mod_ms2, 0.0, 0.0, [], [], blocked=True)
+                    except Exception:
+                        pass
                 # 纯文本分支：返回空白（结构有效、无内容外泄；平台侧不再收到违规文本）
                 return " "
-            if status_s == "ready":
-                _segs_s = self._image_segs_from_paths(payload_s, _prevalidated=True)
-                if _segs_s:
-                    return _segs_s
+            imgs2 = await self._render_moderated(
+                eff_text2, mod_res2, mosaic_mode2,
+                font_scale=eff_scale2,
+                style=grp_custom2.get("style"),
+                theme_mode=grp_custom2.get("theme_mode"),
+                custom_font_path=str(grp_custom2.get("custom_font_path", "") or ""),
+                custom_bold_font_path=str(grp_custom2.get("custom_bold_font_path", "") or ""),
+                perf_out=_perf_out2,
+            )
+            _elapsed2 = int((time.perf_counter() - _t0b) * 1000)
+            violated2, mosaic2 = mod_res2.is_violated, mosaic_mode2 != "none"
+            self.cfg_mgr.record_render(
+                is_violated=violated2, is_mosaic=mosaic2,
+                elapsed_ms=_elapsed2 if imgs2 else None,
+            )
+            if not imgs2:
+                self._release_text_render(_claim_tf2)
+                return message
+            if _perf2:
+                _t_save2 = time.perf_counter()
+            img_paths = await self._save_render_images(imgs2)
+            img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
+            if _perf2:
+                try:
+                    _total_ms2 = (time.perf_counter() - _t0b) * 1000.0
+                    _mo2, _pf2, _dr2, _la2 = self._perf_vals(_perf_out2)
+                    self._emit_perf_log(
+                        f"群{gid}", _total_ms2, _mod_ms2, _mo2, _pf2,
+                        imgs2, img_paths,
+                        draw_ms=_dr2, layout_ms=_la2,
+                        save_ms=(time.perf_counter() - _t_save2) * 1000.0,
+                    )
+                except Exception:
+                    pass
+            if img_paths:
+                try:
+                    _info_tf2 = self._render_hash_slot().get(_claim_tf2)
+                    if isinstance(_info_tf2, dict):
+                        _info_tf2["outcome"] = "done"
+                        _info_tf2["img_paths"] = list(img_paths)
+                except Exception:
+                    pass
+                return [{"type": "image", "data": {"file": str(p.resolve())}} for p in img_paths]
+            self._release_text_render(_claim_tf2)
 
         return message
 
@@ -1577,28 +1475,148 @@ class HandlersMixin:
             return
 
         # 5. 仅违规时转图：非违规直接保留纯文本（放在审查前快速判断，避免无谓渲染）
-        # 先取群专属词库，保证预检与正式审查同口径；预检未命中直接返回
+        # 先取群专属词库，保证预检与正式审查同口径；AI 开启时跳过预检，
+        # 直接走一次完整审查（避免关键词扫两遍），AI 关闭时预检未命中直接返回
         gid_main = self._extract_group_id(event)
         grp_c_main = self._get_group_custom_config(gid_main)
         render_trigger = str(cfg.get("render_trigger", "always") or "always")
         if render_trigger == "violation_only":
-            _qp = grp_c_main.get("keyword_preset") if isinstance(grp_c_main, dict) else None
-            quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
-            if not quick_hit:
+            _ai_on = bool(cfg.get("enable_ai_moderation", False))
+            if not _ai_on:
+                _qp = grp_c_main.get("keyword_preset") if isinstance(grp_c_main, dict) else None
+                quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
+                if not quick_hit:
+                    return
+
+        # 同文并发去重：_transform 已渲染完成 → 复用图路径改写 chain，避免二次渲染。
+        # 命中校验：缓存文件必须仍存在，失效即 miss → 删除内存条目后完整重跑
+        #（安全审查 → 打码 → 绘制 → 排版 → 落盘），不再把死路径塞回消息链。
+        _prior_m = self._text_render_info(full_text)
+        if _prior_m is not None and str(_prior_m.get("outcome") or "") in ("done", "blocked"):
+            if str(_prior_m.get("outcome")) == "blocked":
+                event.stop_event()
+                return
+            _prior_m_paths = self._alive_prior_paths(full_text)
+            if _prior_m_paths:
+                new_chain0 = [
+                    comp for comp in result.chain
+                    if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
+                ]
+                _hit0 = 0
+                for img_path in _prior_m_paths:
+                    try:
+                        new_chain0.append(AstrImage.fromFileSystem(str(img_path)))
+                        _hit0 += 1
+                    except Exception:
+                        pass
+                if _hit0:
+                    if link_mode == "extract_append" and urls_found:
+                        new_chain0.append(Plain("\n🔗 快捷直达链接：\n" + "\n".join(urls_found[:5])))
+                    result.chain = new_chain0
+                    return
+            # 缓存文件已失效/无法组图 → 视为 miss，往下完整重跑（不 return）
+        _claim_m = self._claim_text_render(full_text)
+        if not _claim_m:
+            _prior_m2 = self._text_render_info(full_text)
+            if _prior_m2 is not None and str(_prior_m2.get("outcome") or "") == "blocked":
+                event.stop_event()
+                return
+            _p2m = self._alive_prior_paths(full_text)
+            if _p2m:
+                new_chain1 = [
+                    comp for comp in result.chain
+                    if comp.__class__.__name__ in ("At", "AtAll", "Reply", "Image", "Record", "Video", "File")
+                ]
+                _hit1 = 0
+                for img_path in _p2m:
+                    try:
+                        new_chain1.append(AstrImage.fromFileSystem(str(img_path)))
+                        _hit1 += 1
+                    except Exception:
+                        pass
+                if _hit1:
+                    result.chain = new_chain1
+                    return
+            # 失效条目已删除 → 重新认领走完整渲染；仍在并发窗口则保留原消息
+            _claim_m = self._claim_text_render(full_text)
+            if not _claim_m:
                 return
 
-        # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（命中与新渲染统一组装）
-        status_m, payload_m = await self._pipeline_text_to_images(
-            full_text, gid=gid_main, grp_custom=grp_c_main,
-            render_trigger=render_trigger,
-            session=f"群{gid_main}" if gid_main else "私聊",
+        # 6-8. 先审查再渲染 + 落盘（群组单独字体大小与专属风格/主题，超长分页多图）
+        eff_scale_main = self._get_group_font_scale(gid_main, grp_c_main)
+        _perf_m = self._perf_enabled()
+        _t0m = time.perf_counter()
+        _t_mod_m = _t0m if _perf_m else 0.0
+        _perf_out_m: Optional[Dict] = {} if _perf_m else None
+        mod_main, eff_main, mosaic_main = await self._moderate_text(
+            full_text, keyword_preset=grp_c_main.get("keyword_preset"),
         )
-        if status_m == "blocked":
+        _mod_ms_m = (time.perf_counter() - _t_mod_m) * 1000.0 if _perf_m else 0.0
+        # 仅违规触发门控：无违规则不转图（审查之后、渲染之前，不付 PIL 成本）
+        if render_trigger == "violation_only" and not mod_main.is_violated:
+            self._release_text_render(_claim_m)
+            return
+        if mod_main.is_violated and mod_main.action == "block":
+            self.cfg_mgr.record_render(is_violated=True, count_total=False)
+            self._set_text_render_outcome(_claim_m, "blocked")
+            logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=True")
+            if _perf_m:
+                try:
+                    _sess = f"群{gid_main}" if gid_main else "私聊"
+                    self._emit_perf_log(_sess, (time.perf_counter() - _t0m) * 1000.0,
+                                        _mod_ms_m, 0.0, 0.0, [], [], blocked=True)
+                except Exception:
+                    pass
             # 直接拦截不发送
             event.stop_event()
             return
-        if status_m != "ready" or not payload_m:
+        violated_m, mosaic_m = mod_main.is_violated, mosaic_main != "none"
+        imgs = await self._render_moderated(
+            eff_main, mod_main, mosaic_main,
+            font_scale=eff_scale_main,
+            style=grp_c_main.get("style"),
+            theme_mode=grp_c_main.get("theme_mode"),
+            custom_font_path=str(grp_c_main.get("custom_font_path", "") or ""),
+            custom_bold_font_path=str(grp_c_main.get("custom_bold_font_path", "") or ""),
+            perf_out=_perf_out_m,
+        )
+        _elapsed_m = int((time.perf_counter() - _t0m) * 1000)
+        self.cfg_mgr.record_render(
+            is_violated=violated_m, is_mosaic=mosaic_m,
+            elapsed_ms=_elapsed_m if imgs else None,
+        )
+        if violated_m:
+            logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=False mosaic={mosaic_m}")
+        if not imgs:
+            self._release_text_render(_claim_m)
             return
+        if _perf_m:
+            _t_savem = time.perf_counter()
+        img_paths = await self._save_render_images(imgs)
+        img_paths = self._existing_paths(img_paths)  # 发送前兜底：不存在即丢弃
+        if _perf_m:
+            try:
+                _sess = f"群{gid_main}" if gid_main else "私聊"
+                _mom, _pfm, _drm, _lam = self._perf_vals(_perf_out_m)
+                self._emit_perf_log(
+                    _sess, (time.perf_counter() - _t0m) * 1000.0, _mod_ms_m,
+                    _mom, _pfm, imgs, img_paths,
+                    draw_ms=_drm, layout_ms=_lam,
+                    save_ms=(time.perf_counter() - _t_savem) * 1000.0,
+                )
+            except Exception:
+                pass
+        if not img_paths:
+            self._release_text_render(_claim_m)
+            return
+
+        try:
+            _info_m = self._render_hash_slot().get(_claim_m)
+            if isinstance(_info_m, dict):
+                _info_m["outcome"] = "done"
+                _info_m["img_paths"] = list(img_paths)
+        except Exception:
+            pass
 
         # 8. 组装新消息链并替换
         new_chain = []
@@ -1608,7 +1626,7 @@ class HandlersMixin:
                 new_chain.append(comp)
 
         # 插入渲染出的图片段（超长分页一次性发出，不再丢弃截断部分）
-        for img_path in payload_m:
+        for img_path in img_paths:
             new_chain.append(AstrImage.fromFileSystem(str(img_path)))
 
         # 保留原链中的多媒体段（长文本配图时不再丢弃原图/音视频）
@@ -1629,8 +1647,8 @@ class HandlersMixin:
 
 
 
-    def _schedule_delete(self, path: Path, delay: int = 90):
-        """生成图片即时自动清理（默认 90 秒后删除，用完即删）"""
+    def _schedule_delete(self, path: Path, delay: int = 45):
+        """生成图片即时自动清理（默认 45 秒后删除，用完即删）"""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

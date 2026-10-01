@@ -5,14 +5,22 @@
 - 支持 iOS 与 Android 16 (Material 3 Expressive) 双风格
 - 随机背景小星星星芒点缀
 - 链接转图/保留文本策略
-- 自定义关键词内容安全审查
+- 自定义关键词 + AI 大模型内容安全双轨审查
 - 违规创意半马赛克（Half Mosaic）处置
 - Android 16 WebUI 管理控制台
 """
 
 import asyncio
+import base64
+import io
+import json
+import os
 import re
-from typing import Any, Dict, List
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from PIL import Image
 
 try:
     from astrbot.api import logger
@@ -88,8 +96,6 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>\"'\u4e00-\u9fa5]+")
 # 群号切分 / 非数字清洗（预编译）
 _SPLIT_GROUP_RE = re.compile(r"[,;，；\n\s]+")
 _NON_DIGIT_RE = re.compile(r"\D")
-# 混淆符压缩（关键词预检与打码侧共用：全角/符号分隔混淆统一剥离，须保持两端一致）
-_CONDENSE_CONFUSABLES_RE = re.compile(r"[\s\-_~`!@#$%^&*()+=|\\\[\]{};:'\",.<>?/]+")
 # URL 尾部误吞的标点（中文标点 + 英文标点 + 括号）
 _URL_TRAILING_PUNCT = ".,;:!?)]}'\"，。；：！？、」』】）"
 

@@ -21,8 +21,8 @@ try:
     from .config import DEFAULT_CONFIG
     from .moderation import ContentModerator
     from .renderer import (
-        MessageImageRenderer, _is_usable_font,
-        clear_font_cache, configure_fonts,
+        MessageImageRenderer, _FONT_CONF, _is_usable_font,
+        _resolve_custom_font, clear_font_cache, configure_fonts,
         delete_curated_font, delete_emoji_pack, download_curated_font,
         download_emoji_pack, download_missing_fonts, ensure_emoji_assets,
         get_curated_fonts_status, get_emoji_packs_status, get_font_status,
@@ -35,8 +35,8 @@ except (ImportError, ValueError):
     from core.config import DEFAULT_CONFIG
     from core.moderation import ContentModerator
     from core.renderer import (
-        MessageImageRenderer, _is_usable_font,
-        clear_font_cache, configure_fonts,
+        MessageImageRenderer, _FONT_CONF, _is_usable_font,
+        _resolve_custom_font, clear_font_cache, configure_fonts,
         delete_curated_font, delete_emoji_pack, download_curated_font,
         download_emoji_pack, download_missing_fonts, ensure_emoji_assets,
         get_curated_fonts_status, get_emoji_packs_status, get_font_status,
@@ -200,6 +200,7 @@ class WebApiMixin:
         reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
         reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
+        reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
 
 
 
@@ -225,28 +226,6 @@ class WebApiMixin:
                     )
             except Exception:
                 pass
-            # 范围钳制（与聊天指令层一致：越界只钳制不拒绝，避免 WebUI 手输非法值写坏配置）
-            try:
-                if "font_scale" in payload:
-                    payload["font_scale"] = max(50, min(500, int(payload["font_scale"])))
-            except Exception:
-                pass
-            try:
-                if "img_max_kb" in payload:
-                    payload["img_max_kb"] = max(0, min(5120, int(payload["img_max_kb"])))
-            except Exception:
-                pass
-            try:
-                if "min_length_threshold" in payload:
-                    payload["min_length_threshold"] = max(1, min(1000, int(payload["min_length_threshold"])))
-            except Exception:
-                pass
-            for _k in ("img_send_shrink_kb", "page_max_height", "img_max_width", "card_max_width"):
-                try:
-                    if _k in payload:
-                        payload[_k] = max(0, int(payload[_k]))
-                except Exception:
-                    pass
             self.cfg_mgr.save(payload)
             self._group_cache_sig = None  # 群名单可能变化，清缓存
             try:
@@ -755,9 +734,7 @@ class WebApiMixin:
             from .renderer import _is_usable_font
         except (ImportError, ValueError):
             from core.renderer import _is_usable_font
-
-        def _scan():
-            # 目录遍历 + 整文件读 + FreeType 校验全是阻塞 IO，放工作线程
+        try:
             d = self._fonts_data_dir()
             files = []
             if d.is_dir():
@@ -772,10 +749,7 @@ class WebApiMixin:
                             "size_kb": size_kb,
                             "usable": bool(_is_usable_font(str(p))),
                         })
-            return {"ok": True, "dir": str(d), "files": files}
-
-        try:
-            return json_response(await asyncio.to_thread(_scan))
+            return json_response({"ok": True, "dir": str(d), "files": files})
         except Exception as e:
             return error_response(f"列出字体失败: {e}", status_code=500)
 
@@ -847,8 +821,7 @@ class WebApiMixin:
                     self.cfg_mgr.save()
             except Exception:
                 pass
-            # 回退扫描含整文件 FreeType 校验，放工作线程（返回值不变）
-            picked = await asyncio.to_thread(self._fallback_font_after_delete)
+            picked = self._fallback_font_after_delete()
             try:
                 configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
@@ -871,7 +844,7 @@ class WebApiMixin:
             except Exception:
                 pass
             res = await asyncio.to_thread(delete_curated_font, cid)
-            picked = await asyncio.to_thread(self._fallback_font_after_delete)
+            picked = self._fallback_font_after_delete()
             try:
                 configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
@@ -915,9 +888,7 @@ class WebApiMixin:
 
     async def _api_emoji_packs(self):
         try:
-            # rglob 占用统计 + 字体文件校验是阻塞 IO，放工作线程（返回值不变）
-            packs = await asyncio.to_thread(get_emoji_packs_status)
-            return json_response({"ok": True, "packs": packs})
+            return json_response({"ok": True, "packs": get_emoji_packs_status()})
         except Exception as e:
             return error_response(f"获取 Emoji 列表失败: {e}", status_code=500)
 
@@ -1232,25 +1203,7 @@ class WebApiMixin:
             gen = 0
         jid = self._new_download_job(kind, target, gen=gen)
         try:
-            t = loop.create_task(self._run_download_job(jid, kind, target))
-            # 纳入 _bg_tasks：terminate() 可取消，避免卸载后旧任务复活配置；
-            # 完成即移出，避免列表无限增长
-            try:
-                _tasks = getattr(self, "_bg_tasks", None)
-                if isinstance(_tasks, list):
-                    _tasks.append(t)
-
-                    def _drop(_done, _self=self):
-                        try:
-                            _lst = getattr(_self, "_bg_tasks", None)
-                            if isinstance(_lst, list) and _done in _lst:
-                                _lst.remove(_done)
-                        except Exception:
-                            pass
-
-                    t.add_done_callback(_drop)
-            except Exception:
-                pass
+            loop.create_task(self._run_download_job(jid, kind, target))
             return jid
         except Exception:
             self._DOWNLOAD_JOBS.pop(jid, None)
@@ -1368,6 +1321,45 @@ class WebApiMixin:
             return error_response(f"操作失败: {e}", status_code=500)
 
 
+
+    async def _api_ai_providers(self):
+        try:
+            providers = []
+            # 尝试从 context 获取已接入模型
+            try:
+                # 常见接口：context.providers / context.llm_providers
+                for attr in ("providers", "llm_providers", "provider_manager", "model_list"):
+                    mgr = getattr(self.context, attr, None)
+                    if mgr:
+                        try:
+                            # 若为 dict
+                            if isinstance(mgr, dict):
+                                for k, v in mgr.items():
+                                    providers.append(str(k))
+                            elif hasattr(mgr, "__iter__"):
+                                for p in mgr:
+                                    name = str(getattr(p, "model_name", "") or getattr(p, "id", "") or getattr(p, "name", "") or str(p))
+                                    if name and name not in providers:
+                                        providers.append(name)
+                        except Exception:
+                            continue
+                # 兜底：get_using_provider
+                if not providers:
+                    try:
+                        p = self.context.get_using_provider()
+                        if p:
+                            name = str(getattr(p, "model_name", "") or getattr(p, "id", "") or "default")
+                            if name not in providers:
+                                providers.append(name)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # 去重并限制
+            providers = [p for p in providers if p][:20]
+            return json_response({"ok": True, "providers": providers})
+        except Exception as e:
+            return error_response(f"获取失败: {e}", status_code=500)
 
     # ==========================================
     # 缓存周期清理（可停止 + 数量上限兜底）

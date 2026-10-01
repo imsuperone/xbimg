@@ -1,6 +1,7 @@
 # -*- coding: utf-8 ---
 """群聊维度逻辑：白名单、专属配置、群号提取。"""
 
+import json
 import re
 import time
 from pathlib import Path
@@ -123,8 +124,13 @@ class GroupsMixin:
         """获取指定群的专属配置字典：style, theme_mode, font, font_scale"""
         if not gid:
             return {}
-        raw = self.cfg_mgr._group_dict("group_configs")
-        if not raw:
+        raw = self.cfg_mgr.config.get("group_configs", {})
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                raw = {}
+        if not isinstance(raw, dict):
             return {}
         clean_gid = _NON_DIGIT_RE.sub("", str(gid))
         for k, v in raw.items():
@@ -152,7 +158,12 @@ class GroupsMixin:
             except Exception:
                 pass
         # 兼容旧 group_font_scales
-        raw = self.cfg_mgr._group_dict("group_font_scales")
+        raw = self.cfg_mgr.config.get("group_font_scales", {})
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                raw = {}
         if isinstance(raw, dict):
             clean_gid = _NON_DIGIT_RE.sub("", str(gid))
             for k, v in raw.items():
@@ -205,9 +216,7 @@ class GroupsMixin:
                         return gid
             umo = str(getattr(event, "unified_msg_origin", "") or "")
             if ":group:" in umo.lower():
-                tail = umo.split(":")[-1].strip()
-                if tail:
-                    return tail
+                return umo.split(":")[-1].strip()
         except Exception:
             pass
         return ""
@@ -252,7 +261,15 @@ class GroupsMixin:
         if not gid:
             return
         cfg = self.cfg_mgr.config
-        raw = self.cfg_mgr._group_dict("group_configs")
+        raw = cfg.get("group_configs", {})
+        if isinstance(raw, str):
+            try:
+                import json as _js
+                raw = _js.loads(raw) if raw.strip() else {}
+            except Exception:
+                raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
         gid_str = str(gid)
         cur = dict(raw.get(gid_str, {})) if isinstance(raw.get(gid_str), dict) else {}
         cur.update(patch)

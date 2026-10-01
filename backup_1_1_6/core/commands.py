@@ -2,6 +2,7 @@
 """/xbimg 聊天指令。"""
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -56,65 +57,6 @@ class CommandsMixin:
         except Exception:
             pass
         return False
-
-    def _apply_group_field(self, kind: str, value: str, target: str, gname_of, cfg) -> str:
-        """group style/theme/kw 共用 applier（表驱动）：reset 清空 / 命中设值 / 否则用法。"""
-        if kind == "kw":
-            presets = cfg.get("keyword_presets", {})
-            if not isinstance(presets, dict):
-                presets = {}
-            hit = value if value in presets else None
-            item = presets.get(value) if hit is not None else None
-            pname = item.get("name", value) if isinstance(item, dict) else value
-            names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
-            spec = {
-                "key": "keyword_preset", "hit": hit,
-                "reset_ok": "✅ 已将【{t}】绑定的敏感词库恢复为：跟随全局默认。",
-                "reset_no_target": "当前不在群聊中，请附带群号。",
-                "set_ok": f"✅ 已将【{{t}}】绑定的敏感词库切换为：{pname}",
-                "set_no_target": "当前不在群聊中，请附带群号。",
-                "usage": "用法：/xbimg group kw <词库方案ID> / default [群号]\n当前可用词库：\n" + "\n".join(names),
-            }
-        else:
-            table = {
-                "style": {
-                    "key": "style",
-                    "aliases": {"ios": "ios", "android16": "android16", "android": "android16"},
-                    "reset_ok": "✅ 已将【{t}】的视觉风格恢复为跟随全局默认。",
-                    "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
-                    "set_ok": "✅ 已将【{t}】的视觉风格设置为：{v}",
-                    "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group style ios / android16 / default [群号]",
-                },
-                "theme": {
-                    "key": "theme_mode",
-                    "aliases": {"light": "light", "dark": "dark", "浅色": "light", "深色": "dark"},
-                    "reset_ok": "✅ 已将【{t}】的配色主题恢复为跟随全局默认。",
-                    "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group theme default 123456",
-                    "set_ok": "✅ 已将【{t}】的配色主题设置为：{v}",
-                    "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group theme light / dark / default [群号]",
-                },
-            }
-            spec = dict(table[kind])
-            hit = spec["aliases"].get(value)
-            spec["hit"] = hit
-            if kind == "style":
-                spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(hit.upper() if hit else ""))
-            else:
-                spec["set_ok"] = spec["set_ok"].format(
-                    t="{t}", v=("深色暗黑" if hit == "dark" else "浅色明亮"))
-        if str(value).lower() in ("default", "reset", "跟随", "默认", ""):
-            if not target:
-                return spec["reset_no_target"]
-            self._update_group_custom(target, {spec["key"]: ""})
-            return spec["reset_ok"].format(t=gname_of(target))
-        if spec["hit"] is not None:
-            if not target:
-                return spec["set_no_target"]
-            self._update_group_custom(target, {spec["key"]: spec["hit"]})
-            return spec["set_ok"].format(t=gname_of(target))
-        return spec["usage"]
 
     # ==========================================
     # 管理指令交互 (仅保留纯净的 /xbimg 指令)
@@ -185,6 +127,7 @@ class CommandsMixin:
                 f"• 文件体积：{comp_map.get(_compress_level(cfg), '均衡适中')}\n"
                 f"• 链接策略：{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
                 f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
+                f"• AI 审查开关：{'🤖 开启' if cfg.get('enable_ai_moderation') else '⚪ 关闭'}\n"
                 f"• 违规处置：{action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
                 f"• 全局字体：{cfg.get('font_scale', 100)}%\n"
                 f"• 群生效模式：{group_map.get(cfg.get('group_mode', 'whitelist'), '仅白名单群生效')}\n"
@@ -201,6 +144,7 @@ class CommandsMixin:
                 "• /xbimg maxkb 800 - 单张体积上限KB（超限自动降质，0 关闭）\n"
                 "• /xbimg link image / text / append - 链接策略\n"
                 "• /xbimg mod on / off - 屏蔽词审查开关\n"
+                "• /xbimg ai on / off - AI 审查独立开关\n"
                 "• /xbimg action half / full / block / notice - 违规处置\n"
                 "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
                 "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
@@ -363,6 +307,19 @@ class CommandsMixin:
                 yield event.plain_result("⚪ 敏感屏蔽词库审查已关闭。")
             else:
                 yield event.plain_result("用法：/xbimg mod on 或 /xbimg mod off")
+        elif sub in ("ai", "aimod"):
+            if arg in ("on", "开启", "1"):
+                cfg["enable_ai_moderation"] = True
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("🤖 AI 大模型内容安全审查已开启！")
+            elif arg in ("off", "关闭", "0"):
+                cfg["enable_ai_moderation"] = False
+                self.cfg_mgr.save()
+                self.moderator = ContentModerator(cfg)
+                yield event.plain_result("⚪ AI 大模型内容安全审查已关闭。")
+            else:
+                yield event.plain_result("用法：/xbimg ai on 或 /xbimg ai off")
         elif sub in ("action", "处置"):
             if arg in ("half", "mosaic_half", "半打码", "半马赛克"):
                 cfg["violation_action"] = "mosaic_half"
@@ -502,11 +459,7 @@ class CommandsMixin:
                         scale = int(parts[0])
                     except Exception:
                         scale = None
-                    if scale is not None and 50 <= scale <= 500:
-                        # 首 token 已是合法 scale：第二 token 无处安放，报用法
-                        #（此前静默吞掉第二 token，如 /xbimg size 120 130）
-                        scale = None
-                    else:
+                    if scale is not None and not (50 <= scale <= 500):
                         try:
                             scale = int(parts[1])
                         except Exception:
@@ -530,7 +483,12 @@ class CommandsMixin:
             else:
                 # 只写新位置 group_configs.font_scale（旧 group_font_scales 仅读兼容，不再写入）
                 if scale == 100:
-                    raw_gc = self.cfg_mgr._group_dict("group_configs")
+                    raw_gc = cfg.get("group_configs", {})
+                    if isinstance(raw_gc, str):
+                        try:
+                            raw_gc = json.loads(raw_gc) if raw_gc.strip() else {}
+                        except Exception:
+                            raw_gc = {}
                     if isinstance(raw_gc, dict):
                         cur_gc = raw_gc.get(str(target_gid))
                         if isinstance(cur_gc, dict):
@@ -652,16 +610,68 @@ class CommandsMixin:
                     yield event.plain_result(f"✅ 已将【{_gname(target)}】的字体大小设置为 {scale}%")
                 return
             if action in ("style", "风格"):
-                yield event.plain_result(self._apply_group_field(
-                    "style", (rest[0].lower() if rest else ""), _target_gid(rest[1:]), _gname, cfg))
+                value = (rest[0].lower() if rest else "")
+                target = _target_gid(rest[1:])
+                if value in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group style default 123456")
+                        return
+                    self._update_group_custom(target, {"style": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的视觉风格恢复为跟随全局默认。")
+                    return
+                if value in ("ios", "android16", "android"):
+                    st = "android16" if "android" in value else "ios"
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"style": st})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的视觉风格设置为：{st.upper()}")
+                else:
+                    yield event.plain_result("用法：/xbimg group style ios / android16 / default [群号]")
                 return
             if action in ("theme", "配色"):
-                yield event.plain_result(self._apply_group_field(
-                    "theme", (rest[0].lower() if rest else ""), _target_gid(rest[1:]), _gname, cfg))
+                value = (rest[0].lower() if rest else "")
+                target = _target_gid(rest[1:])
+                if value in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group theme default 123456")
+                        return
+                    self._update_group_custom(target, {"theme_mode": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的配色主题恢复为跟随全局默认。")
+                    return
+                if value in ("light", "dark", "浅色", "深色"):
+                    tm = "dark" if value in ("dark", "深色") else "light"
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"theme_mode": tm})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的配色主题设置为：{'深色暗黑' if tm == 'dark' else '浅色明亮'}")
+                else:
+                    yield event.plain_result("用法：/xbimg group theme light / dark / default [群号]")
                 return
             if action in ("kw", "preset", "词库"):
-                yield event.plain_result(self._apply_group_field(
-                    "kw", (rest[0] if rest else "").strip(), _target_gid(rest[1:]), _gname, cfg))
+                value = (rest[0] if rest else "").strip()
+                target = _target_gid(rest[1:])
+                presets = cfg.get("keyword_presets", {})
+                if not isinstance(presets, dict):
+                    presets = {}
+                if value.lower() in ("default", "reset", "跟随", "默认", ""):
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"keyword_preset": ""})
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】绑定的敏感词库恢复为：跟随全局默认。")
+                    return
+                if value in presets:
+                    if not target:
+                        yield event.plain_result("当前不在群聊中，请附带群号。")
+                        return
+                    self._update_group_custom(target, {"keyword_preset": value})
+                    pname = presets[value].get("name", value) if isinstance(presets[value], dict) else value
+                    yield event.plain_result(f"✅ 已将【{_gname(target)}】绑定的敏感词库切换为：{pname}")
+                else:
+                    names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
+                    yield event.plain_result("用法：/xbimg group kw <词库方案ID> / default [群号]\n当前可用词库：\n" + "\n".join(names))
                 return
             if action == "ttf":
                 fid = (rest[0] if rest else "").strip()
@@ -702,12 +712,22 @@ class CommandsMixin:
                 if not target:
                     yield event.plain_result("当前不在群聊中，请附带群号，例如：/xbimg group reset 123456")
                     return
-                raw = self.cfg_mgr._group_dict("group_configs")
-                if (str(target) in raw or target in raw):
+                raw = cfg.get("group_configs", {})
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw) if raw.strip() else {}
+                    except Exception:
+                        raw = {}
+                if isinstance(raw, dict) and (str(target) in raw or target in raw):
                     raw.pop(str(target), None)
                     raw.pop(target, None)
                     self.cfg_mgr.save({"group_configs": raw})
-                raw_sc = self.cfg_mgr._group_dict("group_font_scales")
+                raw_sc = cfg.get("group_font_scales", {})
+                if isinstance(raw_sc, str):
+                    try:
+                        raw_sc = json.loads(raw_sc) if raw_sc.strip() else {}
+                    except Exception:
+                        raw_sc = {}
                 if isinstance(raw_sc, dict) and (str(target) in raw_sc or target in raw_sc):
                     raw_sc.pop(str(target), None)
                     raw_sc.pop(target, None)
@@ -724,6 +744,9 @@ class CommandsMixin:
                 style_eff = grp_c.get("style", cfg.get("style", "ios"))
                 theme_eff = grp_c.get("theme_mode", cfg.get("theme_mode", "light"))
                 tname = _gname(target) if target else "全局"
+                _perf_g = self._perf_enabled()
+                _t0g = time.perf_counter() if _perf_g else 0.0
+                _perf_out_g = {} if _perf_g else None
                 test_content = (
                     f"# 🎨【{tname}】专属渲染效果测试\n"
                     "这是一段用于测试消息转图排版与美观度的标准文本。\n\n"
@@ -735,46 +758,57 @@ class CommandsMixin:
                     "    print('Msg2Img by xbimg - Test Passed!')\n"
                     "```"
                 )
-                with self._perf_track(tname) as _pt_g:
+                try:
+                    img = await asyncio.to_thread(
+                        MessageImageRenderer.render_pages,
+                        text=test_content,
+                        style=style_eff,
+                        theme_mode=theme_eff,
+                        star_background=bool(cfg.get("star_background", True)),
+                        star_density=str(cfg.get("star_density", "medium")),
+                        mosaic_mode="half",
+                        mosaic_type=str(cfg.get("mosaic_type", "pixel")),
+                        violation_words=["测试词"],
+                        emoji_remote=True,
+                        mosaic_half_pos=str(cfg.get("mosaic_half_pos", "bottom")),
+                        font_scale=eff_scale,
+                        custom_font_path=str(grp_c.get("custom_font_path", "") or ""),
+                        custom_bold_font_path=str(grp_c.get("custom_bold_font_path", "") or ""),
+                        perf_out=_perf_out_g,
+                    )
+                except Exception as e:
+                    yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                    return
+                chain_imgs = []
+                chain_pairs = []
+                if _perf_g:
+                    _t_saveg = time.perf_counter()
+                for _idx, _im in enumerate(img or []):
                     try:
-                        img = await asyncio.to_thread(
-                            MessageImageRenderer.render_pages,
-                            text=test_content,
-                            style=style_eff,
-                            theme_mode=theme_eff,
-                            star_background=bool(cfg.get("star_background", True)),
-                            star_density=str(cfg.get("star_density", "medium")),
-                            mosaic_mode="half",
-                            mosaic_type=str(cfg.get("mosaic_type", "pixel")),
-                            violation_words=["测试词"],
-                            emoji_remote=True,
-                            mosaic_half_pos=str(cfg.get("mosaic_half_pos", "bottom")),
-                            font_scale=eff_scale,
-                            custom_font_path=str(grp_c.get("custom_font_path", "") or ""),
-                            custom_bold_font_path=str(grp_c.get("custom_bold_font_path", "") or ""),
-                            perf_out=_pt_g.perf_out,
-                        )
+                        img_filename = f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
+                        img_path = self.cache_dir / img_filename
+                        await asyncio.to_thread(_im.save, str(img_path), "PNG")
+                        self._schedule_delete(img_path, 45)
+                        chain_pairs.append((_im, img_path))
+                        chain_imgs.append(AstrImage.fromFileSystem(str(img_path)))
                     except Exception as e:
-                        yield event.plain_result(f"❌ 测试图生成失败: {e}")
-                        return
-                    chain_imgs = []
-                    chain_pairs = []
-                    _pt_g.before_save()
-                    for _idx, _im in enumerate(img or []):
-                        try:
-                            img_filename = f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
-                            img_path = self.cache_dir / img_filename
-                            await asyncio.to_thread(_im.save, str(img_path), "PNG")
-                            self._schedule_delete(img_path, 45)
-                            chain_pairs.append((_im, img_path))
-                            chain_imgs.append(AstrImage.fromFileSystem(str(img_path)))
-                        except Exception as e:
-                            logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
-                    _pt_g.set_result([p[0] for p in chain_pairs], [p[1] for p in chain_pairs])
-                    if not chain_imgs:
-                        yield event.plain_result("❌ 测试图生成失败：图片为空。")
-                        return
-                    yield event.chain_result(chain_imgs)
+                        logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+                if _perf_g:
+                    try:
+                        _mo, _pf, _dr, _la = self._perf_vals(_perf_out_g)
+                        self._emit_perf_log(
+                            tname, (time.perf_counter() - _t0g) * 1000.0,
+                            0.0, _mo, _pf,
+                            [p[0] for p in chain_pairs], [p[1] for p in chain_pairs],
+                            draw_ms=_dr, layout_ms=_la,
+                            save_ms=(time.perf_counter() - _t_saveg) * 1000.0,
+                        )
+                    except Exception:
+                        pass
+                if not chain_imgs:
+                    yield event.plain_result("❌ 测试图生成失败：图片为空。")
+                    return
+                yield event.chain_result(chain_imgs)
                 return
             yield event.plain_result("未知 group 子指令，请输入 /xbimg group 查看单群菜单。")
             return
@@ -783,50 +817,73 @@ class CommandsMixin:
             if not self._test_cooldown_ok(event, "test"):
                 yield event.plain_result("⏳ 测试太频繁，请 15 秒后再试。")
                 return
-            _gid_t = self._extract_group_id(event)
-            with self._perf_track(f"群{_gid_t}" if _gid_t else "私聊") as _pt_t:
-                try:
-                    # 测试文本同样过审查：block 直接拒绝，mosaic 则如实打出马赛克效果
-                    _tmod, _teff, _tmosaic = await self._moderate_text(test_content)
-                except Exception as e:
-                    yield event.plain_result(f"❌ 测试图生成失败: {e}")
-                    return
-                _pt_t.after_moderate()
-                if _tmod.is_violated and _tmod.action == "block":
-                    self.cfg_mgr.record_render(is_violated=True, count_total=False)
-                    _pt_t.set_blocked()
-                    yield event.plain_result("🚫 测试文本触发安全审查，已拦截不生成。")
-                    return
-                try:
-                    _tfs = int(cfg.get("font_scale", 100) or 100)
-                except Exception:
-                    _tfs = 100
-                try:
-                    imgs = await self._render_moderated(
-                        _teff, _tmod, _tmosaic, font_scale=_tfs,
-                        perf_out=_pt_t.perf_out,
-                    )
-                except Exception as e:
-                    yield event.plain_result(f"❌ 测试图生成失败: {e}")
-                    return
-                test_imgs = []
-                test_pairs = []
-                _pt_t.before_save()
-                for _idx, _im in enumerate(imgs or []):
-                    # 毫秒+序号+随机：同秒并发 test 不互相覆盖；45 秒后自动清理
+            _perf_t = self._perf_enabled()
+            _t0t = time.perf_counter() if _perf_t else 0.0
+            _t_modt = _t0t if _perf_t else 0.0
+            _perf_out_t = {} if _perf_t else None
+            try:
+                # 测试文本同样过审查：block 直接拒绝，mosaic 则如实打出马赛克效果
+                _tmod, _teff, _tmosaic = await self._moderate_text(test_content)
+            except Exception as e:
+                yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                return
+            _mod_ms_t = (time.perf_counter() - _t_modt) * 1000.0 if _perf_t else 0.0
+            if _tmod.is_violated and _tmod.action == "block":
+                self.cfg_mgr.record_render(is_violated=True, count_total=False)
+                if _perf_t:
                     try:
-                        test_path = self.cache_dir / f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
-                        await asyncio.to_thread(_im.save, str(test_path), "PNG")
-                        self._schedule_delete(test_path, 45)
-                        test_pairs.append((_im, test_path))
-                        test_imgs.append(AstrImage.fromFileSystem(str(test_path)))
-                    except Exception as e:
-                        logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
-                _pt_t.set_result([p[0] for p in test_pairs], [p[1] for p in test_pairs])
-                if not test_imgs:
-                    yield event.plain_result("❌ 测试图生成失败：图片为空。")
-                    return
-                yield event.chain_result(test_imgs)
+                        _gid_t = self._extract_group_id(event)
+                        self._emit_perf_log(
+                            f"群{_gid_t}" if _gid_t else "私聊",
+                            (time.perf_counter() - _t0t) * 1000.0,
+                            _mod_ms_t, 0.0, 0.0, [], [], blocked=True,
+                        )
+                    except Exception:
+                        pass
+                yield event.plain_result("🚫 测试文本触发安全审查，已拦截不生成。")
+                return
+            try:
+                _tfs = int(cfg.get("font_scale", 100) or 100)
+            except Exception:
+                _tfs = 100
+            try:
+                imgs = await self._render_moderated(
+                    _teff, _tmod, _tmosaic, font_scale=_tfs,
+                    perf_out=_perf_out_t,
+                )
+            except Exception as e:
+                yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                return
+            test_imgs = []
+            test_pairs = []
+            _t_savet = time.perf_counter() if _perf_t else 0.0
+            for _idx, _im in enumerate(imgs or []):
+                # 毫秒+序号+随机：同秒并发 test 不互相覆盖；45 秒后自动清理
+                try:
+                    test_path = self.cache_dir / f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
+                    await asyncio.to_thread(_im.save, str(test_path), "PNG")
+                    self._schedule_delete(test_path, 45)
+                    test_pairs.append((_im, test_path))
+                    test_imgs.append(AstrImage.fromFileSystem(str(test_path)))
+                except Exception as e:
+                    logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+            if _perf_t:
+                try:
+                    _gid_t2 = self._extract_group_id(event)
+                    _mo, _pf, _dr, _la = self._perf_vals(_perf_out_t)
+                    self._emit_perf_log(
+                        f"群{_gid_t2}" if _gid_t2 else "私聊",
+                        (time.perf_counter() - _t0t) * 1000.0, _mod_ms_t,
+                        _mo, _pf, [p[0] for p in test_pairs], [p[1] for p in test_pairs],
+                        draw_ms=_dr, layout_ms=_la,
+                        save_ms=(time.perf_counter() - _t_savet) * 1000.0,
+                    )
+                except Exception:
+                    pass
+            if not test_imgs:
+                yield event.plain_result("❌ 测试图生成失败：图片为空。")
+                return
+            yield event.chain_result(test_imgs)
         else:
             yield event.plain_result("未知子指令，请输入 /xbimg 查看指令菜单。")
 

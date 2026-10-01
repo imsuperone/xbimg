@@ -10,9 +10,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-# 预编译正则：关键词切分 / 混淆符压缩
+# 预编译正则：关键词切分 / 混淆符压缩（后者与打码侧共用 common 定义）
 _SPLIT_KW_RE = re.compile(r"[,;，；\n]+")
-_CONDENSE_RE = re.compile(r"[\s\-_~`!@#$%^&*()+=|\\\[\]{};:'\",.<>?/]+")
+try:
+    from .common import _CONDENSE_CONFUSABLES_RE as _CONDENSE_RE
+except (ImportError, ValueError):
+    from core.common import _CONDENSE_CONFUSABLES_RE as _CONDENSE_RE
 
 
 @dataclass
@@ -30,13 +33,9 @@ class ContentModerator:
         self._kw_cache: Dict[str, Tuple[List[str], List[str]]] = {}
         # 关键词正则预检缓存：raw -> compiled pattern（普通消息一次 search 即可排除，避免逐词 in）
         self._kw_pat_cache: Dict[str, Any] = {}
-        self._last_kw_raw: str = ""
 
-    def _get_keywords(self, preset_name: Optional[str] = None) -> List[str]:
-        tokens, _ = self._get_keywords_with_lowered(preset_name)
-        return tokens
-
-    def _get_keywords_with_lowered(self, preset_name: Optional[str] = None) -> Tuple[List[str], List[str]]:
+    def _resolve_kw_raw(self, preset_name: Optional[str] = None) -> str:
+        """解析词库 raw 字符串（纯函数，无副作用，调用方线程本地持有）"""
         raw = ""
         presets = self.config.get("keyword_presets", {})
         if not isinstance(presets, dict):
@@ -46,8 +45,9 @@ class ContentModerator:
         if preset_name and preset_name in presets:
             item = presets[preset_name]
             raw = item.get("keywords", "") if isinstance(item, dict) else str(item)
-        elif not preset_name:
-            # 未指定群预设时，优先合并 custom_keywords 与激活预设
+        else:
+            # 未指定或指定了未知预设名时，回退到激活预设合并：
+            # 未知名绝不静默降级为裸 custom_keywords（会丢掉激活预设词）
             active_p = str(self.config.get("active_keyword_preset", "default") or "default")
             preset_raw = ""
             if active_p in presets:
@@ -59,15 +59,15 @@ class ContentModerator:
         # 兜底
         if not raw:
             raw = str(self.config.get("custom_keywords", "") or "")
+        return raw
+
+    def _get_keywords_with_lowered(self, preset_name: Optional[str] = None) -> Tuple[List[str], List[str], str]:
+        raw = self._resolve_kw_raw(preset_name)
 
         # 按逗号、分号、换行符分割并去重（按 raw 字符串缓存：同词库不重复切分/lower）
-        try:
-            self._last_kw_raw = raw
-        except Exception:
-            pass
         cached = self._kw_cache.get(raw)
         if cached is not None:
-            return list(cached[0]), list(cached[1])
+            return list(cached[0]), list(cached[1]), raw
         seen = set()
         tokens = []
         lowered = []
@@ -92,18 +92,18 @@ class ContentModerator:
                         self._kw_pat_cache[raw] = re.compile(alt)
         except Exception:
             pass
-        return list(tokens), list(lowered)
+        return list(tokens), list(lowered), raw
 
     def check_keywords(self, text: str, preset_name: Optional[str] = None) -> Tuple[bool, List[str]]:
         """检查自定义屏蔽词（游戏词同样视为违规保留）"""
-        keywords, lowered_kws = self._get_keywords_with_lowered(preset_name)
+        keywords, lowered_kws, raw = self._get_keywords_with_lowered(preset_name)
         if not keywords or not text:
             return False, []
 
         lower_text = text.lower()
         # 正则预检：普通消息一次 search 排除，避免逐词 in（命中时再逐词收集明细）
         try:
-            pat = self._kw_pat_cache.get(getattr(self, "_last_kw_raw", None))
+            pat = self._kw_pat_cache.get(raw)
         except Exception:
             pat = None
         if pat is not None:
