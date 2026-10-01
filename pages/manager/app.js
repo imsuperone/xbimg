@@ -386,9 +386,6 @@ async def render_text_to_image(text: str):
         currentConfig = res.config;
         renderConfigToUI(res.config);
       }
-      if (res && res.stats) {
-        renderStats(res.stats);
-      }
     } catch (e) {
       console.warn("[msg2img] 获取配置回退或失败:", e);
       showToast("连接后端失败，显示默认配置");
@@ -400,15 +397,6 @@ async def render_text_to_image(text: str):
     if (v <= 0) return "—";
     if (v < 1000) return `${v}ms`;
     return `${(v / 1000).toFixed(1)}s`;
-  }
-
-  function renderStats(stats) {
-    const todayEl = document.getElementById("statToday");
-    const slowEl = document.getElementById("statSlowest");
-    const avgEl = document.getElementById("statAvg");
-    if (todayEl) todayEl.textContent = (stats.today_count ?? stats.total_rendered) || 0;
-    if (slowEl) slowEl.textContent = formatMs(stats.slowest_render_ms);
-    if (avgEl) avgEl.textContent = formatMs(stats.avg_render_ms);
   }
 
   function renderConfigToUI(cfg) {
@@ -445,18 +433,6 @@ async def render_text_to_image(text: str):
       perfSwitch.checked = pv === true || pv === 1 || String(pv).toLowerCase() === "true";
     }
 
-    // 独立 AI 审查开关
-    const aiModSwitch = document.getElementById("cfgEnableAiModeration");
-    const aiConfigWrap = document.getElementById("aiConfigWrap");
-    const isAiOn = Boolean(cfg.enable_ai_moderation ?? (cfg.moderation_mode === "ai" || cfg.moderation_mode === "both"));
-    if (aiModSwitch) {
-      aiModSwitch.checked = isAiOn;
-    }
-    if (aiConfigWrap) {
-      aiConfigWrap.style.opacity = isAiOn ? "1" : "0.5";
-      aiConfigWrap.style.pointerEvents = isAiOn ? "auto" : "none";
-    }
-
     // half 位置仅 half 模式显示
     const halfPosGroup = document.getElementById("mosaicHalfPosGroup");
     if (halfPosGroup) halfPosGroup.style.display = (cfg.violation_action || "mosaic_half") === "mosaic_half" ? "block" : "none";
@@ -482,33 +458,6 @@ async def render_text_to_image(text: str):
 
     // 填充与同步多预设词库
     populateKeywordPresets();
-
-    const promptEl = document.getElementById("cfgCustomAiPrompt");
-    if (promptEl) {
-      promptEl.value = cfg.custom_ai_prompt || (
-        "你是一个严格而专业的内容安全审核员。请审查以下文本是否包含违法犯罪、色情低俗、恶意辱骂、暴恐危害、欺诈谣言等违规内容。\n" +
-        "请直接输出且仅输出合法的 JSON 格式，严禁添加任何 Markdown 格式或额外解释：\n" +
-        '{"violated": true 或 false, "reason": "违规简短原因，无违规填空字符串"}'
-      );
-    }
-    setSegmentedValue("segAiProviderMode", cfg.ai_provider_mode || "astrbot");
-    const aiAstrSel=document.getElementById("cfgAiAstrbotModel");
-    if(aiAstrSel) aiAstrSel.value=cfg.ai_astrbot_model||"";
-    const aiAstrBox=document.getElementById("aiAstrbotBox");
-    const aiCustomBox2=document.getElementById("aiCustomBox");
-    if(aiAstrBox) aiAstrBox.style.display=(cfg.ai_provider_mode||"astrbot")==="astrbot"?"block":"none";
-    if(aiCustomBox2) aiCustomBox2.style.display=(cfg.ai_provider_mode||"astrbot")==="custom"?"block":"none";
-    // 延迟拉取模型列表
-    setTimeout(()=>fetchAiProviders(), 300);
-
-    const aiBaseEl = document.getElementById("cfgAiBase");
-    if (aiBaseEl) aiBaseEl.value = cfg.ai_api_base || "";
-
-    const aiKeyEl = document.getElementById("cfgAiKey");
-    if (aiKeyEl) aiKeyEl.value = cfg.ai_api_key || "";
-
-    const aiModelEl = document.getElementById("cfgAiModel");
-    if (aiModelEl) aiModelEl.value = cfg.ai_model || "gpt-4o-mini";
 
     // 默认白名单模式
     const grpMode = cfg.group_mode || "whitelist";
@@ -538,17 +487,6 @@ async def render_text_to_image(text: str):
     const customBox = document.getElementById("customFontBox");
     if (customBox) customBox.style.display = fontSrc === "custom" ? "block" : "none";
 
-    // 顶部卡片指示
-    const curStyleEl = document.getElementById("statCurrentStyle");
-    if (curStyleEl) curStyleEl.textContent = (cfg.style || "ios").toUpperCase();
-
-    const statusBadge = document.getElementById("statStatusBadge");
-    if (statusBadge) {
-      const isEn = Boolean(cfg.enable ?? true);
-      statusBadge.textContent = isEn ? "运行中" : "已暂停";
-      statusBadge.className = `widget-badge ${isEn ? "pill-green" : "pill-amber"}`;
-    }
-
     // 动态提示群聊范围状态
     updateGroupModeStatusUI(grpMode, cfg.group_list || "");
   }
@@ -557,9 +495,6 @@ async def render_text_to_image(text: str):
     const enableEl = document.getElementById("cfgEnable");
     const minLenEl = document.getElementById("cfgMinLength");
     const kwEl = document.getElementById("cfgKeywords");
-    const aiBaseEl = document.getElementById("cfgAiBase");
-    const aiKeyEl = document.getElementById("cfgAiKey");
-    const aiModelEl = document.getElementById("cfgAiModel");
     const grpListEl = document.getElementById("cfgGroupList");
     const starBgEl = document.getElementById("cfgStarBg");
     const cfEl = document.getElementById("cfgCustomFont");
@@ -582,7 +517,6 @@ async def render_text_to_image(text: str):
       moderation_mode: getSegmentedValue("segModerationMode", "keywords"),
       // 与 /xbimg mod 同步：mode 开则 keyword 总闸开（moderation.py 两者 AND）
       enable_keywords_moderation: getSegmentedValue("segModerationMode", "keywords") !== "none",
-      enable_ai_moderation: Boolean(document.getElementById("cfgEnableAiModeration")?.checked),
       violation_action: getRadioValue("violationAction", "mosaic_half"),
       mosaic_type: getSegmentedValue("segMosaicType", "pixel"),
       mosaic_half_pos: getSegmentedValue("segMosaicHalfPos", "bottom"),
@@ -608,11 +542,6 @@ async def render_text_to_image(text: str):
         }
         return presets;
       })(),
-      ai_provider_mode: getSegmentedValue("segAiProviderMode","astrbot"),
-      ai_astrbot_model: document.getElementById("cfgAiAstrbotModel")?.value.trim() || "",
-      ai_api_base: aiBaseEl ? aiBaseEl.value.trim() : "",
-      ai_api_key: aiKeyEl ? aiKeyEl.value.trim() : "",
-      ai_model: aiModelEl ? aiModelEl.value.trim() || "gpt-4o-mini" : "gpt-4o-mini",
       group_mode: getSegmentedValue("segGroupMode", "whitelist"),
       group_list: grpListEl ? grpListEl.value.trim() : "",
       font_source: getSegmentedValue("segFontSource", "auto"),
@@ -625,7 +554,6 @@ async def render_text_to_image(text: str):
       page_max_height: (()=>{ const el = document.getElementById("cfgPageMaxHeight"); const v = el ? parseInt(el.value,10) : 3000; return Math.min(3800, Math.max(800, v || 3000)); })(),
       img_max_width: (()=>{ const el = document.getElementById("cfgImgMaxWidth"); if (!el || el.value === "") return 1080; const v = parseInt(el.value,10); return isNaN(v) ? 1080 : Math.min(3000, Math.max(0, v)); })(),
       card_max_width: (()=>{ const el = document.getElementById("cfgCardMaxWidth"); const v = el ? parseInt(el.value,10) : 640; return Math.min(1200, Math.max(480, v || 640)); })(),
-      custom_ai_prompt: document.getElementById("cfgCustomAiPrompt")?.value.trim() || "",
       group_configs: (()=>{
         const curList = (document.getElementById("cfgGroupList")?.value || "").split(/[,;\s]+/).map(s=>s.trim()).filter(Boolean);
         const existing = getGroupConfigs();
@@ -1280,28 +1208,6 @@ async def render_text_to_image(text: str):
       await fetchFontStatus(true);
     }catch(e){ showToast("删除失败: "+e.message, 8000); }
   }
-  async function fetchAiProviders(){
-    const sel=document.getElementById("cfgAiAstrbotModel");
-    if(!sel) return;
-    try{
-      const res=await api.get("ai/providers");
-      const list=res&&res.providers||[];
-      const cur=currentConfig.ai_astrbot_model||"";
-      sel.innerHTML=`<option value="">-- 使用默认模型 --</option>`;
-      list.forEach(m=>{
-        const opt=document.createElement("option");
-        opt.value=m; opt.textContent=m;
-        if(m===cur) opt.selected=true;
-        sel.appendChild(opt);
-      });
-      if(list.length===0){
-        sel.innerHTML=`<option value="">-- 暂无可用模型 --</option>`;
-      }
-    }catch(e){
-      // 静默
-    }
-  }
-
   let _installingCurated = "";
   async function installCuratedFont(cid) {
     if (!cid || _installingCurated) return;
@@ -1600,11 +1506,6 @@ async def render_text_to_image(text: str):
         if (dimEl) dimEl.textContent = `${res.width} × ${res.height}`;
         if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${_activeMosaicMode !== "none" ? " (半马赛克)" : ""}`;
         if (latEl) latEl.textContent = res.render_ms != null ? formatMs(res.render_ms) : `${elapsed}ms`;
-        // 预览不计入业务统计（耗时看 render_ms），仅刷新卡片显示
-        try {
-          const sres = await api.get("config");
-          if (sres && sres.stats) renderStats(sres.stats);
-        } catch (e) {}
         if (announce) showToast("✨ 预览图片生成成功");
       } else {
         throw new Error((res && res.error) || "后端未返回图片数据");
@@ -1942,12 +1843,6 @@ async def render_text_to_image(text: str):
           segItem.classList.add("active");
           const val = segItem.getAttribute("data-val");
 
-          // 风格切换更新统计卡
-          if (parent.id === "segStyle") {
-            const curStyleEl = document.getElementById("statCurrentStyle");
-            if (curStyleEl) curStyleEl.textContent = (val || "ios").toUpperCase();
-          }
-
           // 生效模式切换动态更新底部提示
           if (parent.id === "segGroupMode") {
             const curList = document.getElementById("cfgGroupList")?.value || "";
@@ -1973,14 +1868,6 @@ async def render_text_to_image(text: str):
               }
             }
           }
-          if (parent.id === "segAiProviderMode") {
-            const astrBox=document.getElementById("aiAstrbotBox");
-            const customBox2=document.getElementById("aiCustomBox");
-            if(astrBox) astrBox.style.display = val==="astrbot" ? "block" : "none";
-            if(customBox2) customBox2.style.display = val==="custom" ? "block" : "none";
-            if(val==="astrbot") fetchAiProviders();
-          }
-
           triggerAutoSave(); // 选项切换即时自动保存生效
         }
         return;
@@ -2066,25 +1953,7 @@ async def render_text_to_image(text: str):
         }
         triggerAutoSave();
       }
-      if (e.target && e.target.id === "cfgEnableAiModeration") {
-        const wrap = document.getElementById("aiConfigWrap");
-        if (wrap) {
-          wrap.style.opacity = e.target.checked ? "1" : "0.5";
-          wrap.style.pointerEvents = e.target.checked ? "auto" : "none";
-        }
-        currentConfig.enable_ai_moderation = e.target.checked;
-        if (e.target.checked && currentConfig.moderation_mode === "none") {
-          currentConfig.moderation_mode = "both";
-          setSegmentedValue("segModerationMode", "both");
-        }
-        triggerAutoSave();
-      }
       if (e.target && e.target.id === "cfgEnable") {
-        const statusBadge = document.getElementById("statStatusBadge");
-        if (statusBadge) {
-          statusBadge.textContent = e.target.checked ? "运行中" : "已暂停";
-          statusBadge.className = `widget-badge ${e.target.checked ? "pill-green" : "pill-amber"}`;
-        }
         triggerAutoSave();
       }
       if (e.target && e.target.id === "cfgPerfLog") {
@@ -2215,7 +2084,6 @@ async def render_text_to_image(text: str):
     fetchFontFiles();
     fetchCuratedFonts();
     fetchEmojiPacks();
-    fetchAiProviders();
     fetchPresetUpdateStatus();
 
     // 页面初次加载时，自动触发一次极速预览，让用户进页面立刻能看到效果

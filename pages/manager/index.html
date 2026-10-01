@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.1.5" />
+  <link rel="stylesheet" href="./style.css?v=1.2.0" />
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.1.5</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.2.0</span></h1>
           <p>Text to Image · 控制台</p>
         </div>
       </div>
@@ -35,45 +35,6 @@
         <span id="autoSaveHint" class="auto-save-hint">● 自动保存已开启 · 修改即生效</span>
       </div>
     </header>
-
-    <!-- Glanceable Hero Widgets -->
-    <div class="hero-widgets-grid">
-      <div class="m3-widget-card">
-        <div class="widget-header">
-          <span class="widget-badge pill-cyan">今日生图</span>
-          <span class="widget-icon">🖼️</span>
-        </div>
-        <div class="widget-value" id="statToday">0</div>
-        <div class="widget-caption">今日累计生成图片数量</div>
-      </div>
-
-      <div class="m3-widget-card">
-        <div class="widget-header">
-          <span class="widget-badge pill-amber">最慢生图</span>
-          <span class="widget-icon">🐢</span>
-        </div>
-        <div class="widget-value" id="statSlowest">—</div>
-        <div class="widget-caption">历史最慢单次渲染耗时</div>
-      </div>
-
-      <div class="m3-widget-card">
-        <div class="widget-header">
-          <span class="widget-badge pill-purple">平均生图</span>
-          <span class="widget-icon">⏱️</span>
-        </div>
-        <div class="widget-value" id="statAvg">—</div>
-        <div class="widget-caption">全部图片平均渲染耗时</div>
-      </div>
-
-      <div class="m3-widget-card">
-        <div class="widget-header">
-          <span class="widget-badge pill-green" id="statStatusBadge">运行中</span>
-          <span class="widget-icon" id="statStatusIcon">⚡</span>
-        </div>
-        <div class="widget-value" id="statCurrentStyle">IOS</div>
-        <div class="widget-caption" id="statCurrentStyleSub">当前默认渲染风格</div>
-      </div>
-    </div>
 
     <!-- Category Navigation Bar -->
     <nav class="category-tabs-bar" id="categoryTabs">
@@ -496,60 +457,6 @@
           </div>
         </div>
 
-        <!-- Card: Dedicated AI Moderation -->
-        <div class="m3-card">
-          <div class="card-row-split">
-            <div>
-              <h2 class="card-title">🤖 AI 大模型内容审查 (独立开关)</h2>
-              <p class="card-desc">开启后，在自定义屏蔽词未命中时调用大模型审查违规内容。关闭则绝不消耗任何 AI 接口调用。</p>
-            </div>
-            <label class="m3-switch">
-              <input type="checkbox" id="cfgEnableAiModeration" />
-              <span class="switch-slider"></span>
-            </label>
-          </div>
-
-          <div id="aiConfigWrap" style="margin-top:16px;">
-            <div class="form-group">
-              <label class="form-label">AI 模型来源</label>
-              <div class="m3-segmented-control" id="segAiProviderMode">
-                <button type="button" class="seg-item active" data-val="astrbot">🤖 AstrBot 已接入模型</button>
-                <button type="button" class="seg-item" data-val="custom">🔧 自定义 OpenAI 兼容接口</button>
-              </div>
-            </div>
-
-            <div id="aiAstrbotBox">
-              <div class="form-group">
-                <label class="form-label">AstrBot 模型选择</label>
-                <select id="cfgAiAstrbotModel" class="m3-input">
-                  <option value="">-- 使用 AstrBot 默认会话模型 --</option>
-                </select>
-                <span class="field-hint">直接复用 AstrBot 已配置的大语言模型，无需额外 API Key。</span>
-              </div>
-            </div>
-
-            <div id="aiCustomBox" style="display:none;">
-              <div class="form-group">
-                <label class="form-label">API 基础地址 (Base URL)</label>
-                <input type="text" id="cfgAiBase" class="m3-input" placeholder="例如 https://api.deepseek.com/v1 或 https://api.openai.com/v1" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">API 密钥 (API Key)</label>
-                <input type="password" id="cfgAiKey" class="m3-input" placeholder="sk-..." />
-              </div>
-              <div class="form-group">
-                <label class="form-label">审查模型名称 (Model Name)</label>
-                <input type="text" id="cfgAiModel" class="m3-input" value="gpt-4o-mini" placeholder="gpt-4o-mini / deepseek-chat" />
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top:14px;">
-              <label class="form-label">自定义 AI 审查系统提示词 (Prompt)</label>
-              <textarea id="cfgCustomAiPrompt" class="m3-textarea" rows="3" placeholder="留空使用默认严格审核提示词。可在此补充专属业务审核标准。"></textarea>
-              <span class="field-hint">直接使用内置专业审核提示词即可；如需定制请保持要求输出合法 JSON。</span>
-            </div>
-          </div>
-        </div>
       </section>
 
       <!-- ==================== Tab 4: 群聊生效与配置 ==================== -->

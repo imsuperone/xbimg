@@ -5,7 +5,7 @@
 - 支持 iOS 与 Android 16 (Material 3 Expressive) 双风格
 - 随机背景小星星星芒点缀
 - 链接转图/保留文本策略
-- 自定义关键词 + AI 大模型内容安全双轨审查
+- 自定义关键词内容安全审查
 - 违规创意半马赛克（Half Mosaic）处置
 - Android 16 WebUI 管理控制台
 """

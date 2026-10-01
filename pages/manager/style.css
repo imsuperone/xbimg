@@ -143,64 +143,6 @@ body {
 }
 
 /* ==========================================================================
-   Hero Widgets Grid (Android 16 Expressive Cards)
-   ========================================================================== */
-.hero-widgets-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 18px;
-  margin-bottom: 24px;
-}
-
-.m3-widget-card {
-  background: var(--m3-sys-color-surface-container-high);
-  border-radius: var(--m3-radius-large);
-  border: 1px solid var(--m3-sys-color-divider);
-  padding: 20px 22px;
-  box-shadow: var(--m3-shadow-card);
-  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.m3-widget-card:hover {
-  transform: translateY(-2px);
-}
-
-.widget-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.widget-badge {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: var(--m3-radius-pill);
-}
-
-.pill-cyan { background: var(--m3-status-cyan-bg); color: var(--m3-status-cyan); }
-.pill-amber { background: var(--m3-status-amber-bg); color: var(--m3-status-amber); }
-.pill-purple { background: var(--m3-status-purple-bg); color: var(--m3-status-purple); }
-.pill-green { background: var(--m3-status-green-bg); color: var(--m3-status-green); }
-
-.widget-icon {
-  font-size: 20px;
-}
-
-.widget-value {
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  margin-bottom: 4px;
-}
-
-.widget-caption {
-  font-size: 13px;
-  color: var(--m3-sys-color-outline);
-}
-
-/* ==========================================================================
    Category Navigation Bar (Android 16 Expressive Tabs)
    ========================================================================== */
 .category-tabs-bar {
@@ -270,6 +212,18 @@ body {
 
 .settings-section.active {
   display: flex;
+  animation: sectionIn 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes sectionIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-section.active {
+    animation: none;
+  }
 }
 
 /* ==========================================================================
@@ -1097,11 +1051,6 @@ body {
 
   .group-fetch-row {
     flex-wrap: wrap;
-  }
-
-  .hero-widgets-grid {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
   }
 
   .preview-stage-wrap {

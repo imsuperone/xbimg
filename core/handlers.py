@@ -1251,11 +1251,10 @@ class HandlersMixin:
                 if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text":
                     return message
 
-            # 仅违规时转图：AI 关闭时关键词预检未命中直接返回（省一次完整审查）；
-            # AI 开启时跳过预检，直接走完整审查（关键词只扫一遍）
+            # 仅违规时转图：关键词预检未命中直接返回（省一次完整审查）
             render_trigger = str(cfg.get("render_trigger", "always") or "always")
             grp_custom = self._get_group_custom_config(gid)
-            if render_trigger == "violation_only" and not bool(cfg.get("enable_ai_moderation", False)):
+            if render_trigger == "violation_only":
                 _qp = grp_custom.get("keyword_preset") if isinstance(grp_custom, dict) else None
                 quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
                 if not quick_hit:
@@ -1422,7 +1421,7 @@ class HandlersMixin:
                     return message
             render_trigger2 = str(cfg.get("render_trigger", "always") or "always")
             grp_custom2 = self._get_group_custom_config(gid)
-            if render_trigger2 == "violation_only" and not bool(cfg.get("enable_ai_moderation", False)):
+            if render_trigger2 == "violation_only":
                 _qp2 = grp_custom2.get("keyword_preset") if isinstance(grp_custom2, dict) else None
                 quick_hit2, _ = self.moderator.check_keywords(text, _qp2)
                 if not quick_hit2:
@@ -1593,18 +1592,15 @@ class HandlersMixin:
             return
 
         # 5. 仅违规时转图：非违规直接保留纯文本（放在审查前快速判断，避免无谓渲染）
-        # 先取群专属词库，保证预检与正式审查同口径；AI 开启时跳过预检，
-        # 直接走一次完整审查（避免关键词扫两遍），AI 关闭时预检未命中直接返回
+        # 先取群专属词库，保证预检与正式审查同口径；预检未命中直接返回
         gid_main = self._extract_group_id(event)
         grp_c_main = self._get_group_custom_config(gid_main)
         render_trigger = str(cfg.get("render_trigger", "always") or "always")
         if render_trigger == "violation_only":
-            _ai_on = bool(cfg.get("enable_ai_moderation", False))
-            if not _ai_on:
-                _qp = grp_c_main.get("keyword_preset") if isinstance(grp_c_main, dict) else None
-                quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
-                if not quick_hit:
-                    return
+            _qp = grp_c_main.get("keyword_preset") if isinstance(grp_c_main, dict) else None
+            quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
+            if not quick_hit:
+                return
 
         # 同文并发去重：_transform 已渲染完成 → 复用图路径改写 chain，避免二次渲染。
         # 命中校验：缓存文件必须仍存在，失效即 miss → 删除内存条目后完整重跑

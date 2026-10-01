@@ -200,7 +200,6 @@ class WebApiMixin:
         reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
         reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
-        reg(f"/{pfx}/ai/providers", self._api_ai_providers, ["GET"], "列出 AstrBot 已接入模型")
 
 
 
@@ -1321,45 +1320,6 @@ class WebApiMixin:
             return error_response(f"操作失败: {e}", status_code=500)
 
 
-
-    async def _api_ai_providers(self):
-        try:
-            providers = []
-            # 尝试从 context 获取已接入模型
-            try:
-                # 常见接口：context.providers / context.llm_providers
-                for attr in ("providers", "llm_providers", "provider_manager", "model_list"):
-                    mgr = getattr(self.context, attr, None)
-                    if mgr:
-                        try:
-                            # 若为 dict
-                            if isinstance(mgr, dict):
-                                for k, v in mgr.items():
-                                    providers.append(str(k))
-                            elif hasattr(mgr, "__iter__"):
-                                for p in mgr:
-                                    name = str(getattr(p, "model_name", "") or getattr(p, "id", "") or getattr(p, "name", "") or str(p))
-                                    if name and name not in providers:
-                                        providers.append(name)
-                        except Exception:
-                            continue
-                # 兜底：get_using_provider
-                if not providers:
-                    try:
-                        p = self.context.get_using_provider()
-                        if p:
-                            name = str(getattr(p, "model_name", "") or getattr(p, "id", "") or "default")
-                            if name not in providers:
-                                providers.append(name)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            # 去重并限制
-            providers = [p for p in providers if p][:20]
-            return json_response({"ok": True, "providers": providers})
-        except Exception as e:
-            return error_response(f"获取失败: {e}", status_code=500)
 
     # ==========================================
     # 缓存周期清理（可停止 + 数量上限兜底）

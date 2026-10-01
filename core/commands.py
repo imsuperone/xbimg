@@ -127,7 +127,6 @@ class CommandsMixin:
                 f"• 文件体积：{comp_map.get(_compress_level(cfg), '均衡适中')}\n"
                 f"• 链接策略：{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
                 f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
-                f"• AI 审查开关：{'🤖 开启' if cfg.get('enable_ai_moderation') else '⚪ 关闭'}\n"
                 f"• 违规处置：{action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
                 f"• 全局字体：{cfg.get('font_scale', 100)}%\n"
                 f"• 群生效模式：{group_map.get(cfg.get('group_mode', 'whitelist'), '仅白名单群生效')}\n"
@@ -144,7 +143,6 @@ class CommandsMixin:
                 "• /xbimg maxkb 800 - 单张体积上限KB（超限自动降质，0 关闭）\n"
                 "• /xbimg link image / text / append - 链接策略\n"
                 "• /xbimg mod on / off - 屏蔽词审查开关\n"
-                "• /xbimg ai on / off - AI 审查独立开关\n"
                 "• /xbimg action half / full / block / notice - 违规处置\n"
                 "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
                 "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
@@ -307,19 +305,6 @@ class CommandsMixin:
                 yield event.plain_result("⚪ 敏感屏蔽词库审查已关闭。")
             else:
                 yield event.plain_result("用法：/xbimg mod on 或 /xbimg mod off")
-        elif sub in ("ai", "aimod"):
-            if arg in ("on", "开启", "1"):
-                cfg["enable_ai_moderation"] = True
-                self.cfg_mgr.save()
-                self.moderator = ContentModerator(cfg)
-                yield event.plain_result("🤖 AI 大模型内容安全审查已开启！")
-            elif arg in ("off", "关闭", "0"):
-                cfg["enable_ai_moderation"] = False
-                self.cfg_mgr.save()
-                self.moderator = ContentModerator(cfg)
-                yield event.plain_result("⚪ AI 大模型内容安全审查已关闭。")
-            else:
-                yield event.plain_result("用法：/xbimg ai on 或 /xbimg ai off")
         elif sub in ("action", "处置"):
             if arg in ("half", "mosaic_half", "半打码", "半马赛克"):
                 cfg["violation_action"] = "mosaic_half"

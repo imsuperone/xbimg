@@ -227,16 +227,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
                     continue
         except Exception:
             pass
-        # 关闭 AI 审查共享连接池
-        try:
-            from .core.moderation import close_shared_client
-            await close_shared_client()
-        except Exception:
-            try:
-                from core.moderation import close_shared_client as _csc2
-                await _csc2()
-            except Exception:
-                pass
 
 
 
