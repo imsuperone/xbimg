@@ -115,7 +115,7 @@ body {
 }
 
 .brand-text h1 {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -205,8 +205,8 @@ body {
 }
 
 .m3-accent-picker {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 2px solid var(--m3-sys-color-divider);
   border-radius: 50%;
@@ -428,10 +428,14 @@ body {
   border-radius: var(--m3-radius-pill);
   padding: 4px;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .seg-item {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 9px 16px;
   border: none;
   background: transparent;
@@ -1109,7 +1113,10 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
     padding: 10px 12px;
     font-size: 12px;
   }
-  /* 三个及以上选项的分段组：竖排独占一行，避免 2+1 断行；堆叠态圆角自适应收小 */
+}
+
+/* 窄屏（含窄窗 PC）：三个及以上选项竖排独占一行；堆叠态圆角自适应收小 */
+@media (max-width: 900px) {
   .m3-segmented-control:has(> .seg-item:nth-child(3)) {
     border-radius: var(--m3-radius-medium);
   }
