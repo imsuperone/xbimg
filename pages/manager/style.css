@@ -1109,9 +1109,13 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
     padding: 10px 12px;
     font-size: 12px;
   }
-  /* 三个及以上选项的分段组：竖排独占一行，避免 2+1 断行 */
+  /* 三个及以上选项的分段组：竖排独占一行，避免 2+1 断行；堆叠态圆角自适应收小 */
+  .m3-segmented-control:has(> .seg-item:nth-child(3)) {
+    border-radius: var(--m3-radius-medium);
+  }
   .m3-segmented-control:has(> .seg-item:nth-child(3)) .seg-item {
     flex-basis: 100%;
+    border-radius: 14px;
   }
   .font-file-row {
     flex-wrap: wrap;
@@ -1128,6 +1132,11 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   }
   .category-tabs-bar {
     padding-bottom: 6px;
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .cat-tab {
+    flex: 1 1 auto;
   }
   .toast-container {
     left: 16px;
