@@ -363,9 +363,9 @@ async def render_text_to_image(text: str):
     return "#" + mixed.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
   }
 
-  // 取色派生的变量：主题色 + 容器色 + 页面底色（浅色只染底、卡片留白保对比）
+  // 取色派生的变量：主题色 + 按钮字色 + 容器色 + 页面底色（浅色同步染色卡片/顶栏底，切换主题不残留旧底）
   // --m3-seg-ink：取色直接当字色时的对比度兜底（与所在底对比不足则回退主题正文色，保证任何取色下文字可读）
-  const _ACCENT_VARS = ["--m3-sys-color-primary", "--m3-sys-color-primary-container", "--m3-sys-color-surface", "--m3-sys-color-surface-container", "--m3-sys-color-surface-container-high", "--m3-sys-color-surface-container-highest", "--m3-seg-ink"];
+  const _ACCENT_VARS = ["--m3-sys-color-primary", "--m3-sys-color-on-primary", "--m3-sys-color-primary-container", "--m3-sys-color-surface", "--m3-sys-color-surface-container", "--m3-sys-color-surface-container-high", "--m3-sys-color-surface-container-highest", "--m3-seg-ink"];
 
   function _relLum(hex) {
     const c = [1, 3, 5].map((i) => {
@@ -398,13 +398,15 @@ async def render_text_to_image(text: str):
         "--m3-sys-color-primary-container": mixHex(v, "#E4EAF2", 0.25),
         "--m3-sys-color-surface": mixHex(v, "#F4F7FB", 0.08),
         "--m3-sys-color-surface-container": mixHex(v, "#E8EDF4", 0.12),
+        "--m3-sys-color-surface-container-high": mixHex(v, "#FFFFFF", 0.12),
         "--m3-sys-color-surface-container-highest": mixHex(v, "#DFE6EF", 0.12),
       };
       for (const k in tinted) {
         try { root.style.setProperty(k, tinted[k]); } catch (e) {}
       }
       try {
-        const segBg = dark ? tinted["--m3-sys-color-surface-container-high"] : "#FFFFFF";
+        root.style.setProperty("--m3-sys-color-on-primary", _contrastOk("#FFFFFF", v) ? "#FFFFFF" : (dark ? "#06263F" : "#1E1B16"));
+        const segBg = tinted["--m3-sys-color-surface-container-high"];
         root.style.setProperty("--m3-seg-ink", _contrastOk(v, segBg) ? v : (dark ? "#EAE6DF" : "#1E1B16"));
       } catch (e) {}
     } else {
@@ -2167,9 +2169,37 @@ async def render_text_to_image(text: str):
     downloadCustomUrl: downloadCustomUrl,
   };
 
+  function _verCmp(a, b) {
+    const pa = String(a).replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  }
+
+  function checkForUpdate() {
+    try {
+      const tag = document.querySelector(".version-tag");
+      if (!tag) return;
+      const local = (tag.textContent || "").trim();
+      fetch("https://raw.githubusercontent.com/imsuperone/xbimg/main/metadata.yaml", { cache: "no-store" })
+        .then((r) => (r && r.ok ? r.text() : Promise.reject(new Error("bad response"))))
+        .then((t) => {
+          const m = /(?:^|\n)version:\s*([0-9]+(?:\.[0-9]+)*)/.exec(t || "");
+          if (m && _verCmp(m[1], local) > 0) tag.textContent = "检测更新 v" + m[1];
+        })
+        .catch((e) => console.warn("[msg2img] update check skipped:", e));
+    } catch (e) {
+      console.warn("[msg2img] update check error:", e);
+    }
+  }
+
   // ---- 页面初始化 ----
   async function startApp() {
     initTheme();
+    checkForUpdate();
     bindGlobalDelegation();
     const _picker = document.getElementById("accentPicker");
     if (_picker) {
