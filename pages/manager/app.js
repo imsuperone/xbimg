@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.3
+// Version: 1.3.4
 // ==========================================================================
 (function () {
   "use strict";
@@ -1653,12 +1653,7 @@ async def render_text_to_image(text: str):
     }
   }
 
-  let _lastActiveTab = "visual";
-
   function switchCategoryTab(tabId) {
-    if (tabId !== "preview") {
-      _lastActiveTab = tabId;
-    }
     document.querySelectorAll(".cat-tab").forEach((t) => {
       t.classList.toggle("active", t.getAttribute("data-tab") === tabId);
     });
@@ -1668,25 +1663,13 @@ async def render_text_to_image(text: str):
       sec.classList.toggle("active", sec.getAttribute("data-section") === tabId);
     });
 
-    const workspace = document.getElementById("mainWorkspace");
-    const isMobile = window.innerWidth <= 900;
-    const mobBtn = document.getElementById("mobileFloatPreviewBtn");
-
     if (tabId === "preview") {
-      if (isMobile) {
-        if (workspace) workspace.classList.add("mobile-view-preview");
-        if (mobBtn) mobBtn.innerHTML = `<span>⚙️ 返回配置</span>`;
-      } else {
-        const prevSec = document.getElementById("previewSection");
-        if (prevSec && prevSec.scrollIntoView) {
-          try {
-            prevSec.scrollIntoView({ behavior: "smooth", block: "start" });
-          } catch (e) {}
-        }
+      const prevSec = document.getElementById("previewSection");
+      if (prevSec && prevSec.scrollIntoView) {
+        try {
+          prevSec.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (e) {}
       }
-    } else {
-      if (workspace) workspace.classList.remove("mobile-view-preview");
-      if (mobBtn) mobBtn.innerHTML = `<span>👁️ 实时预览</span>`;
     }
   }
 
@@ -1701,19 +1684,6 @@ async def render_text_to_image(text: str):
         e.preventDefault();
         const tabId = catTab.getAttribute("data-tab");
         if (tabId) switchCategoryTab(tabId);
-        return;
-      }
-
-      // 0.1 移动端浮动预览按钮
-      if (e.target.closest("#mobileFloatPreviewBtn")) {
-        e.preventDefault();
-        const workspace = document.getElementById("mainWorkspace");
-        const isPreviewActive = workspace && workspace.classList.contains("mobile-view-preview");
-        if (isPreviewActive) {
-          switchCategoryTab(_lastActiveTab || "visual");
-        } else {
-          switchCategoryTab("preview");
-        }
         return;
       }
 
