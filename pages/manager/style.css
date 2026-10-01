@@ -1109,6 +1109,10 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
     padding: 10px 12px;
     font-size: 12px;
   }
+  /* 三个及以上选项的分段组：竖排独占一行，避免 2+1 断行 */
+  .m3-segmented-control:has(> .seg-item:nth-child(3)) .seg-item {
+    flex-basis: 100%;
+  }
   .font-file-row {
     flex-wrap: wrap;
     row-gap: 8px;
