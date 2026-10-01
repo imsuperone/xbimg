@@ -4,23 +4,23 @@
 
 :root {
   /* M3 Dynamic Tonal Palette (Light Theme) */
-  --m3-sys-color-primary: #7A5813;
+  --m3-sys-color-primary: #4A90D9;
   --m3-sys-color-on-primary: #FFFFFF;
-  --m3-sys-color-primary-container: #FFDEA9;
-  --m3-sys-color-on-primary-container: #271900;
-  
-  --m3-sys-color-surface: #F8F5EE;
-  --m3-sys-color-on-surface: #1E1B16;
-  --m3-sys-color-surface-container: #F1ECE3;
-  --m3-sys-color-surface-container-high: #FFFFFF;
-  --m3-sys-color-surface-container-highest: #E7E1D7;
-  
-  --m3-sys-color-outline: #817567;
-  --m3-sys-color-outline-variant: #D4C4B5;
-  --m3-sys-color-divider: rgba(129, 117, 103, 0.15);
+  --m3-sys-color-primary-container: #D9E8F7;
+  --m3-sys-color-on-primary-container: #0F2B46;
 
-  --m3-sys-color-secondary-container: #EFE2D0;
-  --m3-sys-color-on-secondary-container: #231B10;
+  --m3-sys-color-surface: #F4F7FB;
+  --m3-sys-color-on-surface: #191C20;
+  --m3-sys-color-surface-container: #E8EDF4;
+  --m3-sys-color-surface-container-high: #FFFFFF;
+  --m3-sys-color-surface-container-highest: #DFE6EF;
+
+  --m3-sys-color-outline: #73777F;
+  --m3-sys-color-outline-variant: #C3C6CF;
+  --m3-sys-color-divider: rgba(90, 100, 115, 0.14);
+
+  --m3-sys-color-secondary-container: #DDE3EA;
+  --m3-sys-color-on-secondary-container: #1A1C1E;
 
   /* Status Tokens */
   --m3-status-cyan: #0288D1;
@@ -39,27 +39,27 @@
   --m3-radius-large: 28px;
   --m3-radius-pill: 999px;
 
-  --m3-shadow-card: 0 4px 16px rgba(45, 35, 20, 0.05);
+  --m3-shadow-card: 0 4px 16px rgba(30, 45, 70, 0.06);
 }
 
 [data-theme="dark"] {
-  --m3-sys-color-primary: #F0C070;
-  --m3-sys-color-on-primary: #432C00;
-  --m3-sys-color-primary-container: #5E4100;
-  --m3-sys-color-on-primary-container: #FFDEA9;
+  --m3-sys-color-primary: #8AB8F0;
+  --m3-sys-color-on-primary: #06263F;
+  --m3-sys-color-primary-container: #1E3A55;
+  --m3-sys-color-on-primary-container: #D6E8FA;
 
-  --m3-sys-color-surface: #131315;
-  --m3-sys-color-on-surface: #EAE6DF;
-  --m3-sys-color-surface-container: #1C1D22;
-  --m3-sys-color-surface-container-high: #24252C;
-  --m3-sys-color-surface-container-highest: #2E3038;
+  --m3-sys-color-surface: #111418;
+  --m3-sys-color-on-surface: #E2E2E6;
+  --m3-sys-color-surface-container: #1A1F26;
+  --m3-sys-color-surface-container-high: #232A33;
+  --m3-sys-color-surface-container-highest: #2C343F;
 
-  --m3-sys-color-outline: #9B8E80;
-  --m3-sys-color-outline-variant: #4F4539;
+  --m3-sys-color-outline: #8B9099;
+  --m3-sys-color-outline-variant: #43474E;
   --m3-sys-color-divider: rgba(255, 255, 255, 0.09);
 
-  --m3-sys-color-secondary-container: #33343C;
-  --m3-sys-color-on-secondary-container: #EFE2D0;
+  --m3-sys-color-secondary-container: #2A313B;
+  --m3-sys-color-on-secondary-container: #DDE3EA;
 
   --m3-status-cyan-bg: rgba(2, 136, 209, 0.2);
   --m3-status-amber-bg: rgba(230, 81, 0, 0.2);
@@ -459,7 +459,7 @@ body {
 
 .seg-item.active {
   background: var(--m3-sys-color-surface-container-high);
-  color: var(--m3-sys-color-primary);
+  color: var(--m3-seg-ink, var(--m3-sys-color-primary));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
@@ -917,7 +917,7 @@ body {
 
 .sg-reset-btn:hover {
   background: var(--m3-sys-color-surface-container-highest);
-  color: var(--m3-sys-color-primary);
+  color: var(--m3-seg-ink, var(--m3-sys-color-primary));
   border-color: var(--m3-sys-color-primary);
 }
 
@@ -930,7 +930,7 @@ body {
 .sg-mini-reset {
   background: none;
   border: none;
-  color: var(--m3-sys-color-primary);
+  color: var(--m3-seg-ink, var(--m3-sys-color-primary));
   font-size: 11px;
   padding: 0;
   cursor: pointer;
@@ -952,7 +952,7 @@ body {
 .selected-group-card .sg-val {
   font-size: 12px;
   font-weight: 700;
-  color: var(--m3-sys-color-primary);
+  color: var(--m3-seg-ink, var(--m3-sys-color-primary));
 }
 
 .sg-controls {

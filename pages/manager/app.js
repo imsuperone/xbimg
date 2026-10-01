@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.1
+// Version: 1.3.3
 // ==========================================================================
 (function () {
   "use strict";
@@ -364,7 +364,21 @@ async def render_text_to_image(text: str):
   }
 
   // 取色派生的变量：主题色 + 容器色 + 页面底色（浅色只染底、卡片留白保对比）
-  const _ACCENT_VARS = ["--m3-sys-color-primary", "--m3-sys-color-primary-container", "--m3-sys-color-surface", "--m3-sys-color-surface-container", "--m3-sys-color-surface-container-high", "--m3-sys-color-surface-container-highest"];
+  // --m3-seg-ink：取色直接当字色时的对比度兜底（与所在底对比不足则回退主题正文色，保证任何取色下文字可读）
+  const _ACCENT_VARS = ["--m3-sys-color-primary", "--m3-sys-color-primary-container", "--m3-sys-color-surface", "--m3-sys-color-surface-container", "--m3-sys-color-surface-container-high", "--m3-sys-color-surface-container-highest", "--m3-seg-ink"];
+
+  function _relLum(hex) {
+    const c = [1, 3, 5].map((i) => {
+      const v = parseInt(hex.substr(i, 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function _contrastOk(fg, bg) {
+    const l1 = _relLum(fg), l2 = _relLum(bg);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05) >= 3.0;
+  }
 
   function applyAccentColor(hex, save) {
     const v = typeof hex === "string" ? hex.trim() : "";
@@ -374,21 +388,25 @@ async def render_text_to_image(text: str):
       const dark = (root.getAttribute("data-theme") || "light") === "dark";
       const tinted = dark ? {
         "--m3-sys-color-primary": v,
-        "--m3-sys-color-primary-container": mixHex(v, "#201800", 0.45),
-        "--m3-sys-color-surface": mixHex(v, "#131315", 0.12),
-        "--m3-sys-color-surface-container": mixHex(v, "#1C1D22", 0.16),
-        "--m3-sys-color-surface-container-high": mixHex(v, "#24252C", 0.16),
-        "--m3-sys-color-surface-container-highest": mixHex(v, "#2E3038", 0.16),
+        "--m3-sys-color-primary-container": mixHex(v, "#1B2C42", 0.45),
+        "--m3-sys-color-surface": mixHex(v, "#111418", 0.12),
+        "--m3-sys-color-surface-container": mixHex(v, "#1A1F26", 0.16),
+        "--m3-sys-color-surface-container-high": mixHex(v, "#232A33", 0.16),
+        "--m3-sys-color-surface-container-highest": mixHex(v, "#2C343F", 0.16),
       } : {
         "--m3-sys-color-primary": v,
-        "--m3-sys-color-primary-container": mixHex(v, "#FFF8EE", 0.25),
-        "--m3-sys-color-surface": mixHex(v, "#F8F5EE", 0.08),
-        "--m3-sys-color-surface-container": mixHex(v, "#F1ECE3", 0.12),
-        "--m3-sys-color-surface-container-highest": mixHex(v, "#E7E1D7", 0.12),
+        "--m3-sys-color-primary-container": mixHex(v, "#E4EAF2", 0.25),
+        "--m3-sys-color-surface": mixHex(v, "#F4F7FB", 0.08),
+        "--m3-sys-color-surface-container": mixHex(v, "#E8EDF4", 0.12),
+        "--m3-sys-color-surface-container-highest": mixHex(v, "#DFE6EF", 0.12),
       };
       for (const k in tinted) {
         try { root.style.setProperty(k, tinted[k]); } catch (e) {}
       }
+      try {
+        const segBg = dark ? tinted["--m3-sys-color-surface-container-high"] : "#FFFFFF";
+        root.style.setProperty("--m3-seg-ink", _contrastOk(v, segBg) ? v : (dark ? "#EAE6DF" : "#1E1B16"));
+      } catch (e) {}
     } else {
       for (const k of _ACCENT_VARS) {
         try { root.style.removeProperty(k); } catch (e) {}
@@ -410,8 +428,8 @@ async def render_text_to_image(text: str):
       } else {
         delete picker.dataset.custom;
         try {
-          const def = getComputedStyle(document.documentElement).getPropertyValue("--m3-sys-color-primary").trim() || "#7A5813";
-          picker.value = /^#[0-9a-fA-F]{6}$/.test(def) ? def : "#7A5813";
+          const def = getComputedStyle(document.documentElement).getPropertyValue("--m3-sys-color-primary").trim() || "#4A90D9";
+          picker.value = /^#[0-9a-fA-F]{6}$/.test(def) ? def : "#4A90D9";
         } catch (e) {}
       }
     }
@@ -2188,6 +2206,13 @@ async def render_text_to_image(text: str):
       _picker.addEventListener("input", () => applyAccentColor(_picker.value, false));
       _picker.addEventListener("change", () => applyAccentColor(_picker.value, true));
       _picker.addEventListener("dblclick", () => applyAccentColor("", true));
+    }
+    const _accentReset = document.getElementById("accentResetBtn");
+    if (_accentReset) {
+      _accentReset.addEventListener("click", () => {
+        applyAccentColor("", true);
+        showToast("已恢复默认主题色");
+      });
     }
     notifyReady();
 
