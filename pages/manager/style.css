@@ -114,26 +114,10 @@ body {
   gap: 16px;
 }
 
-.brand-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--m3-radius-medium);
-  background: var(--m3-sys-color-primary-container);
-  color: var(--m3-sys-color-on-primary-container);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .brand-text h1 {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.brand-text p {
-  font-size: 13px;
-  color: var(--m3-sys-color-outline);
 }
 
 .top-bar-actions {
