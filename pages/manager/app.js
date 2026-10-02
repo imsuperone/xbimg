@@ -823,7 +823,6 @@ async def render_text_to_image(text: str):
           : `${f.size_kb} KB`;
         const fnameSafe = escapeHtml(f.name);
         row.innerHTML =
-          `<span class="font-file-icon">🔤</span>` +
           `<span class="fname" title="${fnameSafe}">${fnameSafe}</span>` +
           `<span class="fsize">${sizeTxt}${f.usable ? "" : "（异常）"}</span>` +
           `<button type="button" class="font-file-del font-del-btn" data-fname="${fnameSafe}" title="删除该字体">删除</button>`;
@@ -1059,7 +1058,7 @@ async def render_text_to_image(text: str):
         return;
       }
       const changed = res.changed || [];
-      let html = `<div class="preset-update-title">🎨 检测到官方词库有更新（${changed.length} 个方案不一致），是否覆盖本地？</div>`;
+      let html = `<div class="preset-update-title">检测到官方词库有更新（${changed.length} 个方案不一致），是否覆盖本地？</div>`;
       html += `<div class="preset-update-list">`;
       changed.forEach((c) => {
         const sample = (c.added_sample || []).slice(0, 5).join("、");
@@ -1117,7 +1116,7 @@ async def render_text_to_image(text: str):
       row.className="selected-group-card";
       row.innerHTML=
         `<div class="sg-card-head">` +
-        `  <span class="sg-name" title="${escapeHtml(gname)}">👥 ${escapeHtml(gname)} <span style="opacity:0.6; font-size:11px">(${gid})</span></span>` +
+        `  <span class="sg-name" title="${escapeHtml(gname)}">${escapeHtml(gname)} <span style="opacity:0.6; font-size:11px">(${gid})</span></span>` +
         `  <div class="sg-head-actions">` +
         `    <span class="sg-val" data-gid="${escapeHtml(gid)}">${hasCustomScale ? sc + "%" : sc + "% (全局)"}</span>` +
         `    <button type="button" class="sg-reset-btn" data-gid="${escapeHtml(gid)}" title="恢复此群全部设置至全局默认">恢复默认</button>` +
@@ -1227,7 +1226,7 @@ async def render_text_to_image(text: str):
         } else {
           btns = `<button type="button" class="m3-btn primary-btn emoji-dl-btn" data-emoji-dl="${p.id}" style="padding:4px 12px; font-size:12px;">下载</button>`;
         }
-        row.innerHTML=`<span class="font-file-icon">${p.id==="ios"?"🍎":p.id==="android"?"🤖":"🪟"}</span><span class="fname">${escapeHtml(p.name)}</span><span class="fsize">${escapeHtml(p.desc)} · ${storageTxt}</span><span class="curated-badge ${bcls}">${badge}</span>${btns}`;
+        row.innerHTML=`<span class="fname">${escapeHtml(p.name)}</span><span class="fsize">${escapeHtml(p.desc)} · ${storageTxt}</span><span class="curated-badge ${bcls}">${badge}</span>${btns}`;
         box.appendChild(row);
       });
     }catch(e){
@@ -1429,7 +1428,6 @@ async def render_text_to_image(text: str):
       chip.className = `group-select-chip ${isSelected ? "selected" : ""}`;
       chip.setAttribute("data-gid", g.gid);
       chip.innerHTML = `
-        <span>👥</span>
         <span>${escapeHtml(g.group_name || g.gid)}</span>
         <span style="opacity: 0.6; font-size: 11px;">(${g.gid})</span>
       `;
@@ -1881,7 +1879,7 @@ async def render_text_to_image(text: str):
             showToast("正在更新词库，请稍候…");
             const res = await api.post("presets/apply_update", { ids: [pid] });
             if (res && res.ok) {
-              await refreshAfterPresetUpdate(`✅ 已覆盖更新 ${pid}`);
+              await refreshAfterPresetUpdate(`已覆盖更新 ${pid}`);
             } else {
               showToast("更新失败：" + ((res && res.error) || "未知"));
             }
@@ -1901,7 +1899,7 @@ async def render_text_to_image(text: str):
             showToast("正在更新词库，请稍候…");
             const res = await api.post("presets/apply_update", {});
             if (res && res.ok) {
-              await refreshAfterPresetUpdate("✅ 官方词库已全部同步");
+              await refreshAfterPresetUpdate("官方词库已全部同步");
             } else {
               showToast("更新失败：" + ((res && res.error) || "未知"));
             }
@@ -1919,7 +1917,7 @@ async def render_text_to_image(text: str):
           try {
             const res = await api.post("presets/dismiss_update", {});
             if (res && res.ok) {
-              await refreshAfterPresetUpdate("✅ 已保留本地词库");
+              await refreshAfterPresetUpdate("已保留本地词库");
             } else {
               showToast("操作失败：" + ((res && res.error) || "未知"));
             }
@@ -2183,14 +2181,23 @@ async def render_text_to_image(text: str):
     try {
       const tag = document.querySelector(".version-tag");
       if (!tag) return;
-      const local = (tag.textContent || "").trim();
+      const local = String(tag.dataset.ver || "").trim().replace(/^v/i, "");
+      if (!local) return;
       fetch("https://raw.githubusercontent.com/imsuperone/xbimg/main/metadata.yaml", { cache: "no-store" })
         .then((r) => (r && r.ok ? r.text() : Promise.reject(new Error("bad response"))))
         .then((t) => {
-          const m = /(?:^|\n)version:\s*([0-9]+(?:\.[0-9]+)*)/.exec(t || "");
-          if (m && _verCmp(m[1], local) > 0) tag.textContent = "检测更新 v" + m[1];
+          const m = /version:\s*["']?v?([0-9]+(?:\.[0-9]+)*)/i.exec(t || "");
+          if (m && _verCmp(m[1], local) > 0) {
+            const remote = String(m[1]).replace(/^v/i, "");
+            tag.textContent = "检测到更新 " + remote + "  当前版本号 " + local;
+          } else {
+            tag.textContent = local;
+          }
         })
-        .catch((e) => console.warn("[msg2img] update check skipped:", e));
+        .catch((e) => {
+          tag.textContent = local;
+          console.warn("[msg2img] update check skipped:", e);
+        });
     } catch (e) {
       console.warn("[msg2img] update check error:", e);
     }
