@@ -923,6 +923,7 @@ body {
 .curated-font-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px 14px;
   background: var(--m3-sys-color-surface-container);
@@ -937,7 +938,7 @@ body {
 
 .curated-info {
   flex: 1;
-  min-width: 0;
+  min-width: 150px;
   display: flex;
   flex-direction: column;
 }
@@ -1183,9 +1184,6 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
     padding: 12px 16px;
     gap: 12px;
     margin-bottom: 16px;
-  }
-  .brand-text h1 {
-    font-size: 17px;
   }
   .top-bar-actions {
     gap: 8px;
