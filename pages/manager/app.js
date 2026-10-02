@@ -173,15 +173,15 @@
 
   // ---- 预设文案选项库 ----
   const PRESET_TEMPLATES = {
-    normal: `# 欢迎使用 AstrBot 消息转图助手
-这是一个高颜值的消息转图插件示例！
-- 支持 iOS 与 Android 16 双重风格
-- 背景随机散落闪烁小星星
-- 智能文本折行与美观排版
+    normal: `# 欢迎使用消息转图助手
+本模板用于演示消息转图片的排版效果。
+- 支持 iOS 与 Android 16 两种样式
+- 背景随机分布闪烁星芒
+- 智能折行与美观排版
 
 > 科技让生活更美好，AI 让交互更有温度。
 
-祝您使用愉快！✨`,
+祝您使用愉快。`,
 
     code: `### 🐍 Python 快速示例
 以下是消息转图核心处理逻辑：
@@ -194,20 +194,20 @@ async def render_text_to_image(text: str):
 
 支持清晰的代码高亮与等宽字体排版。`,
 
-    mosaic: `# 敏感内容半遮蔽演示
-这是前半段合规安全的消息内容，可以正常阅览。
-这里详细记录了正常的知识与交流事项。
+    mosaic: `# 敏感内容半字遮蔽演示
+这是前半段合规的消息内容，可以正常阅览。
+这里记录了正常的知识与交流事项。
 
-⚠️ 下半段触发了违规敏感词【赌博、诈骗】，系统将自动执行打一半马赛克处理！
+⚠️ 下半段触发了违规敏感词【赌博、诈骗】，系统将自动实施半字遮蔽处理。
 请遵守群聊社区规范，共建绿色网络环境。`,
 
-    link: `# 网址链接转图测试
-更多详细信息欢迎点击下方链接查看：
+    link: `# 链接转换测试
+更多详细信息欢迎通过以下链接查看：
 - AstrBot 官方文档：https://astrbot.app
 - NapCat 核心仓库：https://github.com/NapCatQQ/NapCatQQ
 - 项目仓库主页：https://github.com/imsuperone/xbimg
 
-可根据设置选择是转图还是保留可点击纯文本。`,
+可根据设置选择转为图片或保留可点击纯文本。`,
   };
 
   // ---- Toast 浮窗提示（彻底防重放） ----
@@ -340,7 +340,7 @@ async def render_text_to_image(text: str):
       if (picker.dataset.custom) applyAccentColor(picker.value, false);
       else applyAccentColor("", false);
     }
-    showToast(`管理台界面已切换为${next === "dark" ? "深色暗黑" : "浅色明亮"}模式`);
+    showToast(`管理台界面已切换为${next === "dark" ? "深色" : "浅色"}模式`);
   }
 
   function initTheme() {
@@ -489,7 +489,7 @@ async def render_text_to_image(text: str):
       }
     } catch (e) {
       console.warn("[msg2img] 获取配置回退或失败:", e);
-      showToast("连接后端失败，显示默认配置");
+      showToast("与后端连接失败，已载入默认配置");
     }
   }
 
@@ -723,13 +723,13 @@ async def render_text_to_image(text: str):
     const hint = document.getElementById("autoSaveHint");
     const payload = collectConfigFromUI();
     try {
-      if (hint) hint.textContent = "● 保存中…";
+      if (hint) hint.textContent = "● 正在保存…";
       const res = await api.post("config", payload);
       if (res && res.ok) {
-        if (!silent) showToast("✅ 已自动保存并生效");
+        if (!silent) showToast("配置已自动保存并生效");
         if (hint) {
-          hint.textContent = "● 已自动保存 · 修改即生效";
-          setTimeout(() => { if (hint) hint.textContent = "● 自动保存已开启 · 修改即生效"; }, 1800);
+          hint.textContent = "● 已自动保存，修改即时生效";
+          setTimeout(() => { if (hint) hint.textContent = "自动保存已启用，修改即时生效"; }, 1800);
         }
         currentConfig = payload;
       } else {
@@ -737,7 +737,7 @@ async def render_text_to_image(text: str):
       }
     } catch (e) {
       if (hint) hint.textContent = "● 保存失败，请重试";
-      if (!silent) showToast("保存提示: " + e.message);
+      if (!silent) showToast("保存提示：" + e.message);
     } finally {
       _isSaving = false;
       if (_saveDirty) { _saveDirty = false; saveConfig(silent); }
@@ -770,29 +770,29 @@ async def render_text_to_image(text: str):
       const bold = (f.bold || "").split(/[/\\]/).pop() || "无";
       if (f.has_cjk) {
         if (pill) {
-          pill.textContent = `✅ 中文正常 (${base})`;
+          pill.textContent = `中文可用（${base}）`;
           pill.style.background = "var(--m3-status-green-bg)";
           pill.style.color = "var(--m3-status-green)";
         }
       } else {
         if (pill) {
-          pill.textContent = "❌ 缺中文字体 (中文将显示方框)";
+          pill.textContent = "缺少中文字体（中文将显示为方框）";
           pill.style.background = "var(--m3-status-amber-bg)";
           pill.style.color = "var(--m3-status-amber)";
         }
-        if (!silent) showToast("缺中文字体，请先选择字体下载");
+        if (!silent) showToast("未检出中文字体，请先下载字体");
       }
       if (emojiHint) {
         const kb = f.emoji_storage_kb || 0;
         const txt = kb >= 1024 ? (kb/1024).toFixed(1)+" MB" : kb+" KB";
         const style = f.emoji_style || "none";
         const label = style==="none" ? "未启用" : style;
-        emojiHint.textContent = `占用 ${txt} · 当前 ${label}`;
+        emojiHint.textContent = `已占用 ${txt}，当前为${label}`;
       }
       return res;
     } catch (e) {
       if (pill) pill.textContent = "字体状态未知";
-      if (!silent) showToast("查询字体状态: " + e.message);
+      if (!silent) showToast("查询字体状态失败：" + e.message);
       return null;
     }
   }
@@ -807,7 +807,7 @@ async def render_text_to_image(text: str):
       const res = await api.get("fonts/files");
       const files = (res && res.files) || [];
       if (!files.length) {
-        if (box) box.innerHTML = `<div class="font-files-empty">目录为空（系统字体够用，或尚未下载）</div>`;
+        if (box) box.innerHTML = `<div class="font-files-empty">目录为空（系统字体可用，或尚未下载）</div>`;
         if (sel) {
           sel.innerHTML = `<option value="">-- 暂无已安装字体 --</option>`;
         }
@@ -825,7 +825,7 @@ async def render_text_to_image(text: str):
         row.innerHTML =
           `<span class="font-file-icon">🔤</span>` +
           `<span class="fname" title="${fnameSafe}">${fnameSafe}</span>` +
-          `<span class="fsize">${sizeTxt}${f.usable ? "" : " · 异常"}</span>` +
+          `<span class="fsize">${sizeTxt}${f.usable ? "" : "（异常）"}</span>` +
           `<button type="button" class="font-file-del font-del-btn" data-fname="${fnameSafe}" title="删除该字体">删除</button>`;
         box.appendChild(row);
         });
@@ -836,27 +836,27 @@ async def render_text_to_image(text: str):
         files.forEach((f) => {
           const opt = document.createElement("option");
           opt.value = f.name;
-          opt.textContent = `${f.name} (${f.size_kb >= 1024 ? (f.size_kb/1024).toFixed(1)+" MB" : f.size_kb+" KB"}${f.usable ? "" : " · 异常"})`;
+           opt.textContent = `${f.name} (${f.size_kb >= 1024 ? (f.size_kb/1024).toFixed(1)+" MB" : f.size_kb+" KB"}${f.usable ? "" : "（异常）"})`;
           if (cur && (cur === f.name || cur.endsWith("/"+f.name) || cur.endsWith("\\"+f.name))) opt.selected = true;
           sel.appendChild(opt);
         });
       }
       populateGroupFontSelects();
     } catch (e) {
-      if (box) box.innerHTML = `<div class="font-files-empty">读取失败: ${escapeHtml(e.message)}</div>`;
+      if (box) box.innerHTML = `<div class="font-files-empty">读取失败：${escapeHtml(e.message)}</div>`;
     }
   }
 
   async function applySelectedFont() {
     const sel = document.getElementById("fontSelectDropdown");
     if (!sel || !sel.value) {
-      showToast("请先选择一个已安装字体");
+      showToast("请先选择已安装的字体");
       return;
     }
     const fname = sel.value;
     // 直接通过配置切换：设为 custom 并指向该文件
     try {
-      showToast(`🔤 正在切换到 ${fname}…`);
+      showToast(`正在切换至 ${fname}，请稍候…`);
       // 复用保存逻辑：更新 UI 中的隐藏配置并触发保存
       const cfEl = document.getElementById("cfgCustomFont");
       if (cfEl) cfEl.value = fname;
@@ -873,7 +873,7 @@ async def render_text_to_image(text: str):
       // 触发预览刷新
       setTimeout(() => triggerPreview(), 400);
     } catch (e) {
-      showToast("切换失败: " + e.message);
+      showToast("切换失败：" + e.message);
     }
   }
 
@@ -881,15 +881,15 @@ async def render_text_to_image(text: str):
     const input = document.getElementById("cfgCustomFontUrl");
     const url = input ? input.value.trim() : "";
     if (!url) {
-      showToast("请先粘贴字体直链");
+      showToast("请先填写字体直链地址");
       return;
     }
     if (!/\.(ttf|ttc|otf)(\?.*)?$/i.test(url)) {
-      showToast("直链需指向 .ttf/.ttc/.otf 文件");
+      showToast("直链地址须指向 .ttf / .ttc / .otf 文件");
       return;
     }
     try {
-      showToast("⬇️ 正在下载字体，请稍候…");
+      showToast("正在下载字体，请稍候…");
       // S-2: 文件名可从直链直接推导，先落定 UI 状态再单次保存；下载接口从服务端配置读取 URL
       const fname = url.split("?")[0].split("/").pop();
       const cfEl = document.getElementById("cfgCustomFont");
@@ -903,18 +903,18 @@ async def render_text_to_image(text: str):
       currentConfig.custom_font_url = url;
       const res = await api.post("fonts/download");
       if (res && res.downloaded && res.downloaded.length) {
-        showToast(`✅ 下载完成: ${res.downloaded.join(", ")}`);
+          showToast(`下载完成：${res.downloaded.join(", ")}`);
       } else if (res && res.ok) {
-        showToast("✅ 已就绪");
+          showToast("已就绪");
       } else {
-        showToast("下载提示: " + ((res && res.error) || "未知"));
+        showToast("下载提示：" + ((res && res.error) || "未知"));
       }
       await fetchFontStatus(true);
       await fetchFontFiles();
       await fetchCuratedFonts();
       setTimeout(() => triggerPreview(), 400);
     } catch (e) {
-      showToast("下载失败: " + e.message);
+      showToast("下载失败：" + e.message);
     }
   }
 
@@ -924,18 +924,18 @@ async def render_text_to_image(text: str):
     if (!(await uiConfirm(`确定删除字体「${name}」吗？`))) return;
     _deletingFont = name;
     try {
-      showToast(`正在删除 ${name}…`);
+      showToast(`正在删除 ${name}，请稍候…`);
       const res = await api.post("fonts/delete", { name });
       if (res && res.ok) {
-        showToast(res.fallback ? `🗑️ 已删除 ${name}，已自动切换为 ${res.fallback}` : `🗑️ 已删除 ${name}`);
+        showToast(res.fallback ? `已删除 ${name}，并自动切换为 ${res.fallback}` : `已删除 ${name}`);
       } else {
-        showToast("删除提示: " + ((res && res.error) || "未知错误"));
+        showToast("删除失败：" + ((res && res.error) || "未知错误"));
       }
       await fetchFontStatus(true);
       await fetchFontFiles();
       await fetchCuratedFonts();
     } catch (e) {
-      showToast("删除字体异常: " + e.message);
+      showToast("删除失败：" + e.message);
     } finally {
       _deletingFont = "";
     }
@@ -949,7 +949,7 @@ async def render_text_to_image(text: str):
       const res = await api.get("fonts/curated");
       const list = (res && res.curated) || [];
       if (!list.length) {
-        box.innerHTML = `<div class="font-files-empty">精选列表加载失败</div>`;
+        box.innerHTML = `<div class="font-files-empty">精选列表加载失败，请稍后重试</div>`;
         return;
       }
       box.innerHTML = "";
@@ -976,7 +976,7 @@ async def render_text_to_image(text: str):
         box.appendChild(row);
       });
     } catch (e) {
-      box.innerHTML = `<div class="font-files-empty">精选列表读取失败: ${escapeHtml(e.message)}</div>`;
+      box.innerHTML = `<div class="font-files-empty">精选列表读取失败：${escapeHtml(e.message)}</div>`;
     }
   }
 
@@ -1034,7 +1034,7 @@ async def render_text_to_image(text: str):
     document.querySelectorAll(".sg-kw").forEach((sel) => {
       const gid = sel.getAttribute("data-gid");
       const cur = (grpCfgs[gid] && grpCfgs[gid].keyword_preset) || "";
-      sel.innerHTML = `<option value="">跟随全局 (默认)</option>`;
+      sel.innerHTML = `<option value="">沿用全局设置（默认）</option>`;
       Object.keys(presets).forEach((k) => {
         const opt = document.createElement("option");
         opt.value = k;
@@ -1120,7 +1120,7 @@ async def render_text_to_image(text: str):
         `  <span class="sg-name" title="${escapeHtml(gname)}">👥 ${escapeHtml(gname)} <span style="opacity:0.6; font-size:11px">(${gid})</span></span>` +
         `  <div class="sg-head-actions">` +
         `    <span class="sg-val" data-gid="${escapeHtml(gid)}">${hasCustomScale ? sc + "%" : sc + "% (全局)"}</span>` +
-        `    <button type="button" class="sg-reset-btn" data-gid="${escapeHtml(gid)}" title="恢复此群全部设置至跟随全局默认">恢复默认</button>` +
+        `    <button type="button" class="sg-reset-btn" data-gid="${escapeHtml(gid)}" title="恢复此群全部设置至全局默认">恢复默认</button>` +
         `  </div>` +
         `</div>` +
         `<div class="sg-controls">` +
@@ -1134,7 +1134,7 @@ async def render_text_to_image(text: str):
         `  <div class="sg-item">` +
         `    <label>视觉风格</label>` +
         `    <select class="sg-select sg-style" data-gid="${escapeHtml(gid)}">` +
-        `      <option value=""${!curStyle ? " selected" : ""}>跟随全局 (${globalStyleName})</option>` +
+        `      <option value=""${!curStyle ? " selected" : ""}>沿用全局设置（${globalStyleName}）</option>` +
         `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>iOS 磨砂玻璃</option>` +
         `      <option value="android16"${curStyle === "android16" ? " selected" : ""}>Android 16 M3</option>` +
         `    </select>` +
@@ -1142,7 +1142,7 @@ async def render_text_to_image(text: str):
         `  <div class="sg-item">` +
         `    <label>配色主题</label>` +
         `    <select class="sg-select sg-theme" data-gid="${escapeHtml(gid)}">` +
-        `      <option value=""${!curTheme ? " selected" : ""}>跟随全局 (${globalThemeName})</option>` +
+        `      <option value=""${!curTheme ? " selected" : ""}>沿用全局设置（${globalThemeName}）</option>` +
         `      <option value="light"${curTheme === "light" ? " selected" : ""}>浅色明亮</option>` +
         `      <option value="dark"${curTheme === "dark" ? " selected" : ""}>深色暗黑</option>` +
         `    </select>` +
@@ -1175,7 +1175,7 @@ async def render_text_to_image(text: str):
     document.querySelectorAll(".sg-font").forEach(sel=>{
       const gid = sel.getAttribute("data-gid");
       const cur = (grpCfgs[gid] && grpCfgs[gid].custom_font_path) || "";
-      sel.innerHTML = `<option value="">全局默认</option>`;
+      sel.innerHTML = `<option value="">沿用全局设置</option>`;
       opts.forEach(o=>{
         if(!o.value) return;
         const opt=document.createElement("option");
@@ -1210,7 +1210,7 @@ async def render_text_to_image(text: str):
       // 总占用
       const head=document.createElement("div");
       head.className="font-files-empty";
-      head.textContent=`当前应用：${curStyle==="none"?"未启用":curStyle} · 总占用 ${totalTxt}`;
+      head.textContent=`当前：${curStyle==="none"?"未启用":curStyle}，总占用 ${totalTxt}`;
       box.appendChild(head);
       packs.forEach(p=>{
         const isActive=curStyle===p.id;
@@ -1219,7 +1219,7 @@ async def render_text_to_image(text: str):
         const storageTxt=storageKb>=1024?(storageKb/1024).toFixed(1)+" MB":storageKb+" KB";
         const row=document.createElement("div");
         row.className=`font-file-row ${isActive?"active":""}`;
-        const badge=isActive?"✓ 使用中":installed?"已下载":"未下载";
+        const badge=isActive?"使用中":installed?"已下载":"未下载";
         const bcls=isActive?"badge-active":installed?"badge-ready":"badge-idle";
         let btns = "";
         if (installed) {
@@ -1256,14 +1256,14 @@ async def render_text_to_image(text: str):
       if (!s) continue;
       if (s.status === "done") return s;
       if (s.status === "error" || s.status === "cancelled") {
-        throw new Error(s.detail || s.error || "下载失败");
+        throw new Error(s.detail || s.error || "下载未完成");
       }
     }
-    throw new Error("下载超时，任务仍在后台继续，可稍后在列表中查看是否已完成");
+    throw new Error("下载超时，任务仍在后台继续，稍后可在列表中查看是否完成");
   }
   async function downloadEmojiPack(style){
     try{
-      showToast("⬇️ 正在后台下载 Emoji "+style+"，完成后自动生效…");
+      showToast("正在后台下载表情符号 "+style+"，完成后将自动生效…");
       let res = null, asyncOk = false;
       try {
         // 新版后端：立即返回任务，走轮询（不受面板超时限制）
@@ -1281,17 +1281,17 @@ async def render_text_to_image(text: str):
         res = await api.post("emoji/download", {style});
       }
       if(res&&res.ok) {
-        showToast("✅ Emoji 下载完成，已可选中");
+          showToast("表情符号下载完成，可进行选择");
         setSegmentedValue("segEmojiStyle", style);
         triggerAutoSave();
         triggerPreview();
       } else {
-        showToast("下载提示: "+((res&&res.error)||"未知"));
+        showToast("下载提示："+((res&&res.error)||"未知"));
       }
       try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
-    }catch(e){ showToast("下载失败: "+e.message, 8000); }
+    }catch(e){ showToast("下载失败："+e.message, 8000); }
   }
   // POST 失败自动重试一次（面板桥接偶发抖动，删除本身幂等可重入）
   async function apiPostRetryOnce(endpoint, data) {
@@ -1304,12 +1304,12 @@ async def render_text_to_image(text: str):
   }
   async function deleteEmojiPack(style){
     if(!style) return;
-    if(!(await uiConfirm(`确定删除 Emoji 样式 ${style} 的下载缓存吗？`))) return;
+    if(!(await uiConfirm(`确定删除表情符号样式 ${style} 的下载缓存吗？`))) return;
     try{
-      showToast("正在删除 Emoji 缓存…");
+      showToast("正在删除表情符号缓存，请稍候…");
       const res=await apiPostRetryOnce("emoji/delete", {style});
       if(res&&res.ok) {
-        showToast("🗑️ 已删除 "+style);
+          showToast("已删除 "+style);
         // 如果当前选中的是被删样式，重置为 none
         if ((currentConfig.emoji_style || "none") === style) {
           setSegmentedValue("segEmojiStyle", "none");
@@ -1317,19 +1317,19 @@ async def render_text_to_image(text: str):
           triggerAutoSave();
         }
       }
-      else showToast("删除提示: "+((res&&res.error)||"未知"));
+      else showToast("删除提示："+((res&&res.error)||"未知"));
       // 以服务端为准全量同步一次：删除可能附带切回 none，内存与开关不能靠猜
       try { await loadData(); } catch(e) {}
       await fetchEmojiPacks();
       await fetchFontStatus(true);
-    }catch(e){ showToast("删除失败: "+e.message, 8000); }
+    }catch(e){ showToast("删除失败："+e.message, 8000); }
   }
   let _installingCurated = "";
   async function installCuratedFont(cid) {
     if (!cid || _installingCurated) return;
     _installingCurated = cid;
     try {
-      showToast("⬇️ 正在后台下载字体，请稍候…");
+      showToast("正在后台下载字体，请稍候…");
       let res = null, asyncOk = false;
       try {
         res = await api.post("fonts/curated_install_async", { id: cid });
@@ -1347,18 +1347,18 @@ async def render_text_to_image(text: str):
       if (res && res.ok) {
         const dl = (res.downloaded || []).join("、");
         if (res.error) {
-          showToast(`⚠️ ${cid} 部分成功（${dl || "无新增文件"}），失败：${res.error}`);
+          showToast(`${cid} 部分下载成功（${dl || "无新增文件"}），失败原因：${res.error}`);
         } else {
-          showToast(`✅ ${cid} 已下载并切换生效`);
+          showToast(`${cid} 已下载并切换生效`);
         }
       } else {
-        showToast("下载提示: " + ((res && res.error) || "未知"));
+        showToast("下载提示：" + ((res && res.error) || "未知"));
       }
       await fetchFontStatus(true);
       await fetchFontFiles();
       await fetchCuratedFonts();
     } catch (e) {
-      showToast("下载字体: " + e.message);
+      showToast("下载字体失败：" + e.message);
     } finally {
       _installingCurated = "";
     }
@@ -1386,18 +1386,18 @@ async def render_text_to_image(text: str):
 
     try {
       if (btnEl) btnEl.disabled = true;
-      if (hintEl) hintEl.textContent = "正在拉取机器人所有群聊...";
+      if (hintEl) hintEl.textContent = "正在拉取机器人所在群聊…";
 
       let res = await fetchGroupsPayload();
 
       if (res && Array.isArray(res.groups)) {
         cachedGroups = res.groups;
         if (cachedGroups.length === 0) {
-          if (hintEl) hintEl.textContent = "未探测到群聊，已在后台自动监听新消息群";
-          showToast("暂未探测到群聊，发送群消息后即可自动识别");
+          if (hintEl) hintEl.textContent = "未检出群聊，已在后台自动监听新增群聊消息";
+          showToast("暂未检出群聊，产生群聊消息后将自动识别");
         } else {
-          if (hintEl) hintEl.textContent = `已获取 ${cachedGroups.length} 个群聊，点击直接勾选/取消勾选`;
-          showToast(`✅ 已获取到 ${cachedGroups.length} 个群聊`);
+          if (hintEl) hintEl.textContent = `已获取 ${cachedGroups.length} 个群聊，选择即可勾选或取消勾选`;
+          showToast(`已获取 ${cachedGroups.length} 个群聊`);
         }
         renderGroupChips(cachedGroups);
         if (boxEl) boxEl.style.display = "flex";
@@ -1406,7 +1406,7 @@ async def render_text_to_image(text: str):
       }
     } catch (e) {
       if (hintEl) hintEl.textContent = "拉取群聊失败: " + e.message;
-      showToast("拉取群聊: " + e.message);
+      showToast("拉取群聊失败：" + e.message);
     } finally {
       _isFetchingGroups = false;
       if (btnEl) btnEl.disabled = false;
@@ -1481,44 +1481,44 @@ async def render_text_to_image(text: str):
 
     if (mode === "all") {
       if (pill) {
-        pill.textContent = "🌐 全局生效 (所有群聊均会转图)";
+        pill.textContent = "全局生效（全部群聊均转换）";
         pill.style.background = "var(--m3-status-cyan-bg)";
         pill.style.color = "var(--m3-status-cyan)";
       }
       if (note) {
-        note.textContent = "✅ 当前已开启全群生效，机器人接收到任何群的文本回复均会自动转为美图。";
+        note.textContent = "当前已启用全群生效，机器人在各群聊中的文本回复将自动转为图片。";
         note.style.color = "var(--m3-status-green)";
       }
     } else if (mode === "blacklist") {
       if (pill) {
-        pill.textContent = `🚫 黑名单模式 (${list.length} 个群排除)`;
+        pill.textContent = `黑名单模式（已排除 ${list.length} 个群聊）`;
         pill.style.background = "var(--m3-status-amber-bg)";
         pill.style.color = "var(--m3-status-amber)";
       }
       if (note) {
-        note.textContent = `除黑名单中的 ${list.length} 个群外，其他群聊均会正常转图。`;
+        note.textContent = `除黑名单中的 ${list.length} 个群聊外，其余群聊均正常转换。`;
         note.style.color = "var(--m3-sys-color-outline)";
       }
     } else {
       // whitelist
       if (list.length === 0) {
         if (pill) {
-          pill.textContent = "🔒 群聊未开启 (当前仅私聊有效)";
+          pill.textContent = "群聊未启用（当前仅私聊生效）";
           pill.style.background = "var(--m3-status-amber-bg)";
           pill.style.color = "var(--m3-status-amber)";
         }
         if (note) {
-          note.textContent = "⚠️ 当前白名单未添加任何群号！机器人所有群聊回复均保持纯文本，不会转为图片。请点击上方按钮拉取并勾选群聊！";
+          note.textContent = "当前白名单尚未填写群号，群聊回复将保持纯文本，不执行图片转换。请通过上方按钮拉取并勾选群聊。";
           note.style.color = "var(--m3-status-amber)";
         }
       } else {
         if (pill) {
-          pill.textContent = `✅ 白名单已启用 (已指定 ${list.length} 个生效群)`;
+          pill.textContent = `白名单已启用（已指定 ${list.length} 个生效群聊）`;
           pill.style.background = "var(--m3-status-green-bg)";
           pill.style.color = "var(--m3-status-green)";
         }
         if (note) {
-          note.textContent = `✅ 已指定 ${list.length} 个群聊生效：[${list.join(", ")}]，这些群的机器人文本将自动渲染为图片。`;
+          note.textContent = `已指定 ${list.length} 个群聊生效：[${list.join(", ")}]，上述群聊的机器人文本将自动渲染为图片。`;
           note.style.color = "var(--m3-status-green)";
         }
       }
@@ -1570,7 +1570,7 @@ async def render_text_to_image(text: str):
           chip.classList.remove("selected");
         }
       });
-      showToast(`已载入「${tplKey}」文案，请点击实时生成预览`);
+      showToast(`已载入「${tplKey}」模板，请选择生成预览`);
     }
   }
 
@@ -1640,14 +1640,14 @@ async def render_text_to_image(text: str):
         }
         if (metaBox) metaBox.style.display = "flex";
         if (dimEl) dimEl.textContent = `${res.width} × ${res.height}`;
-        if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${mosaicMode === "full" ? " (全打码)" : mosaicMode !== "none" ? " (半马赛克)" : ""}`;
+        if (styleEl) styleEl.textContent = `${styleMode.toUpperCase()}${themeMode === "dark" ? " (深色)" : ""}${mosaicMode === "full" ? "（全文遮蔽）" : mosaicMode !== "none" ? "（半字遮蔽）" : ""}`;
         if (latEl) latEl.textContent = res.render_ms != null ? formatMs(res.render_ms) : `${elapsed}ms`;
-        if (announce) showToast("✨ 预览图片生成成功");
+        if (announce) showToast("预览图片已生成");
       } else {
         throw new Error((res && res.error) || "后端未返回图片数据");
       }
     } catch (e) {
-      showToast("生成预览图: " + e.message);
+      showToast("生成预览图失败：" + e.message);
     } finally {
       _isPreviewing = false;
       if (spinner) spinner.style.display = "none";
@@ -1700,7 +1700,7 @@ async def render_text_to_image(text: str):
           currentConfig.group_configs = cfgs;
           renderSelectedGroupsFontList();
           triggerAutoSave();
-          showToast(`已将群 ${gid} 恢复为跟随全局默认设置`);
+          showToast(`群 ${gid} 已恢复为沿用全局设置`);
         }
         return;
       }
@@ -1718,7 +1718,7 @@ async def render_text_to_image(text: str):
           }
           renderSelectedGroupsFontList();
           triggerAutoSave();
-          showToast(`已重置群 ${gid} 字体大小至跟随全局`);
+          showToast(`群 ${gid} 的字体大小已恢复为沿用全局设置`);
         }
         return;
       }
@@ -1733,18 +1733,18 @@ async def render_text_to_image(text: str):
           (async () => {
             if (!(await uiConfirm(`确定删除该精选字体文件吗？`))) return;
             try {
-              showToast("正在删除字体包…");
+              showToast("正在删除字体包，请稍候…");
               const res = await api.post("fonts/curated_delete", { id: cid });
               if (res && res.ok) {
-                showToast(res.fallback ? `🗑️ 已删除字体包，已自动切换为 ${res.fallback}` : "🗑️ 已删除字体包");
+                showToast(res.fallback ? `已删除字体包，并自动切换为 ${res.fallback}` : "已删除字体包");
               } else {
-                showToast("删除失败: " + ((res && res.error) || "未知"));
+                showToast("删除失败：" + ((res && res.error) || "未知"));
               }
               await fetchFontStatus(true);
               await fetchFontFiles();
               await fetchCuratedFonts();
             } catch(err) {
-              showToast("删除异常: " + err.message);
+              showToast("删除失败：" + err.message);
             }
           })();
         }
@@ -1783,7 +1783,7 @@ async def render_text_to_image(text: str):
         e.preventDefault();
         (async () => {
           try {
-            showToast("正在检测下载链路…");
+            showToast("正在检测下载链路，请稍候…");
             const res = await api.get("emoji/cdn_check");
             const probes = (res && res.probes) || {};
             const parts = Object.keys(probes).map((h) => {
@@ -1791,9 +1791,9 @@ async def render_text_to_image(text: str):
               const short = h.replace(".githubusercontent.com", "").replace("jsdelivr.net", "jsd");
               return p.ok ? `${short}:${p.ms}ms` : `${short}:不通`;
             });
-            showToast(parts.length ? ("🌐 " + parts.join(" · ")) : "无检测结果", 6000);
+            showToast(parts.length ? parts.join("、") : "未返回检测结果", 6000);
           } catch(err) {
-            showToast("检测失败: " + err.message);
+            showToast("检测失败：" + err.message);
           }
         })();
         return;
@@ -1803,23 +1803,23 @@ async def render_text_to_image(text: str):
       if (e.target.closest("#clearAllEmojiBtn")) {
         e.preventDefault();
         (async () => {
-          if (!(await uiConfirm("确定清空全部 Emoji 资源与下载缓存吗？", "确定清空"))) return;
+          if (!(await uiConfirm("确定清空全部表情符号资源与下载缓存吗？", "确定清空"))) return;
           try {
-            showToast("正在清空全部 Emoji 缓存…");
+            showToast("正在清空全部表情符号缓存，请稍候…");
             const res = await apiPostRetryOnce("emoji/delete", { style: "all" });
             if (res && res.ok) {
-              showToast("🗑️ 已清空全部 Emoji 缓存");
+              showToast("已清空全部表情符号缓存");
               setSegmentedValue("segEmojiStyle", "none");
               currentConfig.emoji_style = "none";
               triggerAutoSave();
             } else {
-              showToast("清空提示: " + ((res && res.error) || "未知"));
+              showToast("清空提示：" + ((res && res.error) || "未知"));
             }
             try { await loadData(); } catch(err) {}
             await fetchEmojiPacks();
             await fetchFontStatus(true);
           } catch(err) {
-            showToast("清空异常: " + err.message, 8000);
+            showToast("清空失败：" + err.message, 8000);
           }
         })();
         return;
@@ -1839,7 +1839,7 @@ async def render_text_to_image(text: str):
             populateKeywordPresets();
             renderSelectedGroupsFontList();
             triggerAutoSave();
-            showToast(`✅ 已新建词库方案：${name}`);
+            showToast(`已新建词库方案：${name}`);
           }
         })();
         return;
@@ -1851,7 +1851,7 @@ async def render_text_to_image(text: str):
         const sel = document.getElementById("keywordPresetSelect");
         const cur = sel ? sel.value : "default";
         if (cur === "default") {
-          showToast("⚠️ 默认标准词库不可删除");
+          showToast("默认标准词库不可删除");
           return;
         }
         (async () => {
@@ -1863,7 +1863,7 @@ async def render_text_to_image(text: str):
             populateKeywordPresets();
             renderSelectedGroupsFontList();
             triggerAutoSave();
-            showToast("🗑️ 已删除该词库方案");
+            showToast("已删除该词库方案");
           }
         })();
         return;
@@ -1878,15 +1878,15 @@ async def render_text_to_image(text: str):
         (async () => {
           if (!(await uiConfirm(`用官方词库覆盖本地「${pid}」方案吗？本地独有词将被替换。`))) return;
           try {
-            showToast("正在覆盖更新词库…");
+            showToast("正在更新词库，请稍候…");
             const res = await api.post("presets/apply_update", { ids: [pid] });
             if (res && res.ok) {
               await refreshAfterPresetUpdate(`✅ 已覆盖更新 ${pid}`);
             } else {
-              showToast("覆盖失败: " + ((res && res.error) || "未知"));
+              showToast("更新失败：" + ((res && res.error) || "未知"));
             }
           } catch (err) {
-            showToast("覆盖异常: " + err.message);
+            showToast("更新失败：" + err.message);
           }
         })();
         return;
@@ -1898,15 +1898,15 @@ async def render_text_to_image(text: str):
         (async () => {
           if (!(await uiConfirm("用官方词库覆盖本地全部内置方案吗？本地独有词将被替换，自建方案不受影响。", "全部覆盖"))) return;
           try {
-            showToast("正在覆盖更新词库…");
+            showToast("正在更新词库，请稍候…");
             const res = await api.post("presets/apply_update", {});
             if (res && res.ok) {
               await refreshAfterPresetUpdate("✅ 官方词库已全部同步");
             } else {
-              showToast("覆盖失败: " + ((res && res.error) || "未知"));
+              showToast("更新失败：" + ((res && res.error) || "未知"));
             }
           } catch (err) {
-            showToast("覆盖异常: " + err.message);
+            showToast("更新失败：" + err.message);
           }
         })();
         return;
@@ -1921,10 +1921,10 @@ async def render_text_to_image(text: str):
             if (res && res.ok) {
               await refreshAfterPresetUpdate("✅ 已保留本地词库");
             } else {
-              showToast("操作失败: " + ((res && res.error) || "未知"));
+              showToast("操作失败：" + ((res && res.error) || "未知"));
             }
           } catch (err) {
-            showToast("操作异常: " + err.message);
+            showToast("操作失败：" + err.message);
           }
         })();
         return;
@@ -1964,7 +1964,7 @@ async def render_text_to_image(text: str):
             if (val !== "none") {
               const row = document.querySelector(`#emojiPacksBox [data-emoji-del="${val}"]`);
               if (!row) {
-                showToast(`⚠️「${val}」尚未下载，请先点击下方列表中的「下载」按钮`);
+                showToast(`「${val}」尚未下载，请先通过下方列表下载`);
                 const prev = currentConfig.emoji_style || "none";
                 parent.querySelectorAll(".seg-item").forEach(item => {
                   if (item.getAttribute("data-val") === prev) item.classList.add("active");
@@ -2196,6 +2196,191 @@ async def render_text_to_image(text: str):
     }
   }
 
+  function accentHexToHsv(hex) {
+    const r = parseInt(hex.substr(1, 2), 16) / 255;
+    const g = parseInt(hex.substr(3, 2), 16) / 255;
+    const b = parseInt(hex.substr(5, 2), 16) / 255;
+    const mx = Math.max(r, g, b);
+    const mn = Math.min(r, g, b);
+    const d = mx - mn;
+    let h = 0;
+    if (d !== 0) {
+      if (mx === r) { h = ((g - b) / d) % 6; }
+      else if (mx === g) { h = (b - r) / d + 2; }
+      else { h = (r - g) / d + 4; }
+      h = h * 60;
+      if (h < 0) { h = h + 360; }
+    }
+    const s = mx === 0 ? 0 : d / mx;
+    return { h: h, s: s, v: mx };
+  }
+
+  function accentHsvToHex(h, s, v) {
+    const c = v * s;
+    const hh = h / 60;
+    const x = c * (1 - Math.abs((hh % 2) - 1));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hh >= 0 && hh < 1) { r = c; g = x; b = 0; }
+    else if (hh >= 1 && hh < 2) { r = x; g = c; b = 0; }
+    else if (hh >= 2 && hh < 3) { r = 0; g = c; b = x; }
+    else if (hh >= 3 && hh < 4) { r = 0; g = x; b = c; }
+    else if (hh >= 4 && hh < 5) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    const m = v - c;
+    const to2 = (n) => Math.round((n + m) * 255).toString(16).padStart(2, "0");
+    return ("#" + to2(r) + to2(g) + to2(b)).toUpperCase();
+  }
+
+  function initAccentPopover() {
+    const btn = document.getElementById("accentPickerBtn");
+    const picker = document.getElementById("accentPicker");
+    const pop = document.getElementById("accentPopover");
+    const sv = document.getElementById("accentSv");
+    const svDot = document.getElementById("accentSvDot");
+    const hue = document.getElementById("accentHue");
+    const hueDot = document.getElementById("accentHueDot");
+    const hexInput = document.getElementById("accentHex");
+    const cur = document.getElementById("accentCurrent");
+    if (!btn || !picker || !pop || !sv || !svDot || !hue || !hueDot || !hexInput || !cur) { return; }
+    let hsv = { h: 210, s: 0.65, v: 0.85 };
+    const validHex = (v) => /^#[0-9a-fA-F]{6}$/.test(v);
+    function readStartHex() {
+      const pv = (picker.value || "").trim();
+      if (validHex(pv)) { return pv; }
+      try {
+        const cs = getComputedStyle(document.documentElement).getPropertyValue("--m3-sys-color-primary").trim();
+        if (validHex(cs)) { return cs; }
+      } catch (e) { e; }
+      return "#4A90D9";
+    }
+    function paint() {
+      sv.style.background = "linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,transparent),hsl(" + Math.round(hsv.h) + ",100%,50%)";
+      svDot.style.left = (hsv.s * 100) + "%";
+      svDot.style.top = ((1 - hsv.v) * 100) + "%";
+      hueDot.style.left = (hsv.h / 360 * 100) + "%";
+      const hex = accentHsvToHex(hsv.h, hsv.s, hsv.v);
+      hexInput.value = hex;
+      cur.style.background = hex;
+    }
+    function pushLive() {
+      const hex = accentHsvToHex(hsv.h, hsv.s, hsv.v);
+      picker.value = hex;
+      picker.dispatchEvent(new Event("input"));
+      paint();
+    }
+    function place() {
+      pop.hidden = false;
+      const w = pop.offsetWidth || 240;
+      const h = pop.offsetHeight || 300;
+      const vw = window.innerWidth || 360;
+      const vh = window.innerHeight || 600;
+      const r = btn.getBoundingClientRect();
+      let left = r.left + 20 - w / 2;
+      left = Math.max(8, Math.min(left, vw - w - 8));
+      let top = r.bottom + 8;
+      if (top + h > vh - 8) { top = Math.max(8, r.top - h - 8); }
+      pop.style.left = left + "px";
+      pop.style.top = top + "px";
+    }
+    function openPop() {
+      hsv = accentHexToHsv(readStartHex());
+      paint();
+      place();
+    }
+    function closePop() { pop.hidden = true; }
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (pop.hidden) { openPop(); } else { closePop(); }
+    });
+    let svDrag = false;
+    function svFromEvent(ev) {
+      const r = sv.getBoundingClientRect();
+      let x = ev.clientX - r.left;
+      let y = ev.clientY - r.top;
+      x = Math.max(0, Math.min(x, r.width));
+      y = Math.max(0, Math.min(y, r.height));
+      hsv.s = r.width ? x / r.width : 0;
+      hsv.v = r.height ? 1 - y / r.height : 1;
+      pushLive();
+    }
+    sv.addEventListener("pointerdown", (ev) => {
+      svDrag = true;
+      try { sv.setPointerCapture(ev.pointerId); } catch (e) { e; }
+      svFromEvent(ev);
+    });
+    sv.addEventListener("pointermove", (ev) => { if (svDrag) { svFromEvent(ev); } });
+    sv.addEventListener("pointerup", () => {
+      if (svDrag) { svDrag = false; picker.dispatchEvent(new Event("change")); }
+    });
+    sv.addEventListener("pointercancel", () => { svDrag = false; });
+    let hueDrag = false;
+    function hueFromEvent(ev) {
+      const r = hue.getBoundingClientRect();
+      let x = ev.clientX - r.left;
+      x = Math.max(0, Math.min(x, r.width));
+      hsv.h = r.width ? x / r.width * 360 : 0;
+      if (hsv.h >= 360) { hsv.h = 359.9; }
+      pushLive();
+    }
+    hue.addEventListener("pointerdown", (ev) => {
+      hueDrag = true;
+      try { hue.setPointerCapture(ev.pointerId); } catch (e) { e; }
+      hueFromEvent(ev);
+    });
+    hue.addEventListener("pointermove", (ev) => { if (hueDrag) { hueFromEvent(ev); } });
+    hue.addEventListener("pointerup", () => {
+      if (hueDrag) { hueDrag = false; picker.dispatchEvent(new Event("change")); }
+    });
+    hue.addEventListener("pointercancel", () => { hueDrag = false; });
+    function applyHexInput(fireChange) {
+      const v = (hexInput.value || "").trim();
+      if (validHex(v)) {
+        hsv = accentHexToHsv(v);
+        picker.value = v;
+        picker.dispatchEvent(new Event("input"));
+        if (fireChange) { picker.dispatchEvent(new Event("change")); }
+        paint();
+        hexInput.value = v.toUpperCase();
+        cur.style.background = v;
+      } else {
+        hexInput.value = (picker.value || "").toUpperCase();
+      }
+    }
+    hexInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { applyHexInput(true); }
+      if (ev.key === "Escape") { closePop(); btn.focus(); }
+    });
+    hexInput.addEventListener("blur", () => { applyHexInput(false); });
+    const presetBox = document.getElementById("accentPresets");
+    if (presetBox) {
+      presetBox.querySelectorAll("button[data-color]").forEach((b) => {
+        b.addEventListener("click", () => {
+          const c = b.getAttribute("data-color") || "";
+          if (validHex(c)) {
+            hsv = accentHexToHsv(c);
+            picker.value = c;
+            picker.dispatchEvent(new Event("input"));
+            picker.dispatchEvent(new Event("change"));
+            paint();
+            hexInput.value = c.toUpperCase();
+            cur.style.background = c;
+          }
+        });
+      });
+    }
+    document.addEventListener("pointerdown", (ev) => {
+      if (pop.hidden) { return; }
+      if (pop.contains(ev.target)) { return; }
+      if (btn.contains(ev.target)) { return; }
+      closePop();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && !pop.hidden) { closePop(); }
+    }, true);
+  }
+
   // ---- 页面初始化 ----
   async function startApp() {
     initTheme();
@@ -2214,6 +2399,7 @@ async def render_text_to_image(text: str):
         showToast("已恢复默认主题色");
       });
     }
+    initAccentPopover();
     notifyReady();
 
     const inputEl = document.getElementById("previewInput");

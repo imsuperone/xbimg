@@ -131,21 +131,18 @@ body {
    ========================================================================== */
 .category-tabs-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 20px;
-  overflow-x: auto;
   padding: 4px 2px 8px 2px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.category-tabs-bar::-webkit-scrollbar {
-  display: none;
 }
 
 .cat-tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 150px;
   gap: 8px;
   padding: 10px 18px;
   border-radius: var(--m3-radius-pill);
@@ -177,16 +174,6 @@ body {
   font-size: 16px;
 }
 
-.cat-tab-preview {
-  margin-left: auto;
-}
-
-@media (max-width: 900px) {
-  .cat-tab-preview {
-    margin-left: 0;
-  }
-}
-
 .settings-section {
   display: none;
   flex-direction: column;
@@ -210,14 +197,131 @@ body {
   padding: 0;
   border: 2px solid var(--m3-sys-color-divider);
   border-radius: 50%;
-  background: none;
+  background: var(--m3-sys-color-primary);
   cursor: pointer;
   flex-shrink: 0;
 }
 
-.m3-accent-picker::-webkit-color-swatch-wrapper { padding: 2px; }
-.m3-accent-picker::-webkit-color-swatch { border: none; border-radius: 50%; }
-.m3-accent-picker::-moz-color-swatch { border: none; border-radius: 50%; }
+.accent-picker-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.accent-popover[hidden] {
+  display: none !important;
+}
+
+.accent-popover {
+  position: fixed;
+  z-index: 12000;
+  width: min(240px, calc(100vw - 32px));
+  background: var(--m3-sys-color-surface-container-high);
+  border: 1px solid var(--m3-sys-color-divider);
+  border-radius: var(--m3-radius-large);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.accent-sv {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  border-radius: 12px;
+  border: 1px solid var(--m3-sys-color-divider);
+  cursor: crosshair;
+  touch-action: none;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(210, 100%, 50%);
+}
+
+.accent-sv-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  left: 50%;
+  top: 50%;
+}
+
+.accent-hue {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--m3-sys-color-divider);
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+.accent-hue-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  top: 50%;
+  left: 0%;
+}
+
+.accent-pop-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.accent-hex {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--m3-sys-color-surface-container);
+  border: 1px solid var(--m3-sys-color-divider);
+  border-radius: 12px;
+  color: var(--m3-sys-color-on-surface);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.accent-hex:focus {
+  border-color: var(--m3-sys-color-primary);
+}
+
+.accent-current {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--m3-sys-color-divider);
+  background: var(--m3-sys-color-primary);
+  flex-shrink: 0;
+}
+
+.accent-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.accent-presets button {
+  width: 100%;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--m3-sys-color-divider);
+  cursor: pointer;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .settings-section.active {
@@ -1138,12 +1242,16 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
     padding: 14px;
   }
   .category-tabs-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
     padding-bottom: 6px;
-    flex-wrap: wrap;
-    overflow-x: visible;
   }
   .cat-tab {
-    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .cat-tab:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
   .toast-container {
     left: 16px;

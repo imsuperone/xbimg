@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.3.8" />
+  <link rel="stylesheet" href="./style.css?v=1.3.9" />
 </head>
 <body>
   <div class="app-layout">
@@ -12,27 +12,27 @@
     <header class="top-bar">
       <div class="top-bar-brand">
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag">v1.3.8</span></h1>
+          <h1>消息转图助手 <span class="version-tag">v1.3.9</span></h1>
         </div>
       </div>
       <div class="top-bar-actions">
-        <input type="color" id="accentPicker" class="m3-accent-picker" title="调整主题颜色" value="#4A90D9" />
+        <span class="accent-picker-wrap"><button type="button" id="accentPickerBtn" class="m3-accent-picker" title="调整主题颜色"></button><input type="color" id="accentPicker" value="#4A90D9" hidden /><div class="accent-popover" id="accentPopover" hidden><div class="accent-sv" id="accentSv"><div class="accent-sv-dot" id="accentSvDot"></div></div><div class="accent-hue" id="accentHue"><div class="accent-hue-dot" id="accentHueDot"></div></div><div class="accent-pop-row"><input type="text" class="accent-hex" id="accentHex" maxlength="7" spellcheck="false" value="#4A90D9" /><span class="accent-current" id="accentCurrent"></span></div><div class="accent-presets" id="accentPresets"><button type="button" data-color="#4A90D9" style="background:#4A90D9" title="#4A90D9"></button><button type="button" data-color="#1A73E8" style="background:#1A73E8" title="#1A73E8"></button><button type="button" data-color="#7B1FA2" style="background:#7B1FA2" title="#7B1FA2"></button><button type="button" data-color="#C2185B" style="background:#C2185B" title="#C2185B"></button><button type="button" data-color="#E53935" style="background:#E53935" title="#E53935"></button><button type="button" data-color="#F9A825" style="background:#F9A825" title="#F9A825"></button><button type="button" data-color="#388E3C" style="background:#388E3C" title="#388E3C"></button><button type="button" data-color="#00796B" style="background:#00796B" title="#00796B"></button><button type="button" data-color="#00838F" style="background:#00838F" title="#00838F"></button><button type="button" data-color="#455A64" style="background:#455A64" title="#455A64"></button><button type="button" data-color="#5D4037" style="background:#5D4037" title="#5D4037"></button><button type="button" data-color="#212121" style="background:#212121" title="#212121"></button></div></div></span>
         <button id="accentResetBtn" class="m3-icon-btn" title="恢复默认主题色" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
           </svg>
         </button>
-        <button id="themeToggleBtn" class="m3-icon-btn" title="切换深色/浅色主题" type="button">
+        <button id="themeToggleBtn" class="m3-icon-btn" title="切换深色与浅色主题" type="button">
           <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
           </svg>
         </button>
-        <button id="refreshBtn" class="m3-icon-btn" title="重新获取数据" type="button">
+        <button id="refreshBtn" class="m3-icon-btn" title="重新加载数据" type="button">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
           </svg>
         </button>
-        <span id="autoSaveHint" class="auto-save-hint">● 自动保存已开启 · 修改即生效</span>
+        <span id="autoSaveHint" class="auto-save-hint">自动保存已启用，修改即时生效</span>
       </div>
     </header>
 
@@ -44,11 +44,11 @@
       </button>
       <button type="button" class="cat-tab" data-tab="fonts">
         <span class="cat-icon">🔤</span>
-        <span class="cat-title">字体与Emoji</span>
+        <span class="cat-title">字体与表情符号</span>
       </button>
       <button type="button" class="cat-tab" data-tab="moderation">
         <span class="cat-icon">🛡️</span>
-        <span class="cat-title">安全审查与打码</span>
+        <span class="cat-title">安全审查与遮蔽</span>
       </button>
       <button type="button" class="cat-tab" data-tab="groups">
         <span class="cat-icon">👥</span>
@@ -56,7 +56,7 @@
       </button>
       <button type="button" class="cat-tab cat-tab-preview" data-tab="preview">
         <span class="cat-icon">👁️</span>
-        <span class="cat-title">实时交互预览</span>
+        <span class="cat-title">实时预览</span>
       </button>
     </nav>
 
@@ -70,7 +70,7 @@
           <div class="card-row-split">
             <div>
               <h2 class="card-title">消息转图主服务</h2>
-              <p class="card-desc">开启后，机器人触发发送的所有文本消息将按规则自动渲染为高颜值图片。</p>
+              <p class="card-desc">启用后，机器人发送的文本消息将依据既定规则自动渲染为图片。</p>
             </div>
             <label class="m3-switch">
               <input type="checkbox" id="cfgEnable" checked />
@@ -83,8 +83,8 @@
         <div class="m3-card">
           <div class="card-row-split">
             <div>
-              <h2 class="card-title">📈 性能日志</h2>
-              <p class="card-desc">开启后每张图片打一行 [性能] 日志（总耗时/安全审查/打码/下载分段计时），日志里 grep [性能] 即可捞出；关闭时零开销。</p>
+              <h2 class="card-title">性能日志</h2>
+              <p class="card-desc">启用后，每张图片生成时输出一条 [性能] 日志，记录总耗时、安全审查、遮蔽及下载各阶段耗时；可通过检索 [性能] 关键字筛选相关记录。关闭后不产生额外开销。</p>
             </div>
             <label class="m3-switch">
               <input type="checkbox" id="cfgPerfLog" />
@@ -95,50 +95,50 @@
 
         <!-- Card: Trigger Mode & Threshold -->
         <div class="m3-card">
-          <h2 class="card-title">⚡ 转图触发时机与字数门槛</h2>
-          <p class="card-desc">控制何时将消息转为图片，避免超短问候或日常闲聊频繁转图刷屏。</p>
+          <h2 class="card-title">触发时机与字数下限</h2>
+          <p class="card-desc">设定消息转为图片的触发条件，避免简短问候及日常交流被频繁转换。</p>
           
           <div class="form-group">
-            <label class="form-label">转图触发时机</label>
+            <label class="form-label">触发时机</label>
             <div class="m3-segmented-control" id="segRenderTrigger">
-              <button type="button" class="seg-item active" data-val="always">🔄 始终转图</button>
-              <button type="button" class="seg-item" data-val="violation_only">🛡️ 仅违规时转图</button>
+              <button type="button" class="seg-item active" data-val="always">始终转换</button>
+              <button type="button" class="seg-item" data-val="violation_only">仅违规时转换</button>
             </div>
-            <span class="field-hint">选择「仅违规时转图」时，正常消息保持纯文本，仅检测到敏感违规内容才转图并施加打码处置。</span>
+            <span class="field-hint">选择「仅违规时转换」后，常规消息将以纯文本发送，仅检出违规内容时转为图片并实施遮蔽处理。</span>
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">触发转图字数门槛 (最少字数)</label>
+            <label class="form-label">触发转换字数下限（最少字数）</label>
             <input type="number" id="cfgMinLength" class="m3-input" min="1" max="1000" value="1" />
-            <span class="field-hint">文本字数达到或超过此门槛才转图。设为 1 则所有满足条件的消息均转图。</span>
+            <span class="field-hint">文本字数达到该下限时转为图片。设置为 1 时，符合条件的消息将全部转换。</span>
           </div>
         </div>
 
         <!-- Card: Visual Styles, Themes & Starfield -->
         <div class="m3-card">
-          <h2 class="card-title">🎨 视觉风格与排版主题</h2>
-          <p class="card-desc">定制生成的图片视觉外观体系、配色主题与背景氛围。</p>
+          <h2 class="card-title">视觉样式与排版主题</h2>
+          <p class="card-desc">自定义生成图片的视觉外观、配色主题与背景效果。</p>
 
           <div class="form-group">
-            <label class="form-label">默认渲染风格</label>
+            <label class="form-label">默认渲染样式</label>
             <div class="m3-segmented-control" id="segStyle">
               <button type="button" class="seg-item active" data-val="ios">
                 <span class="seg-icon">🍏</span> iOS 磨砂玻璃
               </button>
               <button type="button" class="seg-item" data-val="android16">
-                <span class="seg-icon">🤖</span> Android 16 M3
+                <span class="seg-icon">🤖</span> Android 16 质感
               </button>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">配色基调</label>
+            <label class="form-label">配色主题</label>
             <div class="m3-segmented-control" id="segTheme">
               <button type="button" class="seg-item active" data-val="light">
-                <span class="seg-icon">☀️</span> 浅色明亮
+                <span class="seg-icon">☀️</span> 浅色
               </button>
               <button type="button" class="seg-item" data-val="dark">
-                <span class="seg-icon">🌙</span> 深色暗黑
+                <span class="seg-icon">🌙</span> 深色
               </button>
             </div>
           </div>
@@ -147,15 +147,15 @@
             <label class="form-label">全局字体缩放比例 <span id="fontScaleVal" class="field-hint" style="display:inline; margin-left:8px; font-weight:700; color:var(--m3-sys-color-primary);">100%</span></label>
             <div style="display:flex; align-items:center; gap:12px;">
               <input type="range" id="cfgFontScale" min="50" max="500" step="5" value="100" style="flex:1; accent-color: var(--m3-sys-color-primary);" />
-              <button id="fontScaleResetBtn" class="m3-btn secondary-btn" type="button" style="padding:6px 12px; font-size:12px;">重置100%</button>
+              <button id="fontScaleResetBtn" class="m3-btn secondary-btn" type="button" style="padding:6px 12px; font-size:12px;">恢复 100%</button>
             </div>
-            <span class="field-hint">按百分比缩放排版字体（50%~500%），默认 100%。单群也可单独定制。</span>
+            <span class="field-hint">依据百分比缩放排版字体（取值范围 50% 至 500%，默认 100%）。各群可另行设置。</span>
           </div>
 
           <div class="form-group card-row-split" style="margin-top: 16px;">
             <div>
-              <label class="form-label" style="margin: 0;">随机背景小星星</label>
-              <p class="field-hint">在卡片四周与背景随机散落闪烁十字星芒、四角星与光晕微粒。</p>
+              <label class="form-label" style="margin: 0;">随机背景星芒</label>
+              <p class="field-hint">于卡片四周及背景随机分布闪烁的十字星芒、四角星与光晕微粒。</p>
             </div>
             <label class="m3-switch">
               <input type="checkbox" id="cfgStarBg" checked />
@@ -164,88 +164,88 @@
           </div>
 
           <div class="form-group" id="starDensityGroup">
-            <label class="form-label">小星星密度</label>
+            <label class="form-label">星芒密度</label>
             <div class="m3-segmented-control" id="segStarDensity">
-              <button type="button" class="seg-item" data-val="sparse">稀疏 (~25颗)</button>
-              <button type="button" class="seg-item active" data-val="medium">标准 (~50颗)</button>
-              <button type="button" class="seg-item" data-val="dense">星海 (~80颗)</button>
+              <button type="button" class="seg-item" data-val="sparse">稀疏（约 25 颗）</button>
+              <button type="button" class="seg-item active" data-val="medium">标准（约 50 颗）</button>
+              <button type="button" class="seg-item" data-val="dense">密集（约 80 颗）</button>
             </div>
           </div>
         </div>
 
         <!-- Card: Output File Size & Quality -->
         <div class="m3-card">
-          <h2 class="card-title">💾 输出图片文件存储大小优化</h2>
-          <p class="card-desc">调节生成图片的文件存储大小（KB/MB），降低群聊传输延迟并节省服务器带宽与磁盘空间。</p>
+          <h2 class="card-title">输出图片体积优化</h2>
+          <p class="card-desc">调整生成图片的文件体积（KB/MB），以降低群聊传输耗时并节约服务器带宽与磁盘空间。</p>
 
           <div class="form-group">
-            <label class="form-label">文件存储大小优化策略</label>
+            <label class="form-label">文件体积优化策略</label>
             <div class="m3-segmented-control" id="segImgCompress">
-              <button type="button" class="seg-item" data-val="lossless">💎 原画无损 (PNG · 文件较大)</button>
-              <button type="button" class="seg-item active" data-val="balanced">⚖️ 均衡适中 (JPEG 94% · 推荐)</button>
-              <button type="button" class="seg-item" data-val="compact">⚡ 极小文件 (JPEG 86% · 极省流量)</button>
+              <button type="button" class="seg-item" data-val="lossless">原画无损（PNG，文件较大）</button>
+              <button type="button" class="seg-item active" data-val="balanced">均衡（JPEG 94%，推荐）</button>
+              <button type="button" class="seg-item" data-val="compact">精简（JPEG 86%，显著节约流量）</button>
             </div>
-            <span class="field-hint">⚠️ <strong>提示</strong>：此项仅优化图片文件占用的存储字节大小（KB/MB），绝不影响文字阅读清晰度，也不会改变图片的画布像素长宽与排版。</span>
+            <span class="field-hint">提示：该选项仅调整图片文件的存储体积（KB/MB），不影响文字清晰度，亦不改变画布像素尺寸与排版。</span>
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">单张图片体积上限（KB，0 为关闭）</label>
+            <label class="form-label">单张图片体积上限（KB，0 表示不限制）</label>
             <input type="number" id="cfgImgMaxKb" class="m3-input" min="0" max="5120" step="50" value="800" />
-            <span class="field-hint">超出上限自动降质重编码压到上限内（无损PNG档只告警不转格式）；调小可缩短上传时间，减少 QQ 端发送超时。默认 800。</span>
+            <span class="field-hint">超出上限时将自动降低质量并重新编码至上限以内（无损 PNG 仅提示，不转换格式）。调低该值可缩短上传耗时，减少 QQ 端发送超时。默认值为 800。</span>
           </div>
         </div>
 
         <!-- Card: Phone Screen Fit -->
         <div class="m3-card">
-          <h2 class="card-title">📱 手机屏适配</h2>
-          <p class="card-desc">控制生成图片的尺寸，保证手机缩略图完整显示、不被裁切。</p>
+          <h2 class="card-title">手机端显示适配</h2>
+          <p class="card-desc">配置生成图片的尺寸，确保手机端缩略图完整显示且不被裁剪。</p>
 
           <div class="form-group">
             <label class="form-label">单页图片最大高度（像素）</label>
             <input type="number" id="cfgPageMaxHeight" class="m3-input" min="800" max="3800" step="100" value="3000" />
-            <span class="field-hint">超长内容按此高度分页输出多图；点开看长图长度不限。默认 3000。</span>
+            <span class="field-hint">超出该高度的内容将分页输出为多张图片；查看长图时长度不受限制。默认值为 3000。</span>
           </div>
 
           <div class="form-group">
-            <label class="form-label">输出图片最大宽度（像素，0 为不限）</label>
+            <label class="form-label">输出图片最大宽度（像素，0 表示不限制）</label>
             <input type="number" id="cfgImgMaxWidth" class="m3-input" min="0" max="3000" step="20" value="1080" />
-            <span class="field-hint">超宽图等比缩小到该宽度；1080p 手机建议 1080。</span>
+            <span class="field-hint">超出该宽度的图片将按比例缩小。1080P 手机建议设置为 1080。</span>
           </div>
 
           <div class="form-group">
             <label class="form-label">卡片宽度基线（像素）</label>
             <input type="number" id="cfgCardMaxWidth" class="m3-input" min="480" max="1200" step="20" value="640" />
-            <span class="field-hint">卡片绝对上限，超长单行折行显示，保证缩略图右边不被裁；默认 640。</span>
+            <span class="field-hint">卡片宽度的绝对上限，超出部分将自动折行，确保缩略图右侧不被裁剪。默认值为 640。</span>
           </div>
         </div>
 
         <!-- Card: Link Handling Strategy -->
         <div class="m3-card">
-          <h2 class="card-title">🔗 智能链接发送策略</h2>
-          <p class="card-desc">当消息中包含 URL 网址超链接时的处理机制。</p>
+          <h2 class="card-title">链接处理策略</h2>
+          <p class="card-desc">配置消息中包含 URL 超链接时的处理方式。</p>
 
           <div class="radio-card-group">
             <label class="m3-radio-card">
               <input type="radio" name="linkMode" value="as_image" checked />
               <div class="radio-card-body">
-                <div class="radio-card-title">链接一并转为图片 (视觉统一)</div>
-                <div class="radio-card-desc">将整条包含链接的内容完整绘制在美观卡片中。</div>
+                <div class="radio-card-title">链接随正文转为图片（样式统一）</div>
+                <div class="radio-card-desc">含链接的完整内容将绘制于同一卡片中。</div>
               </div>
             </label>
 
             <label class="m3-radio-card">
               <input type="radio" name="linkMode" value="keep_text" />
               <div class="radio-card-body">
-                <div class="radio-card-title">包含链接时保持纯文本 (便于点击)</div>
-                <div class="radio-card-desc">检测到网址超链接时跳过转图，直接发送纯文本，方便群成员一键点击跳转。</div>
+                <div class="radio-card-title">含链接时保留纯文本（便于点击）</div>
+                <div class="radio-card-desc">检出超链接时跳过图片转换，直接发送纯文本，群成员可点击跳转。</div>
               </div>
             </label>
 
             <label class="m3-radio-card">
               <input type="radio" name="linkMode" value="extract_append" />
               <div class="radio-card-body">
-                <div class="radio-card-title">转图后附带提取纯文本链接 (兼得推荐)</div>
-                <div class="radio-card-desc">既发送美观的渲染卡片，又在图片下方附带提取出的可点击纯文本链接。</div>
+                <div class="radio-card-title">转换后附带纯文本链接（推荐）</div>
+                <div class="radio-card-desc">在发送渲染卡片的同时，于图片下方附带可点击的纯文本链接。</div>
               </div>
             </label>
           </div>
@@ -257,63 +257,63 @@
         <!-- Card: Fonts Management -->
         <div class="m3-card">
           <div class="card-header-badge-row">
-            <h2 class="card-title">🔤 精选中文字体库</h2>
-            <span class="m3-badge-highlight" id="fontStatusPill">字体检测中…</span>
+            <h2 class="card-title">精选中文体库</h2>
+            <span class="m3-badge-highlight" id="fontStatusPill">正在检测字体…</span>
           </div>
-          <p class="card-desc">精选中文字体一键下载与切换。Windows 开箱即用系统字体；支持一键下载安装或彻底卸载删除。</p>
+          <p class="card-desc">提供精选中文体的下载与切换。Windows 可直接使用系统字体；支持下载安装与卸载。</p>
 
           <div class="form-group">
-            <label class="form-label">精选开源商用字体（点击下载，已下载字体可直接切换或删除卸载）</label>
+            <label class="form-label">精选开源商用字体（选择后下载，已下载字体可直接切换或卸载）</label>
             <div id="curatedFontsBox" class="curated-fonts-grid">
-              <div class="font-files-empty">正在加载精选列表…</div>
+              <div class="font-files-empty">精选列表加载中…</div>
             </div>
           </div>
 
           <div class="form-group" style="margin-top: 18px;">
-            <label class="form-label">已安装字体管理 <span class="field-hint" style="display:inline;">（持久化目录，支持单个彻底删除）</span></label>
+            <label class="form-label">已安装字体管理 <span class="field-hint" style="display:inline;">（持久化目录，支持单独删除）</span></label>
             <div id="fontFilesBox" class="font-files-list">
               <div class="font-files-empty">正在读取…</div>
             </div>
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">从已安装字体中选择当前字体（切换即生效）</label>
+            <label class="form-label">从已安装字体中选择当前字体（切换即时生效）</label>
             <div class="group-fetch-row" style="margin-top:0">
               <select id="fontSelectDropdown" class="m3-input" style="flex:1">
                 <option value="">-- 系统默认中文字体 --</option>
               </select>
             </div>
-            <span class="field-hint">选择已下载的字体即刻生效，无需重启机器人。</span>
+            <span class="field-hint">选择已下载字体后即时生效，无需重启机器人。</span>
           </div>
 
           <details class="m3-details" style="margin-top: 16px;">
-            <summary class="details-summary"><span>⚙️ 高级：本地字体路径与直链下载</span><span class="details-arrow">›</span></summary>
+            <summary class="details-summary"><span>高级：本地字体路径与直链下载</span><span class="details-arrow">›</span></summary>
             <div class="details-content">
               <div class="form-group">
                 <label class="form-label">字体来源模式</label>
                 <div class="m3-segmented-control" id="segFontSource">
-                  <button type="button" class="seg-item active" data-val="auto">☁️ 自动补齐 (推荐)</button>
-                  <button type="button" class="seg-item" data-val="system">🖥️ 仅系统字体</button>
-                  <button type="button" class="seg-item" data-val="custom">📁 自定义字体</button>
+                  <button type="button" class="seg-item active" data-val="auto">自动补全（推荐）</button>
+                  <button type="button" class="seg-item" data-val="system">仅系统字体</button>
+                  <button type="button" class="seg-item" data-val="custom">自定义字体</button>
                 </div>
               </div>
               <div id="customFontBox" style="display: none;">
                 <div class="form-group">
-                  <label class="form-label">自定义常规字体本地绝对路径</label>
+                  <label class="form-label">自定义常规字体本地路径</label>
                   <input type="text" id="cfgCustomFont" class="m3-input" placeholder="例如 C:/Windows/Fonts/simhei.ttf 或 /usr/share/fonts/my.ttf" />
                 </div>
                 <div class="form-group">
-                  <label class="form-label">自定义粗体本地绝对路径 (可选)</label>
-                  <input type="text" id="cfgCustomBoldFont" class="m3-input" placeholder="留空则复用常规字体" />
+                  <label class="form-label">自定义粗体本地路径（可选）</label>
+                  <input type="text" id="cfgCustomBoldFont" class="m3-input" placeholder="留空则沿用常规字体" />
                 </div>
               </div>
               <div class="form-group" style="margin-top: 12px;">
-                <label class="form-label">自定义字体 HTTP(S) 直链下载</label>
+                  <label class="form-label">自定义字体直链下载（HTTP/HTTPS）</label>
                 <div class="group-fetch-row" style="margin-top:0">
                   <input type="text" id="cfgCustomFontUrl" class="m3-input" placeholder="https://.../myfont.ttf 直链" style="flex:1" />
                   <button id="downloadCustomUrlBtn" class="m3-btn primary-btn" type="button">下载并启用</button>
                 </div>
-                <span class="field-hint">粘贴 .ttf / .otf 直链，自动下载至持久化目录并切换生效。</span>
+                <span class="field-hint">粘贴 .ttf / .otf 直链，系统将自动下载至持久化目录并切换生效。</span>
               </div>
             </div>
           </details>
@@ -322,32 +322,32 @@
         <!-- Card: Emoji Management -->
         <div class="m3-card">
           <div class="card-header-badge-row">
-            <h2 class="card-title">😀 Emoji 表情渲染与资源管理</h2>
+            <h2 class="card-title">表情符号渲染与资源管理</h2>
             <span id="emojiStorageHint" class="field-hint" style="font-weight:700; color:var(--m3-sys-color-primary);"></span>
           </div>
-          <p class="card-desc">Emoji 全自动管线：复杂表情全彩图、单表情全彩矢量字体，支持一键下载与释放磁盘空间。</p>
+          <p class="card-desc">表情符号处理流程：复杂表情采用全彩图像，单一表情采用全彩矢量字体；支持下载与缓存清理以释放磁盘空间。</p>
 
           <div class="form-group">
-            <label class="form-label">当前启用的 Emoji 样式</label>
+            <label class="form-label">当前启用的表情符号样式</label>
             <div class="m3-segmented-control" id="segEmojiStyle">
-              <button type="button" class="seg-item active" data-val="none">🚫 不启用 (系统单色)</button>
-              <button type="button" class="seg-item" data-val="ios">🍎 iOS 最新全彩图</button>
-              <button type="button" class="seg-item" data-val="android">🤖 Android Noto 全彩</button>
-              <button type="button" class="seg-item" data-val="windows">🪟 Windows 清晰矢量</button>
+              <button type="button" class="seg-item active" data-val="none">不启用（系统单色）</button>
+              <button type="button" class="seg-item" data-val="ios">iOS 全彩图像</button>
+              <button type="button" class="seg-item" data-val="android">Android Noto 全彩</button>
+              <button type="button" class="seg-item" data-val="windows">Windows 矢量</button>
             </div>
-            <span class="field-hint">默认不启用，使用系统原生字体；按需选择样式后自动加载对应效果。</span>
+            <span class="field-hint">默认不启用，将使用系统原生字体；按需选择样式后将自动加载相应效果。</span>
           </div>
 
           <div class="form-group" style="margin-top:16px;">
               <div class="card-row-split" style="margin-bottom:8px;">
-                <label class="form-label" style="margin:0;">Emoji 样式包与缓存存储管理</label>
+                <label class="form-label" style="margin:0;">表情符号资源包与缓存管理</label>
                 <div>
-                  <button id="cdnCheckBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px; margin-right:6px;">🌐 检测下载链路</button>
-                  <button id="clearAllEmojiBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px;">🗑️ 一键清空全部 Emoji 缓存</button>
+                  <button id="cdnCheckBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px; margin-right:6px;">检测下载链路</button>
+                  <button id="clearAllEmojiBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 10px; font-size:11px;">清空全部表情符号缓存</button>
                 </div>
               </div>
             <div id="emojiPacksBox" class="font-files-list" style="max-height:200px;">
-              <div class="font-files-empty">正在读取 Emoji 资源占用…</div>
+              <div class="font-files-empty">正在读取表情符号资源占用…</div>
             </div>
           </div>
         </div>
@@ -359,68 +359,68 @@
         <div class="m3-card">
           <div class="card-row-split" style="margin-bottom:12px;">
             <div>
-              <h2 class="card-title">🛡️ 屏蔽词审查总开关与处置方式</h2>
-              <p class="card-desc" style="margin-bottom:0;">开启后对文本进行敏感词匹配；可设定命中的违规处置动作与马赛克风格。</p>
+              <h2 class="card-title">屏蔽词审查总开关与处置方式</h2>
+              <p class="card-desc" style="margin-bottom:0;">启用后将对文本执行敏感词匹配；可配置检出违规内容后的处置方式与遮蔽样式。</p>
             </div>
             <div class="m3-segmented-control" id="segModerationMode">
-              <button type="button" class="seg-item active" data-val="keywords">🟢 开启审查</button>
-              <button type="button" class="seg-item" data-val="none">⚪ 关闭</button>
+              <button type="button" class="seg-item active" data-val="keywords">启用审查</button>
+              <button type="button" class="seg-item" data-val="none">关闭</button>
             </div>
           </div>
 
           <div class="form-group" style="margin-top:14px;">
-            <label class="form-label">违规内容处置动作</label>
+            <label class="form-label">违规内容处置方式</label>
             <div class="radio-card-group">
               <label class="m3-radio-card">
                 <input type="radio" name="violationAction" value="mosaic_half" checked />
                 <div class="radio-card-body">
-                  <div class="radio-card-title">🎭 打一半马赛克 (Half Mosaic · 推荐)</div>
-                  <div class="radio-card-desc">仅对命中违规词的文字打一半遮蔽（下半/上半/随机），其余正文清晰可读，兼顾群聊合规与趣味性。</div>
+                  <div class="radio-card-title">半字遮蔽（Half Mosaic，推荐）</div>
+                  <div class="radio-card-desc">仅对检出违规词的文字实施半字遮蔽，其余正文保持清晰可读，兼顾合规要求与可读性。</div>
                 </div>
               </label>
 
               <label class="m3-radio-card">
                 <input type="radio" name="violationAction" value="mosaic_full" />
                 <div class="radio-card-body">
-                  <div class="radio-card-title">🔒 全图正文马赛克打码</div>
-                  <div class="radio-card-desc">卡片整体正文全部打码遮蔽，并打上警告印章。</div>
+                  <div class="radio-card-title">全文遮蔽</div>
+                  <div class="radio-card-desc">对卡片正文整体实施遮蔽，并加盖警告标识。</div>
                 </div>
               </label>
 
               <label class="m3-radio-card">
                 <input type="radio" name="violationAction" value="block" />
                 <div class="radio-card-body">
-                  <div class="radio-card-title">🚫 彻底拦截静默不发</div>
-                  <div class="radio-card-desc">直接终止消息发送，防止违规内容流出至群聊。</div>
+                  <div class="radio-card-title">拦截并取消发送</div>
+                  <div class="radio-card-desc">终止消息发送，防止违规内容进入群聊。</div>
                 </div>
               </label>
 
               <label class="m3-radio-card">
                 <input type="radio" name="violationAction" value="notice" />
                 <div class="radio-card-body">
-                  <div class="radio-card-title">⚠️ 替换为合规警示卡片</div>
-                  <div class="radio-card-desc">将原内容替换为官方安全合规风险说明卡片并发出。</div>
+                  <div class="radio-card-title">替换为合规提示卡片</div>
+                  <div class="radio-card-desc">将原内容替换为安全合规提示卡片后发送。</div>
                 </div>
               </label>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">马赛克渲染方式</label>
+            <label class="form-label">遮蔽渲染方式</label>
             <div class="m3-segmented-control" id="segMosaicType">
-              <button type="button" class="seg-item active" data-val="pixel">🧱 复古像素颗粒块</button>
-              <button type="button" class="seg-item" data-val="blur">🌫️ 高斯磨砂毛玻璃</button>
+              <button type="button" class="seg-item active" data-val="pixel">像素块</button>
+              <button type="button" class="seg-item" data-val="blur">高斯模糊</button>
             </div>
           </div>
 
           <div class="form-group" id="mosaicHalfPosGroup">
-            <label class="form-label">半字打码位置 (Half Mosaic 专属)</label>
+            <label class="form-label">半字遮蔽位置（仅 Half Mosaic）</label>
             <div class="m3-segmented-control" id="segMosaicHalfPos">
-              <button type="button" class="seg-item active" data-val="bottom">⬇️ 遮下半</button>
-              <button type="button" class="seg-item" data-val="top">⬆️ 遮上半</button>
-              <button type="button" class="seg-item" data-val="random">🎲 随机上下</button>
+              <button type="button" class="seg-item active" data-val="bottom">遮蔽下半</button>
+              <button type="button" class="seg-item" data-val="top">遮蔽上半</button>
+              <button type="button" class="seg-item" data-val="random">随机</button>
             </div>
-            <span class="field-hint">每字随机上下更有趣味，也更难被猜测原文。</span>
+            <span class="field-hint">每个文字随机选择遮蔽位置，可有效降低原文被辨识的可能性。</span>
           </div>
         </div>
 
@@ -428,8 +428,8 @@
         <div class="m3-card">
           <div class="card-row-split" style="margin-bottom: 12px;">
             <div>
-              <h2 class="card-title">🚫 敏感屏蔽词库体系 (支持多套方案)</h2>
-              <p class="card-desc" style="margin-bottom:0;">已内置涉毒、涉赌、涉黄、脚本与娱乐互动等详尽违规词库；群聊亦可自由绑定专属词库。</p>
+              <h2 class="card-title">敏感词库体系（支持多套方案）</h2>
+              <p class="card-desc" style="margin-bottom:0;">已内置涉毒、涉赌、涉黄、脚本及娱乐互动等类别的违规词库；各群可绑定专属词库。</p>
             </div>
           </div>
 
@@ -437,23 +437,23 @@
 
           <div class="form-group">
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-              <label class="form-label" style="margin:0; flex:1;">选择/编辑当前敏感词库方案：</label>
-              <button id="addNewPresetBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 12px; font-size:12px;">➕ 新建词库方案</button>
+              <label class="form-label" style="margin:0; flex:1;">选择并编辑当前词库方案：</label>
+              <button id="addNewPresetBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 12px; font-size:12px;">新建词库方案</button>
               <button id="delPresetBtn" class="font-file-del" type="button" style="padding:4px 10px; font-size:12px;" title="删除当前自定义词库">删除当前方案</button>
             </div>
             <select id="keywordPresetSelect" class="m3-input" style="width:100%; margin-bottom:10px;">
-              <option value="default">标准涉敏与违禁词库 (默认综合)</option>
-              <option value="anti_porn">严格涉黄与低俗色情库</option>
-              <option value="anti_gambling">严格涉赌涉诈与黑产库</option>
-              <option value="anti_drugs">严格涉毒与违禁品库</option>
-              <option value="xbbot_game">互动娱乐/涉黑调教过滤库</option>
+              <option value="default">标准综合词库（默认）</option>
+              <option value="anti_porn">涉黄与低俗内容库（严格）</option>
+              <option value="anti_gambling">涉赌涉诈与黑产库（严格）</option>
+              <option value="anti_drugs">涉毒与违禁品库（严格）</option>
+              <option value="xbbot_game">娱乐互动内容过滤库</option>
             </select>
           </div>
 
           <div class="form-group">
-            <label class="form-label">当前词库敏感词列表 (中英文逗号、分号或换行分隔)</label>
-            <textarea id="cfgKeywords" class="m3-textarea" rows="6" placeholder="输入敏感屏蔽词..."></textarea>
-            <span class="field-hint">编辑此框即刻保存至当前选中的方案中；群聊配置中可针对每个群单独绑定指定词库。</span>
+            <label class="form-label">当前词库（以中英文逗号、分号或换行分隔）</label>
+            <textarea id="cfgKeywords" class="m3-textarea" rows="6" placeholder="请输入敏感词…"></textarea>
+            <span class="field-hint">在此编辑的内容将即时保存至当前所选方案；群聊配置中可为各群绑定指定词库。</span>
           </div>
         </div>
 
@@ -464,17 +464,17 @@
         <!-- Card: Group Filtering Mode -->
         <div class="m3-card group-focus-card">
           <div class="card-header-badge-row">
-            <h2 class="card-title">👥 群聊生效范围设置</h2>
-            <span class="m3-badge-highlight" id="groupStatusPill">群聊已限制 (仅勾选群有效)</span>
+            <h2 class="card-title">群聊生效范围</h2>
+            <span class="m3-badge-highlight" id="groupStatusPill">生效范围受限（仅所选群聊）</span>
           </div>
-          <p class="card-desc">⚠️ <strong>核心机制</strong>：为防止在不相关群聊中滥发转图刷屏，<strong>默认所有群聊完全不转图</strong>（仅私聊转图）。请选择「白名单群」并在下方点击拉取或手动勾选需要转图的群！</p>
+          <p class="card-desc">核心规则：为避免在无关群聊中发送图片，默认情况下群聊不执行图片转换（仅私聊生效）。请选择白名单模式，并于下方拉取或手动勾选需要生效的群聊。</p>
 
           <div class="form-group">
-            <label class="form-label">群聊生效模式切换</label>
+            <label class="form-label">群聊生效模式</label>
             <div class="m3-segmented-control" id="segGroupMode">
-              <button type="button" class="seg-item active" data-val="whitelist">🛡️ 仅白名单群生效 (默认推荐)</button>
-              <button type="button" class="seg-item" data-val="all">🌐 全部所有群直接生效</button>
-              <button type="button" class="seg-item" data-val="blacklist">🚫 黑名单排除模式</button>
+              <button type="button" class="seg-item active" data-val="whitelist">仅白名单群聊生效（默认，推荐）</button>
+              <button type="button" class="seg-item" data-val="all">全部群聊生效</button>
+              <button type="button" class="seg-item" data-val="blacklist">黑名单排除模式</button>
             </div>
           </div>
 
@@ -482,9 +482,9 @@
           <div class="group-fetch-row" style="margin-top:16px;">
             <button id="fetchGroupsBtn" class="m3-btn primary-btn" type="button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
-              一键拉取机器人所有群聊 (点击胶囊直接勾选)
+              拉取机器人所在群聊（选择标签即可勾选）
             </button>
-            <span id="groupFetchHint" class="field-hint" style="margin: 0; color: var(--m3-sys-color-primary); font-weight: 600;">点击拉取已加入群</span>
+            <span id="groupFetchHint" class="field-hint" style="margin: 0; color: var(--m3-sys-color-primary); font-weight: 600;">选择后拉取已加入的群聊</span>
           </div>
 
           <div id="groupPickerBox" class="group-chips-wrap" style="display: none;">
@@ -492,9 +492,9 @@
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">当前生效群号列表 (英文逗号隔开，可直接在上方点击胶囊选择)</label>
-            <input type="text" id="cfgGroupList" class="m3-input" placeholder="留空则所有群聊均不转图！示例：12345678, 88776655" />
-            <span class="field-hint" id="groupHelpNote" style="color: var(--m3-status-amber);">当前未添加任何群号，群聊将保持发送纯文本，不会转为图片。</span>
+            <label class="form-label">当前生效群号（以英文逗号分隔，可通过上方标签选择）</label>
+            <input type="text" id="cfgGroupList" class="m3-input" placeholder="留空则全部群聊均不转换。示例：12345678, 88776655" />
+            <span class="field-hint" id="groupHelpNote" style="color: var(--m3-status-amber);">当前未填写群号，群聊将以纯文本发送，不执行图片转换。</span>
           </div>
         </div>
 
@@ -502,8 +502,8 @@
         <div class="m3-card" id="selectedGroupsBox" style="display:none;">
           <div class="card-row-split" style="margin-bottom:12px;">
             <div>
-              <h2 class="card-title">🎛️ 各群专属独立定制</h2>
-              <p class="card-desc" style="margin-bottom:0;">为特定群单独定制字体大小（滑块+精准数值）、风格、主题、字体及专属词库。未定制项自动<strong>跟随全局默认</strong>设置。</p>
+              <h2 class="card-title">各群专属配置</h2>
+              <p class="card-desc" style="margin-bottom:0;">可为指定群聊单独配置字体大小（滑块与精确数值）、样式、主题、字体及专属词库。未配置项将自动沿用全局设置。</p>
             </div>
           </div>
           <div id="selectedGroupsFontList" class="selected-groups-list"></div>
@@ -515,25 +515,25 @@
         <div class="m3-card">
           <div class="card-header-actions">
             <div>
-              <h2 class="card-title">👁️ 实时交互预览台</h2>
-              <p class="card-desc">所见即所得调试渲染效果（点击模板填入文本，输入完成后点击实时生成）。</p>
+              <h2 class="card-title">实时预览</h2>
+              <p class="card-desc">用于调试渲染效果，所见即所得（选择模板填入文本，输入完成后生成预览）。</p>
             </div>
             <button id="renderPreviewBtn" class="m3-btn primary-btn" type="button" style="padding:10px 22px; font-size:14px; font-weight:700;">
               <span id="previewSpinner" class="spinner" style="display: none;"></span>
-              实时生成预览
+              生成预览
             </button>
           </div>
 
           <!-- Quick Templates -->
           <div class="chips-row" style="margin-bottom:14px;">
-            <button type="button" class="m3-chip" data-tpl="normal">✨ 标准精美图</button>
-            <button type="button" class="m3-chip" data-tpl="code">💻 代码排版</button>
-            <button type="button" class="m3-chip" data-tpl="mosaic">🎭 半马赛克效果</button>
-            <button type="button" class="m3-chip" data-tpl="link">🔗 链接测试</button>
+            <button type="button" class="m3-chip" data-tpl="normal">标准样式</button>
+            <button type="button" class="m3-chip" data-tpl="code">代码排版</button>
+            <button type="button" class="m3-chip" data-tpl="mosaic">半字遮蔽效果</button>
+            <button type="button" class="m3-chip" data-tpl="link">链接测试</button>
           </div>
 
           <div class="form-group" style="margin-top: 12px;">
-            <textarea id="previewInput" class="m3-textarea" rows="5" placeholder="在此输入要转成图片的测试消息文本..."></textarea>
+            <textarea id="previewInput" class="m3-textarea" rows="5" placeholder="请输入待转换为图片的测试文本…"></textarea>
           </div>
 
           <!-- Live Preview Image Box -->
@@ -542,7 +542,7 @@
               <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
                 <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
               </svg>
-              <p style="font-size:15px; font-weight:600; margin-top:10px;">点击上方“实时生成预览”查看最终卡片渲染效果</p>
+              <p style="font-size:15px; font-weight:600; margin-top:10px;">选择上方「生成预览」以查看卡片渲染效果</p>
             </div>
             <img id="previewImage" class="preview-result-img" alt="预览效果图" style="display: none;" />
           </div>
@@ -561,6 +561,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.3.8"></script>
+  <script src="./app.js?v=1.3.9"></script>
 </body>
 </html>
