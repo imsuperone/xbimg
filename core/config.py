@@ -155,6 +155,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "img_max_width": 1080,
     "card_max_width": 640,
     "ui_accent_color": "",
+    "ui_theme_mode": "",
     "group_configs": {},
     "group_mode": "whitelist",
     "group_list": "",

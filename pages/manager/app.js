@@ -334,6 +334,7 @@ async def render_text_to_image(text: str):
     const current = document.documentElement.getAttribute("data-theme") || "light";
     const next = current === "light" ? "dark" : "light";
     applyThemeMode(next);
+    persistUiTheme();
     // B-9: 无自定义色时取色器跟着主题走，否则深色下仍显示浅色默认值造成脱节
     const picker = document.getElementById("accentPicker");
     if (picker) {
@@ -472,6 +473,24 @@ async def render_text_to_image(text: str):
   let currentConfig = {};
   let cachedGroups = [];
 
+  // 首帧挂起（index.html <head> 里 data-boot）的揭开时机：主题色 + 深浅色都回填完才放行
+  function revealUiPrefs() {
+    try { document.documentElement.removeAttribute("data-boot"); } catch (e) {}
+  }
+
+  // 界面深浅色落服务端：只发这一个键（config.save 是 merge 语义，不会冲掉其他配置）
+  let _uiPrefTimer = null;
+  function persistUiTheme() {
+    if (_uiPrefTimer) clearTimeout(_uiPrefTimer);
+    _uiPrefTimer = setTimeout(() => {
+      _uiPrefTimer = null;
+      const mode = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      api.post("config", { ui_theme_mode: mode }).then((res) => {
+        if (!res || !res.ok) console.warn("[msg2img] 保存界面深浅色失败:", res);
+      }).catch((e) => console.warn("[msg2img] 保存界面深浅色失败:", e));
+    }, 600);
+  }
+
   async function loadData() {
     try {
       const res = await api.get("config");
@@ -482,6 +501,8 @@ async def render_text_to_image(text: str):
     } catch (e) {
       console.warn("[msg2img] 获取配置回退或失败:", e);
       showToast("与后端连接失败，已载入默认配置");
+    } finally {
+      revealUiPrefs();
     }
   }
 
@@ -581,6 +602,11 @@ async def render_text_to_image(text: str):
 
     // 动态提示群聊范围状态
     updateGroupModeStatusUI(grpMode, cfg.group_list || "");
+    // 界面深浅色同样以服务端为准（沙箱 iframe 禁 localStorage，只存本地刷新即丢）
+    // 必须先于取色：applyAccentColor 的 primary-container / seg-ink 派生依赖当前 data-theme
+    if (cfg.ui_theme_mode === "dark" || cfg.ui_theme_mode === "light") {
+      applyThemeMode(cfg.ui_theme_mode);
+    }
     // 主题色：后端配置优先，其次本地记录
     initAccentColor(cfg.ui_accent_color);
   }
