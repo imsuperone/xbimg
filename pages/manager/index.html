@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
   <link rel="stylesheet" href="./style.css?v=1.3.11" />
-  <!-- 主题色/深浅色存在服务端配置里，需等 config 回来才套用；沙箱 iframe 禁 localStorage，
+  <!-- 主题色/深浅色存在服务端配置里（唯一真相源，无本地副本），需等 config 回来才套用；
        首帧先挂起，避免"先见默认色、再跳成已存色"。回填后由 revealUiPrefs() 揭开，3s 兜底。 -->
   <style>
     html[data-boot] { visibility: hidden; background: #f4f6f8; }

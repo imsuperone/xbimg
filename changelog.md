@@ -4,6 +4,7 @@
 
 - **修复** 界面深浅色切换后刷新即恢复默认——AstrBot 沙箱 iframe 禁 `localStorage`，主题色能留住靠的是服务端配置自动保存，深浅色此前却只写本地。现新增 `ui_theme_mode` 配置键，切换时 600ms 防抖写 `config`（`save()` 为 merge 语义，不冲其他配置），拉配置时一并回填
 - **优化** 首帧由 `<head>` 内联脚本置 `data-boot` 挂起，主题色与深浅色回填完成再揭幕（3s 兜底超时），消除「先见默认色、再跳成已存色」的闪变
+- **清理** 删除 `msg2img_theme` / `msg2img_accent` 的本地读写，服务端 `ui_accent_color` / `ui_theme_mode` 是唯一真相源
 
 ## v1.3.10
 

@@ -323,11 +323,8 @@ async def render_text_to_image(text: str):
   // ---- 主题切换 ----
   // 注意：页面自身深色/浅色切换与生成的图片配色基调完全独立！
   function applyThemeMode(theme) {
-    const targetTheme = theme === "dark" ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", targetTheme);
-    try {
-      localStorage.setItem("msg2img_theme", targetTheme);
-    } catch (e) {}
+    // 深浅色唯一真相源是服务端 ui_theme_mode，不留本地副本
+    document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
   }
 
   function toggleTheme() {
@@ -345,10 +342,12 @@ async def render_text_to_image(text: str):
   }
 
   function initTheme() {
+    // 深浅色没有本地缓存可读（服务端 ui_theme_mode 是唯一真相源，
+    // 由 renderConfigToUI 回填）；首帧按系统偏好给个初值，随后被覆盖。
     try {
-      const saved = localStorage.getItem("msg2img_theme") || "light";
-      applyThemeMode(saved);
-    } catch (e) {}
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      applyThemeMode(prefersDark ? "dark" : "light");
+    } catch (e) { applyThemeMode("light"); }
     // B-9: 初始化即把取色器对齐当前主题的默认 primary，避免首屏脱节
     try {
       const picker = document.getElementById("accentPicker");
@@ -407,10 +406,6 @@ async def render_text_to_image(text: str):
         try { root.style.removeProperty(k); } catch (e) {}
       }
     }
-    try {
-      if (ok) localStorage.setItem("msg2img_accent", v);
-      else localStorage.removeItem("msg2img_accent");
-    } catch (e) {}
     if (save) {
       currentConfig.ui_accent_color = ok ? v : "";
       triggerAutoSave();
@@ -431,11 +426,9 @@ async def render_text_to_image(text: str):
   }
 
   function initAccentColor(cfgAccent) {
-    let v = typeof cfgAccent === "string" ? cfgAccent.trim() : "";
-    if (!/^#[0-9a-fA-F]{6}$/.test(v)) {
-      try { v = localStorage.getItem("msg2img_accent") || ""; } catch (e) { v = ""; }
-    }
-    applyAccentColor(v, false);
+    // 唯一真相源是服务端 ui_accent_color，无本地副本可回退
+    const v = typeof cfgAccent === "string" ? cfgAccent.trim() : "";
+    applyAccentColor(/^#[0-9a-fA-F]{6}$/.test(v) ? v : "", false);
   }
 
   // ---- 分段选择器助手 ----
@@ -602,7 +595,7 @@ async def render_text_to_image(text: str):
 
     // 动态提示群聊范围状态
     updateGroupModeStatusUI(grpMode, cfg.group_list || "");
-    // 界面深浅色同样以服务端为准（沙箱 iframe 禁 localStorage，只存本地刷新即丢）
+    // 界面深浅色同样以服务端 ui_theme_mode 为准（无本地副本）
     // 必须先于取色：applyAccentColor 的 primary-container / seg-ink 派生依赖当前 data-theme
     if (cfg.ui_theme_mode === "dark" || cfg.ui_theme_mode === "light") {
       applyThemeMode(cfg.ui_theme_mode);
