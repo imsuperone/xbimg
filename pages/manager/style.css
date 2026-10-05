@@ -22,6 +22,9 @@
   --m3-sys-color-secondary-container: #DDE3EA;
   --m3-sys-color-on-secondary-container: #1A1C1E;
 
+  --m3-sys-color-error: #B3261E;
+  --m3-sys-color-error-container: #F9DEDC;
+
   /* Status Tokens */
   --m3-status-cyan: #0288D1;
   --m3-status-cyan-bg: #E1F5FE;
@@ -60,6 +63,9 @@
 
   --m3-sys-color-secondary-container: #2A313B;
   --m3-sys-color-on-secondary-container: #DDE3EA;
+
+  --m3-sys-color-error: #FFB4AB;
+  --m3-sys-color-error-container: #93000A;
 
   --m3-status-cyan-bg: rgba(2, 136, 209, 0.2);
   --m3-status-amber-bg: rgba(230, 81, 0, 0.2);
@@ -1010,16 +1016,6 @@ button.m3-accent-picker:focus-visible {
   flex-shrink: 0;
 }
 
-.auto-save-hint {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--m3-status-green);
-  background: var(--m3-status-green-bg);
-  padding: 6px 12px;
-  border-radius: var(--m3-radius-pill);
-  border: 1px solid var(--m3-status-green);
-}
-
 .selected-groups-list {
   display: flex;
   flex-direction: column;
@@ -1197,8 +1193,12 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   pointer-events: none !important;
 }
 
+/* Toast：右下堆叠 pill（与 xbbot_beta 同款），带类型色 + 可点击复制 */
 .m3-toast {
-  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 8px 9px 16px;
   border-radius: var(--m3-radius-pill);
   background: var(--m3-sys-color-surface-container-highest);
   color: var(--m3-sys-color-on-surface);
@@ -1208,7 +1208,56 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   animation: toastIn 0.3s cubic-bezier(0.2, 0, 0, 1);
   pointer-events: auto !important;
+  max-width: min(520px, calc(100vw - 32px));
+  line-height: 1.5;
+  transition: opacity 0.28s cubic-bezier(0.4, 0, 1, 1), transform 0.28s cubic-bezier(0.4, 0, 1, 1);
 }
+.m3-toast.out {
+  animation: none;
+  opacity: 0;
+  transform: translateY(14px) scale(0.97);
+}
+.m3-toast-ic {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.m3-toast-ic svg { display: block; width: 18px; height: 18px; }
+.m3-toast:not(.okk):not(.badk) .m3-toast-ic { color: var(--m3-sys-color-primary); }
+.m3-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.m3-toast-copy {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.18s, background 0.18s, transform 0.18s;
+}
+.m3-toast-copy:hover { opacity: 1; background: rgba(127, 127, 127, 0.18); }
+.m3-toast-copy:active { transform: scale(0.9); }
+.m3-toast-copy.done { opacity: 1; }
+.m3-toast-copy svg { display: block; width: 16px; height: 16px; }
+.m3-toast.okk { background: var(--m3-status-green); color: #FFFFFF; border-color: transparent; }
+.m3-toast.badk { background: var(--m3-sys-color-error); color: #FFFFFF; border-color: transparent; }
+[data-theme="dark"] .m3-toast { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+[data-theme="dark"] .m3-toast.okk { background: rgba(46, 125, 50, 0.28); color: #6DD58C; border-color: #6DD58C; }
+[data-theme="dark"] .m3-toast.badk { background: var(--m3-sys-color-error-container); color: var(--m3-sys-color-error); border-color: var(--m3-sys-color-error); }
 
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(20px); }
@@ -1225,9 +1274,6 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   .top-bar-actions {
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .auto-save-hint {
-    display: none;
   }
   .m3-card {
     padding: 16px;
@@ -1291,9 +1337,10 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   .toast-container {
     left: 16px;
     right: 16px;
+    align-items: center;
   }
   .m3-toast {
-    text-align: center;
+    max-width: calc(100vw - 32px);
   }
 }
 

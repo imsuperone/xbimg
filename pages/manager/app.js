@@ -210,29 +210,141 @@ async def render_text_to_image(text: str):
 可根据设置选择转为图片或保留可点击纯文本。`,
   };
 
-  // ---- Toast 浮窗提示（彻底防重放） ----
+  // ---- Toast 浮窗提示（与 xbbot_beta 同款：右下堆叠 + 类型色 + 点击复制） ----
   let _lastToastText = "";
   let _lastToastTime = 0;
-  function showToast(msg, duration = 3000) {
-    const now = Date.now();
-    if (_lastToastText === msg && now - _lastToastTime < 1200) {
-      return; // 过滤 1.2 秒内完全相同的重复弹窗
+  const _TOAST_MAX = 4;
+  const _TOAST_ICON = {
+    ok: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>'
+  };
+  const _TOAST_COPY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
+  const _TOAST_DONE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+
+  // 类型自动识别（显式传 type 时以显式为准）：失败类 → bad，进行中/提示 → info，完成类 → ok
+  function _toastTypeOf(msg, explicit) {
+    if (explicit === "ok" || explicit === "bad" || explicit === "info") return explicit;
+    const s = String(msg ?? "");
+    if (/失败|错误|异常|超出|并非|不支持|无法|不存在|未包含|超时|未检出|非法/.test(s)) return "bad";
+    if (/请先|请填写|请稍候|请至少|正在|尚未|暂未/.test(s)) return "info";
+    if (/已|成功|完成|就绪|生效|完毕|恢复默认/.test(s)) return "ok";
+    return "info";
+  }
+
+  // 沙箱里 navigator.clipboard 常被禁，退到 execCommand；都不行则选中文本让用户手动复制
+  async function _copyText(text) {
+    const s = String(text ?? "");
+    if (!s) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(s);
+        return true;
+      }
+    } catch (e) {}
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = s;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;padding:0;border:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, s.length);
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return !!ok;
+    } catch (e) { return false; }
+  }
+
+  function _ensureToastContainer() {
+    let c = document.getElementById("toastContainer");
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "toastContainer";
+      c.className = "toast-container";
+      c.setAttribute("aria-live", "polite");
+      document.body.appendChild(c);
     }
-    _lastToastText = msg;
+    return c;
+  }
+
+  function showToast(msg, type, duration) {
+    // 兼容旧签名 showToast(msg, 3000)：第二参是数字即为时长
+    if (typeof type === "number") { duration = type; type = ""; }
+    const text = String(msg ?? "");
+    const now = Date.now();
+    if (_lastToastText === text && now - _lastToastTime < 1200) return; // 过滤 1.2 秒内完全相同的重复弹窗
+    _lastToastText = text;
     _lastToastTime = now;
 
-    const container = document.getElementById("toastContainer");
-    if (!container) return;
+    const container = _ensureToastContainer();
+    const kind = _toastTypeOf(text, type);
     const t = document.createElement("div");
-    t.className = "m3-toast";
-    t.textContent = msg;
-    container.appendChild(t);
-    setTimeout(() => {
-      t.style.opacity = "0";
-      t.style.transform = "translateY(20px)";
-      t.style.transition = "all 0.3s";
+    t.className = "m3-toast" + (kind === "ok" ? " okk" : kind === "bad" ? " badk" : "");
+    t.setAttribute("role", "status");
+
+    const ic = document.createElement("span");
+    ic.className = "m3-toast-ic";
+    ic.innerHTML = _TOAST_ICON[kind] || _TOAST_ICON.info;
+    t.appendChild(ic);
+
+    const body = document.createElement("div");
+    body.className = "m3-toast-text";
+    body.textContent = text;
+    t.appendChild(body);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "m3-toast-copy";
+    btn.title = "复制这条通知";
+    btn.setAttribute("aria-label", "复制这条通知");
+    btn.innerHTML = _TOAST_COPY_SVG;
+    t.appendChild(btn);
+
+    // 长文本给更久，留出阅读与复制时间
+    const life = duration || Math.min(9000, Math.max(3000, 2400 + text.length * 45));
+    let timer = 0;
+    const dismiss = () => {
+      t.classList.add("out");
       setTimeout(() => t.remove(), 300);
-    }, duration);
+    };
+    const arm = (ms) => { clearTimeout(timer); timer = setTimeout(dismiss, ms); };
+
+    const doCopy = async () => {
+      if (await _copyText(text)) {
+        btn.innerHTML = _TOAST_DONE_SVG;
+        btn.classList.add("done");
+        btn.title = "已复制";
+        setTimeout(() => {
+          btn.innerHTML = _TOAST_COPY_SVG;
+          btn.classList.remove("done");
+          btn.title = "复制这条通知";
+        }, 1600);
+        arm(Math.max(life, 4000));
+      } else {
+        // 剪贴板被拦：全选文本，用户 Ctrl/Cmd+C 兜底
+        try {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(body);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (e) {}
+        btn.title = "自动复制失败，已选中文本，请手动 Ctrl+C";
+        arm(Math.max(life, 6000));
+      }
+    };
+
+    btn.addEventListener("click", (e) => { e.stopPropagation(); doCopy(); });
+    t.addEventListener("click", () => {
+      // 用户正在手动选词时不打断
+      try { if (String(window.getSelection())) return; } catch (e) {}
+      doCopy();
+    });
+
+    container.appendChild(t);
+    while (container.children.length > _TOAST_MAX) container.removeChild(container.firstChild);
+    arm(life);
   }
 
   // ---- 页内确认框 / 输入框（面板常跑在沙盒 iframe 中，原生 confirm/prompt 会被直接拦截导致按钮无响应） ----
@@ -731,24 +843,17 @@ async def render_text_to_image(text: str):
     if (_isSaving) { _saveDirty = true; return; }
     _isSaving = true;
 
-    const hint = document.getElementById("autoSaveHint");
     const payload = collectConfigFromUI();
     try {
-      if (hint) hint.textContent = "● 正在保存…";
       const res = await api.post("config", payload);
       if (res && res.ok) {
-        if (!silent) showToast("配置已自动保存并生效");
-        if (hint) {
-          hint.textContent = "● 已自动保存，修改即时生效";
-          setTimeout(() => { if (hint) hint.textContent = "自动保存已启用，修改即时生效"; }, 1800);
-        }
+        if (!silent) showToast("配置已自动保存并生效", "ok");
         currentConfig = payload;
       } else {
         throw new Error((res && res.error) || "保存返回异常");
       }
     } catch (e) {
-      if (hint) hint.textContent = "● 保存失败，请重试";
-      if (!silent) showToast("保存提示：" + e.message);
+      if (!silent) showToast("保存提示：" + e.message, "bad");
     } finally {
       _isSaving = false;
       if (_saveDirty) { _saveDirty = false; saveConfig(silent); }
