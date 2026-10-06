@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.7
+// Version: 1.3.13
 // ==========================================================================
 (function () {
   "use strict";
@@ -716,6 +716,9 @@ async def render_text_to_image(text: str):
     initAccentColor(cfg.ui_accent_color);
   }
 
+  // data-gid 选择器安全转义（gid 可能含引号等破坏选择器的字符）
+  function _gidq(g) { return String(g).replace(/["\\]/g, "\\$&"); }
+
   function collectConfigFromUI() {
     const enableEl = document.getElementById("cfgEnable");
     const minLenEl = document.getElementById("cfgMinLength");
@@ -786,12 +789,12 @@ async def render_text_to_image(text: str):
         const m = {};
         curList.forEach(gid=>{
           const prev = existing[gid] || {};
-          const slider = document.querySelector(`.sg-slider[data-gid="${gid}"]`);
-          const numEl = document.querySelector(`.sg-num[data-gid="${gid}"]`);
-          const stSel = document.querySelector(`.sg-style[data-gid="${gid}"]`);
-          const thSel = document.querySelector(`.sg-theme[data-gid="${gid}"]`);
-          const ftSel = document.querySelector(`.sg-font[data-gid="${gid}"]`);
-          const kwSel = document.querySelector(`.sg-kw[data-gid="${gid}"]`);
+          const slider = document.querySelector(`.sg-slider[data-gid="${_gidq(gid)}"]`);
+          const numEl = document.querySelector(`.sg-num[data-gid="${_gidq(gid)}"]`);
+          const stSel = document.querySelector(`.sg-style[data-gid="${_gidq(gid)}"]`);
+          const thSel = document.querySelector(`.sg-theme[data-gid="${_gidq(gid)}"]`);
+          const ftSel = document.querySelector(`.sg-font[data-gid="${_gidq(gid)}"]`);
+          const kwSel = document.querySelector(`.sg-kw[data-gid="${_gidq(gid)}"]`);
 
           let scaleVal = null;
           if (numEl && numEl.value !== "") {
@@ -843,8 +846,8 @@ async def render_text_to_image(text: str):
     if (_isSaving) { _saveDirty = true; return; }
     _isSaving = true;
 
-    const payload = collectConfigFromUI();
     try {
+      const payload = collectConfigFromUI();
       const res = await api.post("config", payload);
       if (res && res.ok) {
         if (!silent) showToast("配置已自动保存并生效", "ok");
@@ -2213,9 +2216,9 @@ async def render_text_to_image(text: str):
       if (e.target && e.target.classList.contains("sg-slider")) {
         const gid = e.target.getAttribute("data-gid");
         const val = parseInt(e.target.value, 10) || 100;
-        const numEl = document.querySelector(`.sg-num[data-gid="${gid}"]`);
+        const numEl = document.querySelector(`.sg-num[data-gid="${_gidq(gid)}"]`);
         if (numEl) numEl.value = val;
-        const valEl = document.querySelector(`.sg-val[data-gid="${gid}"]`);
+        const valEl = document.querySelector(`.sg-val[data-gid="${_gidq(gid)}"]`);
         if (valEl) valEl.textContent = val + "%";
         const cfgs = getGroupConfigs();
         if (!cfgs[gid]) cfgs[gid] = {};
@@ -2227,9 +2230,9 @@ async def render_text_to_image(text: str):
         const gid = e.target.getAttribute("data-gid");
         let val = parseInt(e.target.value, 10) || 100;
         val = Math.max(50, Math.min(500, val));
-        const slider = document.querySelector(`.sg-slider[data-gid="${gid}"]`);
+        const slider = document.querySelector(`.sg-slider[data-gid="${_gidq(gid)}"]`);
         if (slider) slider.value = val;
-        const valEl = document.querySelector(`.sg-val[data-gid="${gid}"]`);
+        const valEl = document.querySelector(`.sg-val[data-gid="${_gidq(gid)}"]`);
         if (valEl) valEl.textContent = val + "%";
         const cfgs = getGroupConfigs();
         if (!cfgs[gid]) cfgs[gid] = {};

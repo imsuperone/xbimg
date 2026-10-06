@@ -2487,6 +2487,7 @@ def _submit_prefetch(text: str, skip_singles: bool = False):
 
 def _fetch_remote_emoji_urllib(code: str, dest_dir: Path, tmp: Path) -> bool:
     """urllib 兜底通道（无 httpx 环境），与旧行为一致"""
+    global _EMOJI_REMOTE_DEAD_UNTIL  # 退避必须写到模块级，否则 600s 防抖永不生效
     import time as _time
     import urllib.error
     import urllib.request

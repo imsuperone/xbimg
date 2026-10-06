@@ -14,14 +14,14 @@ try:
         _COMPRESS_CANON, _compress_level,
     )
     from .moderation import ContentModerator
-    from .renderer import MessageImageRenderer
+    from .renderer import MessageImageRenderer, configure_fonts
 except (ImportError, ValueError):
     from core.common import (
         AstrImage, AstrMessageEvent, PLUGIN_NAME, filter, logger,
         _COMPRESS_CANON, _compress_level,
     )
     from core.moderation import ContentModerator
-    from core.renderer import MessageImageRenderer
+    from core.renderer import MessageImageRenderer, configure_fonts
 
 
 class CommandsMixin:
@@ -695,6 +695,7 @@ class CommandsMixin:
                     yield event.plain_result(f"✅ 成功将【{_gname(target)}】的字体切换为：{hit['name']}")
                 else:
                     self.cfg_mgr.save({"font_source": "custom", "custom_font_path": fname})
+                    configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
                     yield event.plain_result(f"✅ 全局字体已切换为：{hit['name']}")
                 return
             if action in ("reset", "default", "恢复默认", "重置"):
