@@ -366,17 +366,27 @@ class ConfigManager:
             except Exception:
                 pass
 
-    def save(self, new_cfg: Dict[str, Any] = None):
+    def save(self, new_cfg: Dict[str, Any] = None) -> bool:
+        """落盘配置，返回是否写入成功。
+
+        失败降级为仅内存态并告警，不再静默吞掉：聊天指令侧维持不中断，
+        WebUI 保存据返回值回传错误，避免「保存成功」假象。
+        """
         if new_cfg:
             self.config.update(new_cfg)
+        ok = True
         try:
             # 原子落盘：先写 tmp 再替换，避免写一半断电损坏配置
             tmp = self.cfg_file.with_name(f"config.json.tmp.{os.getpid()}")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
             os.replace(str(tmp), str(self.cfg_file))
-        except Exception:
-            pass
+        except Exception as e:
+            ok = False
+            try:
+                logger.warning(f"[{PLUGIN_NAME}] 配置落盘失败 {self.cfg_file}: {e}")
+            except Exception:
+                pass
         # save 时顺带把节流中的统计落盘，避免进程退出丢数
         self._flush_stats()
 
@@ -402,6 +412,7 @@ class ConfigManager:
                     self.raw_cfg.save()
             except Exception:
                 pass
+        return ok
 
     def get_presets_update_status(self) -> Dict[str, Any]:
         """检测内置官方词库相对本地是否有更新，返回差异明细（只读，不改配置）"""

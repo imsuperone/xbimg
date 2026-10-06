@@ -1258,6 +1258,16 @@ def _download_file(url: str, dest: Path) -> Tuple[bool, str]:
     同目标并发由锁串行化；成功后清理同目标其他 URL 的残留分片。
     """
     import hashlib as _hl
+    from urllib.parse import urlsplit as _urlsplit
+
+    # SSRF 护栏：只放行 http/https——file:// 能读本地文件，ftp/data 等亦一律拒绝。
+    # custom_font_url 是本函数唯一的用户可配来源，其余调用方均为内置固定链接
+    try:
+        _scheme = _urlsplit(str(url or "")).scheme.lower()
+    except Exception:
+        _scheme = ""
+    if _scheme not in ("http", "https"):
+        return False, f"不支持的链接协议「{_scheme or '空'}」，仅允许 http/https"
 
     try:
         url_hash = _hl.sha1(str(url or "").encode("utf-8", "ignore")).hexdigest()[:8]

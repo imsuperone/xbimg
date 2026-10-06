@@ -247,7 +247,7 @@ class WebApiMixin:
                         payload[_k] = max(0, int(payload[_k]))
                 except Exception:
                     pass
-            self.cfg_mgr.save(payload)
+            saved_ok = self.cfg_mgr.save(payload)
             self._group_cache_sig = None  # 群名单可能变化，清缓存
             try:
                 if "emoji_style" in payload:
@@ -259,6 +259,12 @@ class WebApiMixin:
             except Exception as e:
                 logger.warning(f"[{PLUGIN_NAME}] 字体配置同步异常: {e}")
             self.moderator = ContentModerator(self.cfg_mgr.config)
+            if not saved_ok:
+                # 内存已按新配置生效，但磁盘没写上：如实报错，避免「保存成功」假象
+                return error_response(
+                    "配置已生效到内存，但写入配置文件失败（检查磁盘空间/权限），重启后将丢失",
+                    status_code=500,
+                )
             return json_response({"ok": True, "config": self.cfg_mgr.config})
         except Exception as e:
             return error_response(f"保存失败: {e}", status_code=500)
@@ -786,8 +792,10 @@ class WebApiMixin:
         try:
             payload = await request.json(default={})
             name = str(payload.get("name", "") or "").strip()
-            # 仅允许纯文件名，拒绝任何路径成分
-            if not name or name in (".", "..") or "/" in name or "\\" in name:
+            # 仅允许纯文件名：拒路径成分，也拒冒号——Windows 下 "C:x.ttf"
+            # （盘符相对路径，拼接会整个跳出字体目录）与 "evil:font.ttf"
+            # （NTFS ADS 数据流）都能绕过斜杠检查
+            if not name or name in (".", "..") or "/" in name or "\\" in name or ":" in name:
                 return error_response("非法文件名", status_code=400)
             if not name.lower().endswith((".ttf", ".ttc", ".otf", ".dfont")):
                 return error_response("仅允许删除字体文件", status_code=400)
