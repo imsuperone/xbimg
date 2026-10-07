@@ -2384,6 +2384,49 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         self.assertNotIn("文本甲", str(key))
         self.assertIsInstance(_stable_seed(str(key)), int)
 
+    def test_gradient_cache_no_ghost_across_messages(self):
+        """渐变缓存不串染：连续渲染两条同尺寸消息，第二张不得透出第一条的残影
+
+        回归背景：_fast_linear_gradient 未命中时曾把原始对象存进缓存并返回，
+        _draw_page 就地 paste 阴影/卡片把整张卡片（含文字）烙进缓存，
+        之后同尺寸的每张图都叠出上一条消息“淡淡的印记”。
+        """
+        from PIL import ImageChops
+        from core.renderer import (
+            MessageImageRenderer, _GRADIENT_CACHE, _RENDER_CACHE, _LAYOUT_CACHE,
+        )
+
+        caches = (_GRADIENT_CACHE, _RENDER_CACHE, _LAYOUT_CACHE)
+        for c in caches:
+            c.clear()
+            self.addCleanup(c.clear)
+
+        def mk(seed: int) -> str:
+            # 结构一致（同段落数/同字数）→ 同布局 → 画布尺寸相同 → 渐变缓存键相同
+            return "\n\n".join(
+                "".join(chr(0x4E00 + (seed * 37 + i * 13 + j) % 6000) for j in range(36))
+                for i in range(8)
+            )
+
+        img_a = MessageImageRenderer.render(
+            mk(1), star_background=False, emoji_remote=False,
+        )
+        img_b = MessageImageRenderer.render(
+            mk(7), star_background=False, emoji_remote=False,
+        )
+        self.assertEqual(img_a.size, img_b.size, "前置条件：两条消息画布尺寸需一致")
+        self.assertGreater(len(_GRADIENT_CACHE), 0)
+
+        # 干净基准：清掉渐变缓存后重渲 B
+        for c in caches:
+            c.clear()
+        img_clean = MessageImageRenderer.render(
+            mk(7), star_background=False, emoji_remote=False,
+        )
+        self.assertEqual(img_b.size, img_clean.size)
+        ghost = ImageChops.difference(img_b, img_clean).getbbox()
+        self.assertIsNone(ghost, f"第二张图透出了上一条消息的残影，差异区域 {ghost}")
+
     def test_prefetch_submits_to_pool(self):
         """预取可提交到共享线程池并正常汇合（layout 并行路径冒烟）"""
         from core.renderer import _submit_prefetch, _prefetch_emoji_images

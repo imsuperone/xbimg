@@ -3110,7 +3110,10 @@ def _fast_linear_gradient(
         try:
             if len(_GRADIENT_CACHE) >= _GRADIENT_CACHE_LIMIT:
                 _GRADIENT_CACHE.pop(next(iter(_GRADIENT_CACHE)))
-            _GRADIENT_CACHE[gkey] = out
+            # 缓存只存“未绘制”的纯净副本：调用方拿到 out 后会就地 paste 阴影与整张
+            # 卡片（含正文），直接存 out 会把上一条消息烙进缓存，之后同尺寸的每张图
+            # 都会透出它的残影（卡片底半透明 245，残影约 4% 可见度，即“淡淡的印记”）
+            _GRADIENT_CACHE[gkey] = out.copy()
         except Exception:
             pass
     return out
