@@ -21,3 +21,7 @@ aidoc/
 backup_1_1_6/
 .omo/
 
+
+# 测试不进 GitHub（zip 已由 pack.py 排除）
+test_*.py
+tests/
