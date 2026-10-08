@@ -1303,6 +1303,22 @@ class HandlersMixin:
             return ""
         return "\n🔗 快捷直达链接：\n" + "\n".join(urls[:5])
 
+    @staticmethod
+    def _is_link_append_block(text: str) -> bool:
+        """text 是否恰为 _link_append_text 产出的链接块。
+
+        主钩子把链接块作为 Plain 追加进消息链，适配器拿到的正是这段文本；
+        按同一规则重新生成必须逐字相同，才能判定它是链接块而非普通正文。
+        """
+        try:
+            t = (text or "").strip()
+            if not t:
+                return False
+            block = HandlersMixin._link_append_text(t, "extract_append").strip()
+        except Exception:
+            return False
+        return bool(block) and block == t
+
     async def _pipeline_text_to_images(
         self, full_text: str, *, gid: str, grp_custom: Dict[str, Any],
         render_trigger: str, session: str,
@@ -1381,6 +1397,14 @@ class HandlersMixin:
             if violated:
                 logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> blocked=False mosaic={mosaic}")
             if not imgs:
+                # 违规却一张图都没渲染出来：不能落回 miss（调用方会把原文
+                # 原样发出 = fail-open），按 blocked 处置。
+                # record_render 已在上面记过账，这里不重复记
+                if violated:
+                    self._set_text_render_outcome(_claim, "blocked")
+                    logger.info(f"[{PLUGIN_NAME}] 触发安全审查 -> 渲染为空，blocked=True")
+                    _pt.set_blocked()
+                    return ("blocked", [])
                 self._release_text_render(_claim)
                 return ("miss", [])
             _pt.before_save()
@@ -1430,6 +1454,12 @@ class HandlersMixin:
                 return message
 
             if self._is_cmd_reply_skip(full_text):
+                return message
+
+            # extract_append 追加的链接块只由主钩子负责：它已经随图发过一次，
+            # 适配器再转图会多出一张“链接文字图”并把链接重复附一遍
+            if (str(cfg.get("link_mode", "as_image") or "as_image") == "extract_append"
+                    and self._is_link_append_block(full_text)):
                 return message
 
             try:
@@ -1689,16 +1719,26 @@ class HandlersMixin:
                             yield p
 
                 deleted: List[Path] = []
-                cached_files = sorted(_sweep_names(), key=lambda p: p.stat().st_mtime)
+
+                def _mtime(p):
+                    # 清扫与渲染线程并发，条目可能在 iterdir 与 stat 之间被删；
+                    # 单个 stat 失败只丢该条目，不能让整轮清扫跳过
+                    try:
+                        return p.stat().st_mtime
+                    except OSError:
+                        return None
+
+                cached_files = sorted(_sweep_names(), key=lambda p: _mtime(p) or 0.0)
                 for p in cached_files:
                     try:
-                        if now - p.stat().st_mtime > 3600:  # 超过 1 小时清除
+                        mt = _mtime(p)
+                        if mt is not None and now - mt > 3600:  # 超过 1 小时清除
                             p.unlink(missing_ok=True)
                             deleted.append(p)
                     except Exception:
                         pass
                 # 数量兜底：超过 300 张删最旧的（防止高频群聊打爆磁盘）
-                remain = sorted(_sweep_names(), key=lambda p: p.stat().st_mtime)
+                remain = sorted(_sweep_names(), key=lambda p: _mtime(p) or 0.0)
                 for p in remain[:-300]:
                     try:
                         p.unlink(missing_ok=True)

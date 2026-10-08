@@ -2438,6 +2438,130 @@ class TestMsg2ImgPlugin(unittest.TestCase):
         # 空文本直接短路
         self.assertEqual(_prefetch_emoji_images(""), (0, True))
 
+    def test_adapter_skips_extract_append_link_block(self):
+        """回归：extract_append 链接块不得被适配器二次转图（多一张链接图+链接重复）"""
+        import asyncio
+        from main import Msg2ImgPlugin
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["group_mode"] = "all"
+        cfg["link_mode"] = "extract_append"
+        plugin = Msg2ImgPlugin(context=None, config=cfg)
+        plugin.moderator = ContentModerator(plugin.cfg_mgr.config)
+
+        link = plugin._link_append_text("https://example.com/a", "extract_append")
+        self.assertTrue(link, "前置条件：extract_append 应产出链接块")
+        segs = [
+            {"type": "image", "data": {"file": "https://example.com/a.png"}},
+            {"type": "text", "data": {"text": link}},
+        ]
+
+        async def _go():
+            return await plugin._transform_onebot_message("999", list(segs))
+
+        out = asyncio.run(_go())
+        # 链接块原样放行：不多出图片段、链接文本不被转走
+        self.assertEqual(out, segs)
+        self.assertEqual(
+            len([s for s in out if isinstance(s, dict) and s.get("type") == "image"]), 1
+        )
+
+    def test_adapter_blocked_when_violation_renders_nothing(self):
+        """回归：审查判违规但渲染零输出时必须 blocked，不得落回 miss 放行原文"""
+        import asyncio
+        from main import Msg2ImgPlugin
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["group_mode"] = "all"
+        cfg["moderation_mode"] = "keywords"
+        cfg["custom_keywords"] = "赌博"
+        cfg["violation_action"] = "mosaic_half"  # 非 block：会走到渲染
+        plugin = Msg2ImgPlugin(context=None, config=cfg)
+        plugin.moderator = ContentModerator(plugin.cfg_mgr.config)
+
+        async def _empty_render(*a, **k):
+            return []
+
+        plugin._render_moderated = _empty_render
+        text = "今晚赌博局见，务必参加"
+
+        async def _go():
+            return await plugin._pipeline_text_to_images(
+                text, gid="999", grp_custom={}, render_trigger="always", session="群999"
+            )
+
+        status, payload = asyncio.run(_go())
+        self.assertEqual(status, "blocked")
+        self.assertEqual(payload, [])
+        info = plugin._text_render_info(text)
+        self.assertIsNotNone(info)
+        self.assertEqual(info.get("outcome"), "blocked")
+
+    def test_split_pages_keeps_violation_word_intact(self):
+        """回归：违规词被页边界劈开时不得切页（否则两半都匹配不到、漏打码）"""
+        from core.renderer import LineBlock, _split_content_pages
+
+        def entry(t, h=40):
+            return (t, LineBlock(text=t, block_type="text", font_size=26, is_bold=False), h)
+
+        lines = [entry("前文内容铺满这一行以赌"), entry("博局后文继续")]
+        # 不带违规词：按高度正常切成 2 页
+        plain = _split_content_pages(lines, 50)
+        self.assertEqual(len(plain), 2)
+        # 带违规词：页尾「赌」+ 下行「博」→ 合并到同一页
+        kept = _split_content_pages(lines, 50, violation_words=["赌博"])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(kept[0]), 2)
+        # 不相关关键词不阻止切页
+        other = _split_content_pages(lines, 50, violation_words=["无关词"])
+        self.assertEqual(len(other), 2)
+
+    def test_needs_cjk_download_no_data_dir(self):
+        """回归：字体数据目录不可用时 needs_cjk_download 不得抛 TypeError"""
+        from core import renderer as R
+        with mock.patch.object(R, "_FONT_DATA_DIR", Path(self._iso_tmp.name)), \
+                mock.patch.object(R, "_font_data_dir", return_value=None), \
+                mock.patch.dict(R._FONT_CONF, {"font_source": "auto",
+                                               "custom_font_url": "https://x.com/a.ttf"}):
+            self.assertIsInstance(R.needs_cjk_download(), bool)
+
+    def test_render_cache_skips_incomplete_prefetch(self):
+        """回归：emoji 预算内没下完的降级图不得写入渲染缓存（否则后续全拿残缺图）"""
+        from core.renderer import MessageImageRenderer, _RENDER_CACHE
+        _RENDER_CACHE.clear()
+        self.addCleanup(_RENDER_CACHE.clear)
+        text = "预取完整性缓存测试ABC"
+        with mock.patch("core.renderer._prefetch_emoji_images", return_value=(0, False)):
+            img = MessageImageRenderer._render_pages_inner(
+                text=text, emoji_style="android", emoji_remote=True,
+            )
+        self.assertTrue(img)
+        self.assertEqual(len(_RENDER_CACHE), 0, "降级渲染结果不应入缓存")
+        with mock.patch("core.renderer._prefetch_emoji_images", return_value=(0, True)):
+            img2 = MessageImageRenderer._render_pages_inner(
+                text=text, emoji_style="android", emoji_remote=True,
+            )
+        self.assertTrue(img2)
+        self.assertEqual(len(_RENDER_CACHE), 1, "完整渲染结果应正常入缓存")
+
+    def test_config_save_tmp_names_unique(self):
+        """回归：并发 save 的 tmp 名必须互不相同（同名 tmp 会互相截断）"""
+        mgr = ConfigManager()
+        seen = []
+        real_replace = os.replace
+
+        def spy(a, b):
+            seen.append(Path(a).name)
+            return real_replace(a, b)
+
+        with mock.patch("os.replace", side_effect=spy):
+            mgr.save()
+            mgr.save()
+        cfg_tmps = [n for n in seen if n.startswith("config.json.tmp.")]
+        self.assertEqual(len(cfg_tmps), 2)
+        self.assertNotEqual(cfg_tmps[0], cfg_tmps[1], "两次落盘用了同名 tmp")
+        # 落盘后无残留 tmp
+        leftovers = list(mgr.data_dir.glob("config.json.tmp.*"))
+        self.assertEqual(leftovers, [])
+
 
 if __name__ == "__main__":
     unittest.main()

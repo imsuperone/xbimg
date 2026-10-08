@@ -1209,8 +1209,9 @@ def needs_cjk_download() -> bool:
     if src == "system":
         return False
     custom_url = (_FONT_CONF.get("custom_font_url") or "").strip()
-    if custom_url and _FONT_DATA_DIR is not None:
-        target = _font_data_dir() / _safe_font_filename(custom_url)
+    _dir = _font_data_dir()
+    if custom_url and _dir is not None:
+        target = _dir / _safe_font_filename(custom_url)
         if not _is_usable_font(str(target)):
             return True
     if src == "custom":
@@ -3319,7 +3320,29 @@ def _truncated_line(font_scale: int = 100):
     )
 
 
-def _split_content_pages(rendered_lines, max_content: float, font_scale: int = 100, max_pages: int = MAX_CONTENT_PAGES):
+def _split_would_break_word(cur, nxt, violation_words) -> bool:
+    """页尾恰好是某违规词的前缀、且下一行以该词余下部分开头 → 不在此切页。
+
+    违规词的字级打码在单页内按整词匹配定位，跨页会两半都匹配不到而漏打。
+    """
+    if not violation_words:
+        return False
+    cur_tail = "".join(e[0] for e in cur)[-128:].lower()
+    nxt_text = (nxt[0] or "").lower()
+    if not cur_tail or not nxt_text:
+        return False
+    for kw in violation_words:
+        k = (kw or "").strip().lower()
+        if not k:
+            continue
+        for cut in range(1, len(k)):
+            if cur_tail.endswith(k[:cut]) and nxt_text.startswith(k[cut:]):
+                return True
+    return False
+
+
+def _split_content_pages(rendered_lines, max_content: float, font_scale: int = 100,
+                         max_pages: int = MAX_CONTENT_PAGES, violation_words=None):
     """按单页高度上限切分排版行；非末页追加未完待续行，超页数上限末页追加截断行"""
     pages: List[List[Tuple[str, LineBlock, int]]] = []
     cur: List[Tuple[str, LineBlock, int]] = []
@@ -3327,9 +3350,12 @@ def _split_content_pages(rendered_lines, max_content: float, font_scale: int = 1
     for entry in rendered_lines:
         _, _, lh = entry
         if cur and cur_h + lh > max_content:
-            pages.append(cur)
-            cur = []
-            cur_h = 0
+            if _split_would_break_word(cur, entry, violation_words):
+                pass  # 让违规词留在同一页，代价是本页略超高
+            else:
+                pages.append(cur)
+                cur = []
+                cur_h = 0
         cur.append(entry)
         cur_h += lh
     if cur:
@@ -3631,8 +3657,9 @@ class MessageImageRenderer:
                 pass
         # emoji 缺图预取与排版并行：先提交线程池，layout 跑完再汇合，
         # prefetch_ms 只计阻塞等待（与 layout 重叠的时间不计入本次延迟）
+        # _pf_complete：预取是否在预算内取完全部 todo（返回元组第二位即 complete）
         _pf_fut = None
-        _pf_incomplete = False
+        _pf_complete = True
         try:
             if _nes is not None and _nes != "none":
                 try:
@@ -3667,7 +3694,7 @@ class MessageImageRenderer:
             if _pf_fut is not None:
                 if perf_out is not None:
                     _t_pf = time.perf_counter()
-                _, _pf_incomplete = _pf_fut.result(timeout=max(1.0, _EMOJI_PREFETCH_BUDGET_S + 1.0))
+                _, _pf_complete = _pf_fut.result(timeout=max(1.0, _EMOJI_PREFETCH_BUDGET_S + 1.0))
                 if perf_out is not None:
                     perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
             elif ctx["emoji_remote_eff"]:
@@ -3678,15 +3705,19 @@ class MessageImageRenderer:
                     _skip_1 = False
                 if perf_out is not None:
                     _t_pf = time.perf_counter()
-                    _, _pf_incomplete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
+                    _, _pf_complete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
                     perf_out["prefetch_ms"] = (time.perf_counter() - _t_pf) * 1000.0
                 else:
-                    _, _pf_incomplete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
+                    _, _pf_complete = _prefetch_emoji_images(ctx["text"], skip_singles=_skip_1)
         except Exception:
             pass
-        # 预算内没下完：本次禁止绘制路径串行拉网（否则每个缺图又是 3s 超时）
-        _draw_remote = ctx["emoji_remote_eff"] and not _pf_incomplete
-        pages = _split_content_pages(ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"])
+        # 预取没在预算内取完：本次禁止绘制路径串行拉网（否则每个缺图又是 3s 超时），
+        # 且本张是缺 emoji 的降级图，不入渲染缓存
+        _draw_remote = ctx["emoji_remote_eff"] and _pf_complete
+        pages = _split_content_pages(
+            ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"],
+            violation_words=violation_words,
+        )
         total = len(pages)
         if perf_out is not None:
             _t_draw = time.perf_counter()
@@ -3708,8 +3739,9 @@ class MessageImageRenderer:
                 perf_out["draw_ms"] = float(perf_out.get("draw_ms", 0.0)) + (time.perf_counter() - _t_draw) * 1000.0
             except Exception:
                 pass
-        # 仅缓存小体量结果，避免大长图堆内存
-        if cache_key is not None and len(images) <= 2:
+        # 仅缓存小体量结果，避免大长图堆内存；
+        # 预算内没下完 emoji 时本次是降级图（缺 emoji 未补全），也不入缓存
+        if cache_key is not None and len(images) <= 2 and _pf_complete:
             try:
                 if len(_RENDER_CACHE) >= _RENDER_CACHE_LIMIT:
                     _RENDER_CACHE.pop(next(iter(_RENDER_CACHE)))

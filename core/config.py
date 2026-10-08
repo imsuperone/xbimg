@@ -377,7 +377,9 @@ class ConfigManager:
         ok = True
         try:
             # 原子落盘：先写 tmp 再替换，避免写一半断电损坏配置
-            tmp = self.cfg_file.with_name(f"config.json.tmp.{os.getpid()}")
+            # tmp 名带随机后缀：save() 可能在线程池里与事件循环并发调用，
+            # 同名 tmp 会让两个写入方互相截断
+            tmp = self.cfg_file.with_name(f"config.json.tmp.{os.getpid()}.{os.urandom(4).hex()}")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
             os.replace(str(tmp), str(self.cfg_file))
@@ -526,7 +528,7 @@ class ConfigManager:
         if self._stats is None:
             return
         try:
-            tmp = self.stats_file.with_name(f"stats.json.tmp.{os.getpid()}")
+            tmp = self.stats_file.with_name(f"stats.json.tmp.{os.getpid()}.{os.urandom(4).hex()}")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._stats, f, ensure_ascii=False, indent=2)
             os.replace(str(tmp), str(self.stats_file))
