@@ -2,7 +2,7 @@
 
 ## 版本公告
 
-当前版本：**v1.3.19**（要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`）
+当前版本：**v1.3.20**（要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`）
 
 本插件用于将机器人发送的纯文本消息自动渲染为高品质图片，并提供内容安全审查与 Web 可视化控制台。
 
@@ -21,7 +21,7 @@
 - **违规处置**：`half` 打一半马赛克 / `full` 全文打码 / `block` 彻底拦截 / `notice` 替换为合规警示卡片；马赛克支持 `pixel` 像素块 / `blur` 高斯模糊，半码位置 `bottom / top / random`，字级精准打码。
 - **群组精细化**：`whitelist / all / blacklist` 三种生效模式，单群可独立设置字体、风格、主题、词库、精选字体。
 - **字体与 Emoji 管理**：6 款精选中文字体（思源黑体 / 思源宋体 / 霞鹜文楷 / 站酷快乐体 / 马善政毛笔 / macOS 苹方）一键下载卸载无锁定；`ios / android / windows / none` 四种 Emoji 样式按需下载，支持云端补全与本地缓存。
-- **WebUI 控制台**：AstrBot 后台单列全屏仪表盘，含实时文本渲染测试台、字体 / Emoji / 词库管理，手机电脑自适应，修改即自动保存。
+- **WebUI 控制台**：AstrBot 后台单列全屏仪表盘，含实时文本渲染测试台、字体 / Emoji / 词库管理，手机电脑自适应，修改即自动保存。测试台的打码由预览页「不打码 / 半字遮蔽 / 全文遮蔽」独立开关控制，与正式违规处置配置解耦（默认不打码）。
 - **高优先级无损拦截**：`on_decorating_result(priority=99999)` 与适配器 `send_group_msg / call_action` 双钩子，保留 At / Reply / 图片音视频段，与 `xbbot` 等业务插件兼容。
 
 ---
@@ -144,7 +144,7 @@ WebUI 端点（`webapi.py`，均以 `/{插件名}` 为前缀）：`config`(GET/P
 - **handlers.py / renderer.py 拆文件**：补丁与落盘、字体/emoji IO 与排版绘制确实是两类职责，但两者都是热路径相邻代码，拆分要移动大量被测试直接引用的成员（`test_plugin.py` 经 plugin 实例访问），风险与收益不匹配。**另开任务按需做。**
 - **`render_pages` 与 `_render_pages_inner` 参数抄送**：测试直接调 `_render_pages_inner`，合入需改测试签名，收益低。**保留。**
 
-以上为审查结论；已收敛项见 changelog v1.3.19。
+以上为审查结论；已收敛项的逐条说明见 v1.3.19 提交记录（changelog 按惯例只保留最新版）。
 
 ---
 

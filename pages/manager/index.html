@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.3.19" />
+  <link rel="stylesheet" href="./style.css?v=1.3.20" />
   <!-- 主题色/深浅色存在服务端配置里（唯一真相源，无本地副本），需等 config 回来才套用；
        首帧先挂起，避免"先见默认色、再跳成已存色"。回填后由 revealUiPrefs() 揭开，3s 兜底。 -->
   <style>
@@ -25,7 +25,7 @@
     <header class="top-bar">
       <div class="top-bar-brand">
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.19">1.3.19</span></h1>
+          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.20">1.3.20</span></h1>
         </div>
       </div>
       <div class="top-bar-actions">
@@ -548,6 +548,17 @@
             <textarea id="previewInput" class="m3-textarea" rows="5" placeholder="请输入待转换为图片的测试文本…"></textarea>
           </div>
 
+          <!-- 预览专用打码开关：与正式配置 violation_action 完全解耦（预览只是浏览测试） -->
+          <div class="form-group">
+            <label class="form-label">预览打码</label>
+            <div class="m3-segmented-control" id="segPreviewMosaic">
+              <button type="button" class="seg-item active" data-val="none">不打码</button>
+              <button type="button" class="seg-item" data-val="half">半字遮蔽</button>
+              <button type="button" class="seg-item" data-val="full">全文遮蔽</button>
+            </div>
+            <span class="field-hint">仅影响本页预览，不改动正式配置；遮蔽方式与半字位置仍跟随「内容安全」设置。</span>
+          </div>
+
           <!-- Live Preview Image Box -->
           <div class="preview-stage-wrap" style="min-height: 460px;">
             <div class="stage-placeholder" id="previewEmptyPlaceholder">
@@ -573,6 +584,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.3.19"></script>
+  <script src="./app.js?v=1.3.20"></script>
 </body>
 </html>

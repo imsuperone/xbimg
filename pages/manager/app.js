@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.19
+// Version: 1.3.20
 // ==========================================================================
 (function () {
   "use strict";
@@ -1654,29 +1654,22 @@ async def render_text_to_image(text: str):
   // ==========================================
   // 仅选择模板填入输入框（不自动触发生成）
   // ==========================================
-  let _activeMosaicMode = "none";
-  let _mosaicUserPinned = false;
-
-  // B-7: 预览打码跟随当前违规处置配置（half/full/block/notice→half/full/none），模板显式选择优先
+  // 预览打码只由预览页的 segPreviewMosaic 决定（默认不打码）。
+  // 与正式配置 violation_action 完全解耦——预览只是浏览测试，不该被生产策略牵着一直打码。
   function resolvePreviewMosaicMode() {
-    if (_mosaicUserPinned && (_activeMosaicMode === "half" || _activeMosaicMode === "full")) return _activeMosaicMode;
-    const va = getRadioValue("violationAction", (currentConfig && currentConfig.violation_action) || "mosaic_half");
-    if (va === "mosaic_full") return "full";
-    if (va === "mosaic_half") return "half";
-    return "none";
+    return getSegmentedValue("segPreviewMosaic", "none");
   }
 
   function applyPreset(tplKey) {
     const inputEl = document.getElementById("previewInput");
     if (PRESET_TEMPLATES[tplKey]) {
       if (inputEl) inputEl.value = PRESET_TEMPLATES[tplKey];
+      // 「半字遮蔽效果」模板自动切到遮蔽；其余模板一律还原为不打码
       if (tplKey === "mosaic") {
         const va = getRadioValue("violationAction", (currentConfig && currentConfig.violation_action) || "mosaic_half");
-        _activeMosaicMode = va === "mosaic_full" ? "full" : "half";
-        _mosaicUserPinned = true;
+        setSegmentedValue("segPreviewMosaic", va === "mosaic_full" ? "full" : "half");
       } else {
-        _activeMosaicMode = "none";
-        _mosaicUserPinned = false;
+        setSegmentedValue("segPreviewMosaic", "none");
       }
 
       // 视觉高亮选中的选项胶囊
@@ -2066,6 +2059,13 @@ async def render_text_to_image(text: str):
           segItem.classList.add("active");
           const val = segItem.getAttribute("data-val");
 
+          // 预览打码开关：临时浏览选择，不写入配置；已有预览图则立即重渲染
+          if (parent.id === "segPreviewMosaic") {
+            const pImg = document.getElementById("previewImage");
+            if (pImg && pImg.style.display !== "none" && pImg.src) triggerPreview();
+            return;
+          }
+
           // 生效模式切换动态更新底部提示
           if (parent.id === "segGroupMode") {
             const curList = document.getElementById("cfgGroupList")?.value || "";
@@ -2204,10 +2204,6 @@ async def render_text_to_image(text: str):
 
     // 输入类即时保存
     document.addEventListener("input", function (e) {
-      // B-7: 手动改字时清除非显式固定的打码选择，避免模板残留导致预览与正文不符
-      if (e.target && e.target.id === "previewInput") {
-        if (!_mosaicUserPinned && _activeMosaicMode !== "none") _activeMosaicMode = "none";
-      }
       if (e.target && e.target.id === "cfgGroupList") {
         updateGroupChipsSelection();
         updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), e.target.value);
