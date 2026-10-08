@@ -3427,37 +3427,13 @@ class MessageImageRenderer:
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
-        # 1. 参数归一化（先 lower 再校验，兼容 "IOS"/"Light" 等大小写）
-        text = str(text or "").strip()
-        style = str(style or "ios").lower()
-        if style not in ("ios", "android16"):
-            style = "ios"
-        theme_mode = str(theme_mode or "light").lower()
-        if theme_mode not in ("light", "dark"):
-            theme_mode = "light"
+        # 1. 参数归一化：唯一实现在 _norm_cache_params（缓存键与排版同源，杜绝两套规则漂移）
+        text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style = _norm_cache_params(
+            text, style, theme_mode, mosaic_half_pos, font_scale,
+            emoji_style=emoji_style, emoji_remote=emoji_remote,
+        )
         theme = THEMES.get((style, theme_mode), THEMES[("ios", "light")])
-        mosaic_half_pos = str(mosaic_half_pos or "bottom").lower()
-        if mosaic_half_pos not in ("top", "bottom", "random"):
-            mosaic_half_pos = "bottom"
-        try:
-            font_scale = int(font_scale)
-        except Exception:
-            font_scale = 100
-        font_scale = max(50, min(500, font_scale))
         _sc = lambda v: max(6, int(round(v * font_scale / 100)))
-        # emoji 样式归一化（兼容旧 bool）
-        if emoji_style is None:
-            # 兼容旧调用：emoji_remote bool
-            if isinstance(emoji_remote, str):
-                emoji_style = str(emoji_remote).lower()
-                if emoji_style not in ("none", "ios", "android", "windows"):
-                    emoji_style = _EMOJI_STYLE
-            else:
-                emoji_style = _EMOJI_STYLE if _EMOJI_STYLE in ("none", "ios", "android", "windows") else ("android" if bool(emoji_remote) else "none")
-        else:
-            emoji_style = str(emoji_style).lower()
-            if emoji_style not in ("none", "ios", "android", "windows"):
-                emoji_style = "none"
         # 是否允许云端
         emoji_remote_eff = emoji_style != "none"
 
@@ -3714,6 +3690,14 @@ class MessageImageRenderer:
         # 预取没在预算内取完：本次禁止绘制路径串行拉网（否则每个缺图又是 3s 超时），
         # 且本张是缺 emoji 的降级图，不入渲染缓存
         _draw_remote = ctx["emoji_remote_eff"] and _pf_complete
+        # 绘制参数注入 ctx（ctx 每次调用都是新 dict：命中取 dict(_lhit) 副本、
+        # 未命中建新 dict 后以 dict(ctx) 入缓存，注入不会污染 _LAYOUT_CACHE）
+        ctx.update(
+            star_background=star_background, star_density=star_density,
+            mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
+            violation_words=violation_words,
+            emoji_remote_eff=_draw_remote, perf_out=perf_out,
+        )
         pages = _split_content_pages(
             ctx["rendered_lines"], ctx["max_content"], ctx["font_scale"],
             violation_words=violation_words,
@@ -3722,16 +3706,7 @@ class MessageImageRenderer:
         if perf_out is not None:
             _t_draw = time.perf_counter()
         images = [
-            cls._draw_page(
-                ctx, pg, idx, total,
-                star_background=star_background, star_density=star_density,
-                mosaic_mode=mosaic_mode, mosaic_type=mosaic_type,
-                mosaic_half_pos=ctx["mosaic_half_pos"],
-                violation_words=violation_words,
-                emoji_remote_eff=_draw_remote,
-                emoji_style=ctx["emoji_style"],
-                perf_out=perf_out,
-            )
+            cls._draw_page(ctx, pg, idx, total)
             for idx, pg in enumerate(pages)
         ]
         if perf_out is not None:
@@ -3757,17 +3732,12 @@ class MessageImageRenderer:
         page_lines: List[Tuple[str, LineBlock, int]],
         page_idx: int,
         total_pages: int,
-        star_background: bool = True,
-        star_density: str = "medium",
-        mosaic_mode: str = "none",
-        mosaic_type: str = "pixel",
-        mosaic_half_pos: str = "bottom",
-        violation_words: Optional[List[str]] = None,
-        emoji_remote_eff: bool = True,
-        emoji_style: str = "none",
-        perf_out: Optional[Dict[str, float]] = None,
     ) -> Image.Image:
-        """绘制单页卡片（render_pages 与 render 多页首屏使用）"""
+        """绘制单页卡片（render_pages 与 render 多页首屏使用）。
+
+        绘制参数（星空/打码/emoji/性能回填）全部取自 ctx，由
+        _render_pages_inner 在排版后注入，避免逐层抄送十几个形参。
+        """
         style = ctx["style"]
         theme = ctx["theme"]
         theme_mode = ctx["theme_mode"]
@@ -3778,6 +3748,15 @@ class MessageImageRenderer:
         footer_gap = ctx["footer_gap"]
         footer_block = ctx["footer_block"]
         inner_pad_x = ctx["inner_pad_x"]
+        star_background = ctx["star_background"]
+        star_density = ctx["star_density"]
+        mosaic_mode = ctx["mosaic_mode"]
+        mosaic_type = ctx["mosaic_type"]
+        mosaic_half_pos = ctx["mosaic_half_pos"]
+        violation_words = ctx["violation_words"]
+        emoji_style = ctx["emoji_style"]
+        emoji_remote_eff = ctx["emoji_remote_eff"]
+        perf_out = ctx["perf_out"]
         content_h = sum(lh for _, _, lh in page_lines)
         card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
         margin_x = 30

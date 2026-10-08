@@ -1319,6 +1319,57 @@ class HandlersMixin:
             return False
         return bool(block) and block == t
 
+    @staticmethod
+    def _has_link(text: str) -> bool:
+        """text 中是否含可点击链接（keep_text 放行判断用；文案产出见 _link_append_text）"""
+        try:
+            return bool(_clean_urls(_URL_PATTERN.findall(text or "")))
+        except Exception:
+            return False
+
+    def _should_transform(
+        self, full_text: str, gid: str,
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """三入口共用准入判断：字数门槛 → keep_text 放行 → violation_only 关键词预检。
+
+        通过返回 (render_trigger, grp_custom)，不通过返回 None（调用方原样放行）。
+        入口特有的检查（cmd 回执跳过、链接块识别、媒体占比）留在各调用方。
+        """
+        cfg = self.cfg_mgr.config
+        try:
+            min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
+        except Exception:
+            min_threshold = 1
+        if len(full_text) < min_threshold:
+            return None
+        if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text" \
+                and self._has_link(full_text):
+            return None
+        render_trigger = str(cfg.get("render_trigger", "always") or "always")
+        grp_custom = self._get_group_custom_config(gid)
+        if render_trigger == "violation_only":
+            _qp = grp_custom.get("keyword_preset") if isinstance(grp_custom, dict) else None
+            quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
+            if not quick_hit:
+                return None
+        return (render_trigger, grp_custom)
+
+    def _reuse_prior(self, full_text: str) -> Optional[Tuple[str, List[Path]]]:
+        """同文终态复用判定（管线三处调用点共用）。
+
+        blocked → ("blocked", [])；已有存活图 → ("ready", paths)；
+        无终态/文件已失效 → None（调用方继续认领或等待）。
+        """
+        _info = self._text_render_info(full_text)
+        if _info is None:
+            return None
+        if str(_info.get("outcome") or "") == "blocked":
+            return ("blocked", [])
+        _pp = self._alive_prior_paths(full_text)
+        if _pp and self._image_segs_from_paths(_pp, _prevalidated=True):
+            return ("ready", _pp)
+        return None
+
     async def _pipeline_text_to_images(
         self, full_text: str, *, gid: str, grp_custom: Dict[str, Any],
         render_trigger: str, session: str,
@@ -1331,31 +1382,22 @@ class HandlersMixin:
         miss=无需处理（调用方原样放行）。
         """
         # 命中复用：缓存文件必须仍存在，失效即 miss 往下完整重跑
-        _prior = self._text_render_info(full_text)
-        if _prior is not None and str(_prior.get("outcome") or "") in ("done", "blocked"):
-            if str(_prior.get("outcome")) == "blocked":
-                return ("blocked", [])
-            _pp = self._alive_prior_paths(full_text)
-            if _pp and self._image_segs_from_paths(_pp, _prevalidated=True):
-                return ("ready", _pp)
-            # 缓存文件已失效/无法组装 → 视为 miss，往下完整重跑
+        _reuse = self._reuse_prior(full_text)
+        if _reuse is not None:
+            return _reuse
         _claim = self._claim_text_render(full_text)
         if not _claim:
             # 另一路径正在渲染/已处理：按 outcome 复用或等待其完成后复用
-            _prior2 = self._text_render_info(full_text)
-            if _prior2 is not None and str(_prior2.get("outcome") or "") == "blocked":
-                return ("blocked", [])
-            _p2 = self._alive_prior_paths(full_text)
-            if _p2 and self._image_segs_from_paths(_p2, _prevalidated=True):
-                return ("ready", _p2)
+            _reuse = self._reuse_prior(full_text)
+            if _reuse is not None:
+                return _reuse
             # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
             _st = await self._await_inflight_claim(full_text)
+            _reuse = self._reuse_prior(full_text)
+            if _reuse is not None:
+                return _reuse
             if _st == "blocked":
                 return ("blocked", [])
-            if _st == "done":
-                _p3 = self._alive_prior_paths(full_text)
-                if _p3 and self._image_segs_from_paths(_p3, _prevalidated=True):
-                    return ("ready", _p3)
             # 条目已消失/超时 → 重新认领走完整渲染；仍失败则调用方保留原消息
             _claim = self._claim_text_render(full_text)
             if not _claim:
@@ -1458,33 +1500,17 @@ class HandlersMixin:
 
             # extract_append 追加的链接块只由主钩子负责：它已经随图发过一次，
             # 适配器再转图会多出一张“链接文字图”并把链接重复附一遍
-            if (str(cfg.get("link_mode", "as_image") or "as_image") == "extract_append"
-                    and self._is_link_append_block(full_text)):
+            link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
+            if link_mode == "extract_append" and self._is_link_append_block(full_text):
                 return message
 
-            try:
-                min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
-            except Exception:
-                min_threshold = 1
-            if len(full_text) < min_threshold:
+            # 共用准入：字数门槛 / keep_text 放行 / violation_only 关键词预检
+            _adm = self._should_transform(full_text, gid)
+            if _adm is None:
                 return message
-
-            # 链接策略与主路径保持一致
-            if _clean_urls(_URL_PATTERN.findall(full_text)):
-                if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text":
-                    return message
-
-            # 仅违规时转图：关键词预检未命中直接返回（省一次完整审查）
-            render_trigger = str(cfg.get("render_trigger", "always") or "always")
-            grp_custom = self._get_group_custom_config(gid)
-            if render_trigger == "violation_only":
-                _qp = grp_custom.get("keyword_preset") if isinstance(grp_custom, dict) else None
-                quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
-                if not quick_hit:
-                    return message
+            render_trigger, grp_custom = _adm
 
             # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（输出组装见下）
-            link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
             status, payload = await self._pipeline_text_to_images(
                 full_text, gid=gid, grp_custom=grp_custom,
                 render_trigger=render_trigger, session=f"群{gid}",
@@ -1515,22 +1541,11 @@ class HandlersMixin:
             text = message.strip()
             if self._is_cmd_reply_skip(text):
                 return message
-            try:
-                min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
-            except Exception:
-                min_threshold = 1
-            if len(text) < min_threshold:
+            # 共用准入：字数门槛 / keep_text 放行 / violation_only 关键词预检
+            _adm = self._should_transform(text, gid)
+            if _adm is None:
                 return message
-            if _clean_urls(_URL_PATTERN.findall(text)):
-                if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text":
-                    return message
-            render_trigger2 = str(cfg.get("render_trigger", "always") or "always")
-            grp_custom2 = self._get_group_custom_config(gid)
-            if render_trigger2 == "violation_only":
-                _qp2 = grp_custom2.get("keyword_preset") if isinstance(grp_custom2, dict) else None
-                quick_hit2, _ = self.moderator.check_keywords(text, _qp2)
-                if not quick_hit2:
-                    return message
+            render_trigger2, grp_custom2 = _adm
 
             # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（输出组装见下）
             status_s, payload_s = await self._pipeline_text_to_images(
@@ -1591,31 +1606,18 @@ class HandlersMixin:
         if has_other_media and len(full_text) < 10:
             return
 
-        # 3. 最小字数门槛过滤
-        try:
-            min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
-        except Exception:
-            min_threshold = 1
-        if len(full_text) < min_threshold:
-            return
-
-        # 4. 链接处理策略判断
-        link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
-        urls_found = _clean_urls(_URL_PATTERN.findall(full_text))
-        if urls_found and link_mode == "keep_text":
-            # 用户选择包含链接时保持纯文本，方便群友点击
-            return
-
-        # 5. 仅违规时转图：非违规直接保留纯文本（放在审查前快速判断，避免无谓渲染）
-        # 先取群专属词库，保证预检与正式审查同口径；预检未命中直接返回
+        # 3-5. 共用准入：字数门槛 / keep_text 放行 / violation_only 关键词预检
+        # （群专属词库与预检同口径，命中后一并给出 render_trigger 与 grp_custom）
         gid_main = self._extract_group_id(event)
-        grp_c_main = self._get_group_custom_config(gid_main)
-        render_trigger = str(cfg.get("render_trigger", "always") or "always")
-        if render_trigger == "violation_only":
-            _qp = grp_c_main.get("keyword_preset") if isinstance(grp_c_main, dict) else None
-            quick_hit, _ = self.moderator.check_keywords(full_text, _qp)
-            if not quick_hit:
-                return
+        _adm = self._should_transform(full_text, gid_main)
+        if _adm is None:
+            return
+        render_trigger, grp_c_main = _adm
+
+        # 链接处理策略：仅 extract_append 才需要产出附带文案（准入判断已在上方完成）
+        link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
+        urls_found = _clean_urls(_URL_PATTERN.findall(full_text)) \
+            if link_mode == "extract_append" else []
 
         # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（命中与新渲染统一组装）
         status_m, payload_m = await self._pipeline_text_to_images(

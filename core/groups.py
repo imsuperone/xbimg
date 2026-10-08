@@ -222,26 +222,10 @@ class GroupsMixin:
 
         cfg = self.cfg_mgr.config
         mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
-        if mode == "all":
-            logger.debug(f"[{PLUGIN_NAME}] 群聊 {gid} 匹配通过 (模式: 全部群生效)")
-            return True
-
-        tokens = self._parsed_group_list()
-        is_in = self._match_group_tokens(gid, tokens)
-
-        if mode == "whitelist":
-            if is_in:
-                logger.debug(f"[{PLUGIN_NAME}] 群聊 {gid} 命中白名单，允许转图")
-                return True
-            else:
-                logger.debug(f"[{PLUGIN_NAME}] 群聊 {gid} 未在白名单中，跳过转图")
-                return False
-        elif mode == "blacklist":
-            if is_in:
-                logger.debug(f"[{PLUGIN_NAME}] 群聊 {gid} 命中黑名单，跳过转图")
-                return False
-            return True
-        return False
+        # 判定唯一实现是 _is_gid_allowed（all/whitelist/blacklist 同口径）
+        allowed = self._is_gid_allowed(gid)
+        logger.debug(f"[{PLUGIN_NAME}] 群聊 {gid} 群过滤({mode}) -> {allowed}")
+        return allowed
 
 
 

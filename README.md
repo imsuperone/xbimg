@@ -2,7 +2,7 @@
 
 ## 版本公告
 
-当前版本：**v1.3.18**（要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`）
+当前版本：**v1.3.19**（要求 AstrBot `>=3.4.0`，平台 `aiocqhttp`）
 
 本插件用于将机器人发送的纯文本消息自动渲染为高品质图片，并提供内容安全审查与 Web 可视化控制台。
 
@@ -77,7 +77,7 @@
 
 ## 架构与功能接口梳理
 
-按代码实际实现汇总：**一个功能只认一个实现入口**，下表之外的同义入口均为待收敛冗余（见「冗余与层次问题」）。
+按代码实际实现汇总：**一个功能只认一个实现入口**（v1.3.19 已完成冗余收敛，历史结论与不改项理由见「冗余与层次审查」）。
 
 ### 分层
 
@@ -100,12 +100,16 @@ main.py            装配层：Msg2ImgPlugin(Star + Groups/Handlers/Commands/Web
 | 入站消息登记群名 | `on_all_message_entry` | AstrBot 消息事件 |
 | 文本转图（主路径） | `on_decorating_result` → `_pipeline_text_to_images` | AstrBot 装饰钩子 |
 | 文本转图（OneBot 适配器路径） | `_transform_onebot_message` → 同上管线 | `send_group_msg` / `call_action` 补丁 |
-| 渲染管线（认领/复用/审查/渲染/落盘/记账） | `_pipeline_text_to_images` | 上述两个入口，三处前置判断共用 |
+| 渲染管线（认领/复用/审查/渲染/落盘/记账） | `_pipeline_text_to_images` | 上述两个入口 |
+| 三入口准入判断（字数 / keep_text / violation_only 预检） | `_should_transform(full_text, gid)` | list 分支、str 分支、`on_decorating_result` |
+| 同文终态复用判断（blocked / ready / 源源重跑） | `_reuse_prior(full_text)` | 管线内三处调用点 |
 | 内容审查 | `ContentModerator.review`（全量）、`check_keywords`（预检） | 管线 |
 | 渲染出图 | `MessageImageRenderer.render_pages` → `_prepare_layout` + `_split_content_pages` + `_draw_page` | 管线、WebUI 预览 |
 | 单图便捷入口 | `render()`（`render_pages()[0]`） | WebUI 预览台 |
 | 链接块文案产出 | `_link_append_text` | 三入口输出组装、链接块识别 |
-| 群是否生效 | `_is_gid_allowed(gid)` | 适配器路径 |
+| 链接有无判断 | `_has_link` | `_should_transform` |
+| 参数归一化（text/style/theme/mosaic/font/emoji） | `_norm_cache_params` | `_prepare_layout`、缓存键前置 |
+| 群是否生效 | `_is_gid_allowed(gid)`（event 级入口 `_is_group_allowed` 取群号后调它） | 主钩子 |
 | 单群配置 | `_get_group_custom_config` / `_get_group_font_scale` | 管线、指令 |
 | 配置读写 | `ConfigManager.config` / `save()` | 全部模块 |
 | 统计记账 | `record_render` / `get_stats` | 管线 |
@@ -116,31 +120,31 @@ main.py            装配层：Msg2ImgPlugin(Star + Groups/Handlers/Commands/Web
 
 WebUI 端点（`webapi.py`，均以 `/{插件名}` 为前缀）：`config`(GET/POST)、`stats`、`groups`、`groups/fetch`、`preview`、`preview_img`、`reset`、`fonts/{status,download,files,delete}`、`fonts/curated{,_install,_delete}`、`emoji/{packs,cdn_check,download,download_async,download_status(×2),delete}`、`fonts/curated_install{,_async,_status(×2)}`、`presets/{update_status,apply_update,dismiss_update}`。
 
-### 冗余与层次问题（第一性审查，仅记录未改动）
+### 冗余与层次审查（v1.3.19 已收敛）
 
-**一个功能多处实现（应收敛为一个）**
+**已收敛（一个功能一个实现）**
 
-1. **三入口前置判断复制三份**：`enable` / 群过滤 / `min_length_threshold` 解析 / `link_mode==keep_text` 放行 / `violation_only` 关键词预检，在 list 分支、str 分支、`on_decorating_result` 各写一遍。真正的差异只有「文本怎么提取」和「结果怎么组装」，中间的准入判断应收敛成一个 `_should_transform(full_text, gid) -> bool`。这是当前最大的一处同义实现。
-2. **链接有无判断重复 4 次**：`_clean_urls(_URL_PATTERN.findall(text))` 在 handlers 里出现 4 处；产出文案已由 `_link_append_text` 唯一负责，但「判断」仍散落。应收敛为 `_has_link(text) -> bool`。
-3. **群过滤双实现**：`_is_gid_allowed(gid)` 是纯群号判定，但 `_is_group_allowed(event)` 又把 `whitelist/all/blacklist` 分支完整重写了一遍（只多了日志）。后者取到 gid 后应直接调前者，模式分支只留一处。
-4. **参数归一化双实现**：`_norm_cache_params`（缓存键前置）与 `_prepare_layout`（真正排版）各自实现同一套 lower/白名单/clamp 规则，靠注释「与 _prepare_layout 一致」维系，规则改动只改一边即缓存键与实际渲染参数失配。应收敛成一个归一化函数，两处调用同一实现。
-5. **同文复用判定三段式**：`_pipeline_text_to_images` 里 `_prior` → `_prior2` → `_await_inflight_claim` 后三段几乎相同的「blocked 放行 / alive 路径 ready」判断。应收敛为一个 `_try_reuse(full_text)`。
-6. **状态查询接口 query/path 双版本**：`download_status` 与 `download_status/<job_id>`、`curated_install_status` 同理，一个功能两套路由实现。
-7. **单复数落盘两接口**：`_save_render_image` 与 `_save_render_images`，后者只是前者的多图循环加容错；调用方只应看到一个。
+1. **三入口准入判断 → `_should_transform`**：`min_length_threshold` 解析、`link_mode==keep_text` 放行、`violation_only` 关键词预检原在 list 分支、str 分支、`on_decorating_result` 各写一遍（约 20 行 ×3），且三处需同步维护顺序。现合并为 `_should_transform(full_text, gid) -> (render_trigger, grp_custom) | None`，通过返回供管线直用，不通过返回 `None` 由调用方原样放行。入口特有的 cmd 回执跳过、链接块识别、媒体占比检查留在调用方——它们才是三入口真正的差异。
+2. **链接判断 → `_has_link`**：`_clean_urls(_URL_PATTERN.findall(text))` 的「判断」用途收敛为 `_has_link(text) -> bool`；`_link_append_text` 保留 findall（文案产出需要 URL 列表本身，不是重复）。
+3. **群过滤 → 复用 `_is_gid_allowed`**：`_is_group_allowed(event)` 原把 `whitelist/all/blacklist` 分支完整重写一遍只为了加日志；现取群号后直接调 `_is_gid_allowed`，模式分支只留一处，日志保留 mode 与结论。
+4. **参数归一化 → `_norm_cache_params` 唯一实现**：`_prepare_layout` 原是它的逐字副本，靠注释「与 _norm_cache_params 一致」维系，规则改动只改一边即缓存键与实际排版失配。现 `_prepare_layout` 直接调它。
+5. **同文复用三段式 → `_reuse_prior`**：`_pipeline_text_to_images` 头部原是三段几乎逐字相同的「blocked 放行 / 存活路径 ready / 否则重跑」，现合并为一个返回 `("blocked", [])` / `("ready", paths)` / `None` 的 helper，管线三处调用。
+6. **绘制参数并入 ctx**：`_draw_page` 原收 10 个形参，其中 `mosaic_half_pos`/`emoji_style` 本就在 ctx 里被取出来又传回去，其余绘制期参数（`star_*`、`mosaic_*`、`violation_words`、`perf_out`）由 `_render_pages_inner` 逐个抄送。现签名收敛为 `(ctx, page_lines, page_idx, total_pages)`，绘制参数在排版完成后一次性 `ctx.update(...)` 注入。ctx 每次调用都是新 dict（命中取 `dict(_lhit)` 副本、未命中以 `dict(ctx)` 入缓存），注入不污染 `_LAYOUT_CACHE`。
 
-**数据在层次间反复传输**
+**复核后判定为非问题（原文档误报，已改正）**
 
-1. **同文本重复哈希**：一次管线内 `full_text` 被 `_text_hash` 计算 4～6 次（`_text_render_info`、`_claim_text_render`、`_alive_prior_paths`→`_text_render_info`、`_await_inflight_claim` 各自重算）。哈希应算一次、以 key 传递。
-2. **17 个渲染参数逐层透传**：`render_pages` → `_render_pages_inner` → `_draw_page` 把 style/theme/mosaic/emoji/font 等 kwarg 原样抄送三层；排版结果已收敛进 `ctx` 字典，但绘制期参数（`mosaic_*`、`violation_words`、`emoji_style`）仍逐个传。这些应并入 `ctx`，与 `rendered_lines` 同路。
-3. **`perf_out` 字典透传 4 层**：仅为回填 4 个毫秒数，每层都 `if perf_out is not None` 分叉。属于横切关注点占用了主接口签名。
-4. **同文两份缓存**：`_RENDER_CACHE`（成品图）与 `_LAYOUT_CACHE`（排版 ctx）对同一文本各存一份，首次渲染写两次；`_RENDER_CACHE` 命中前还要先跑一遍归一化算键。价值是换页/改马赛克时只重画不重排，但代价是双份内存与双份键计算，属可议的设计取舍。
+- ~~状态查询 query/path 双版本~~：`download_status` 与 `download_status/<job_id>` 只是同一个 `_download_status_for(job_id)` 的两行路由薄壳，前端 `pollDownloadJob` 走 path 版。路由层各一行不算双实现。
+- ~~单复数落盘两接口~~：`_save_render_images` 是 `_save_render_image` 的多图循环，属正常的「单件/批量」分层；外部调用方只见复数版（单图也走它，内部短路）。
 
-**摆放不合理的重层**
+**评估后不改（记录理由，避免反复重议）**
 
-- `handlers.py`（约 1600 行）同时承担：管线编排、两个消息钩子、适配器猴子补丁（`_patch_bot_send` 一族）、图片落盘与压缩、性能日志、周期清扫。其中补丁与落盘是可独立的两块，与「管线」无必然耦合。
-- `renderer.py`（约 4000 行）同时承担：字体管理、emoji 下载与缓存、参数归一化、排版、分页、绘制、马赛克、五类模块级缓存。字体/emoji 的 IO 部分与「排版绘制」是两类职责（一个阻塞网络、一个纯计算），混在同文件导致渲染热路径与下载冷路径共用一个模块。
+- **同文本重复哈希**：一次管线内 `_text_hash` 确实算 4～6 次，但 sha256 对 ≤12KB 文本是数十微秒量级，4～6 次合计约 0.15ms，相对渲染（100ms+）不可测。给 4 个已稳定的 slot 助手加 `key=` 形参反而增接口面。**不改。**
+- **`perf_out` 字典透传**：零开销 out-param 设计（`None` 时每层 `if` 短路，无分配无锁），是显式的取舍而非隐藏成本；改为 contextvar/模块全局会让回填点与读取点失去可追溯性。绘制层已因上文第 6 项少抄一层。**保留。**
+- **同文两份缓存**：`_RENDER_CACHE`（成品图）与 `_LAYOUT_CACHE`（排版 ctx）是有意的两级缓存——换页/改马赛克时只重画不重排。代价是双份内存与双份键计算，收益是 WebUI 换页预览不必重排。**保留为设计取舍。**
+- **handlers.py / renderer.py 拆文件**：补丁与落盘、字体/emoji IO 与排版绘制确实是两类职责，但两者都是热路径相邻代码，拆分要移动大量被测试直接引用的成员（`test_plugin.py` 经 plugin 实例访问），风险与收益不匹配。**另开任务按需做。**
+- **`render_pages` 与 `_render_pages_inner` 参数抄送**：测试直接调 `_render_pages_inner`，合入需改测试签名，收益低。**保留。**
 
-以上为审查结论，未做改动；是否重构按需另开任务。
+以上为审查结论；已收敛项见 changelog v1.3.19。
 
 ---
 
