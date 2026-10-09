@@ -1,17 +1,27 @@
-# 消息转图助手
+# 消息转图助手 v1.3.23
 
 > 将机器人发出的纯文本消息渲染为高品质图片，附内容审查与 Web 控制台。
 
 ## 简介
 
-支持 iOS / Android 16 双主题、Markdown 排版、星空背景与三档画质；提供敏感词审查与违规处置（打码、拦截、警示卡片），可按群精细配置字体、风格与词库。
+机器人发出的文本消息可在本地渲染为图片发送，支持 Markdown 排版与多种主题；渲染失败自动回落原文，不影响正常发送。
 
 本插件基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开发。AstrBot 是一个松耦合、异步、支持多消息平台部署，具有易用的插件系统和完善的大语言模型（LLM）接入功能的聊天机器人及开发框架，使用文档见 [docs.astrbot.app](https://docs.astrbot.app)。
 
 - 插件 ID：`astrbot_plugin_xbimg`
-- 当前版本：`v1.3.22`
+- 当前版本：`v1.3.23`
 - 运行要求：AstrBot `>=3.4.0`，平台 `aiocqhttp`
 - 仓库：https://github.com/imsuperone/xbimg
+
+## 功能
+
+- 双主题：iOS 磨砂玻璃风格与 Android 16 胶囊卡片风格。
+- 星空背景：随机十字星、星芒与光晕粒子，密度可调。
+- 画质档位：原画、均衡、极小三档可选。
+- 链接策略：遇 URL 转图、保留纯文本或附提取后的纯文本链接。
+- 敏感词审查：多套违规词方案按群绑定，支持 AI 双轨审查。
+- 违规处置：打码、拦截、警示卡片，打码样式与位置可调。
+- Web 控制台：全屏仪表盘与实时文本渲染测试台。
 
 ## 安装
 
@@ -50,13 +60,9 @@
 | `/xbimg group ttf <字体id> [群号]` | 单群精选字体 |
 | `/xbimg group list` / `reset [群号]` / `test [群号]` | 列表 / 恢复跟随全局 / 效果测试 |
 
-## 依赖与字体
-
-- `Pillow >= 9.1.0`、`httpx >= 0.24.0`、`numpy >= 1.22`；
-- Windows 自带字体开箱即用；Linux 安装 `fonts-noto-cjk`，或在 WebUI 精选字体中一键下载。
-
 ## 说明
 
+- 依赖 `Pillow >= 9.1.0`、`httpx >= 0.24.0`、`numpy >= 1.22`。
+- Windows 自带字体开箱即用；Linux 安装 `fonts-noto-cjk`，或在 WebUI 精选字体中一键下载。
 - 私聊默认生效；群聊受 `group_mode + group_list` 控制。
 - `violation_only` 模式下普通消息保持纯文本，仅违规转图、打码或拦截。
-- 渲染失败自动回落原文，不影响正常发送。
