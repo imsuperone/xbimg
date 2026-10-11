@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.25
+// Version: 1.3.26
 // ==========================================================================
 (function () {
   "use strict";
@@ -109,6 +109,8 @@
     `./`,
   ];
 
+  let _detectFlight = null;
+
   async function fetchWithPrefixFallback(urlSuffix, options) {
     if (_detectedPrefix) {
       try {
@@ -117,15 +119,31 @@
         _lastLegError = `已知前缀失败(${_detectedPrefix}): ${e && e.message ? e.message : e}`;
       }
     }
-    let firstErr = null;
-    for (const p of API_PREFIXES) {
-      try {
-        const res = await tryFetchJson(`${p}${urlSuffix}`, options || {});
-        _detectedPrefix = p;
-        return res;
-      } catch (e) {
-        if (!firstErr) firstErr = `[${p}] ${e && e.message ? e.message : e}`;
+    if (_detectFlight) {
+      try { await _detectFlight; } catch (_) {}
+      if (_detectedPrefix) {
+        return await tryFetchJson(`${_detectedPrefix}${urlSuffix}`, options || {});
       }
+    }
+    let firstErr = null;
+    const runProbe = (async () => {
+      for (const p of API_PREFIXES) {
+        try {
+          const res = await tryFetchJson(`${p}${urlSuffix}`, options || {});
+          _detectedPrefix = p;
+          return res;
+        } catch (e) {
+          if (!firstErr) firstErr = `[${p}] ${e && e.message ? e.message : e}`;
+        }
+      }
+      return null;
+    })();
+    _detectFlight = runProbe;
+    try {
+      const probeRes = await runProbe;
+      if (probeRes !== null && _detectedPrefix) return probeRes;
+    } finally {
+      if (_detectFlight === runProbe) _detectFlight = null;
     }
     _lastLegError = firstErr;
     const bridgeInfo = _lastBridgeError ? `桥接:${_lastBridgeError}；` : "";
@@ -435,8 +453,9 @@ async def render_text_to_image(text: str):
   // ---- 主题切换 ----
   // 注意：页面自身深色/浅色切换与生成的图片配色基调完全独立！
   function applyThemeMode(theme) {
-    // 深浅色唯一真相源是服务端 ui_theme_mode，不留本地副本
-    document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
+    const mode = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", mode);
+    try { localStorage.setItem("xbimg_ui_theme", mode); } catch (e) {}
   }
 
   function toggleTheme() {
@@ -454,11 +473,15 @@ async def render_text_to_image(text: str):
   }
 
   function initTheme() {
-    // 深浅色没有本地缓存可读（服务端 ui_theme_mode 是唯一真相源，
-    // 由 renderConfigToUI 回填）；首帧按系统偏好给个初值，随后被覆盖。
+    // 优先使用 localStorage 缓存，其次按系统偏好给初值，随后由 renderConfigToUI 回填覆盖
     try {
-      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-      applyThemeMode(prefersDark ? "dark" : "light");
+      const cached = localStorage.getItem("xbimg_ui_theme");
+      if (cached === "dark" || cached === "light") {
+        applyThemeMode(cached);
+      } else {
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        applyThemeMode(prefersDark ? "dark" : "light");
+      }
     } catch (e) { applyThemeMode("light"); }
     // B-9: 初始化即把取色器对齐当前主题的默认 primary，避免首屏脱节
     try {
@@ -513,9 +536,13 @@ async def render_text_to_image(text: str):
         if (!/^#[0-9a-fA-F]{6}$/.test(segBg)) segBg = dark ? "#232A33" : "#FFFFFF";
         root.style.setProperty("--m3-seg-ink", _contrastOk(v, segBg) ? v : (dark ? "#EAE6DF" : "#1E1B16"));
       } catch (e) {}
+      try { localStorage.setItem("xbimg_ui_accent", v); } catch (e) {}
     } else {
       for (const k of _ACCENT_VARS) {
         try { root.style.removeProperty(k); } catch (e) {}
+      }
+      if (save) {
+        try { localStorage.removeItem("xbimg_ui_accent"); } catch (e) {}
       }
     }
     if (save) {
@@ -555,6 +582,10 @@ async def render_text_to_image(text: str):
         item.classList.remove("active");
       }
     });
+    if (containerId === "segModerationMode") {
+      const modSw = document.getElementById("cfgModerationEnable");
+      if (modSw) modSw.checked = String(val) !== "none";
+    }
   }
 
   function getSegmentedValue(containerId, defaultVal = "") {
@@ -1487,15 +1518,21 @@ async def render_text_to_image(text: str):
   // 主动拉取与勾选群聊功能
   // ==========================================
   let _isFetchingGroups = false;
-  // S-4: 拉群单入口（POST 主链路 + GET 兜底共用；成功路径与原来完全一致，超时由 api 层统一收敛）
-  async function fetchGroupsPayload() {
+  async function fetchGroupsPayload(forceRefresh = false) {
+    if (forceRefresh) {
+      try {
+        return await api.post("groups/fetch");
+      } catch (e) {
+        return await api.get("groups");
+      }
+    }
     try {
-      return await api.post("groups/fetch");
-    } catch (e) {
       return await api.get("groups");
+    } catch (e) {
+      return await api.post("groups/fetch");
     }
   }
-  async function fetchGroups(silent = false) {
+  async function fetchGroups(silent = false, forceRefresh = false) {
     if (_isFetchingGroups) return;
     _isFetchingGroups = true;
 
@@ -1507,7 +1544,7 @@ async def render_text_to_image(text: str):
       if (btnEl) btnEl.disabled = true;
       if (hintEl && !silent) hintEl.textContent = "正在拉取机器人所在群聊…";
 
-      let res = await fetchGroupsPayload();
+      let res = await fetchGroupsPayload(forceRefresh);
 
       if (res && Array.isArray(res.groups)) {
         cachedGroups = res.groups;
@@ -1565,7 +1602,7 @@ async def render_text_to_image(text: str):
       rows.push({ gid, group_name: gname });
     });
 
-    const switchColLabel = mode === "blacklist" ? "加入黑名单" : "本群白名单开关";
+    const switchColLabel = mode === "blacklist" ? "黑名单开关" : "启用开关";
     if (rows.length === 0) {
       boxEl.innerHTML = `<div class="font-files-empty" style="padding: 18px 12px;">${
         searchKw ? "未找到匹配的群聊" : "暂无群聊记录，点击上方「刷新群聊列表」或手动输入群号添加"
@@ -1576,7 +1613,7 @@ async def render_text_to_image(text: str):
     let html = `<table class="group-switch-table"><thead><tr>
       <th>群聊名称 / 群号</th>
       <th>生效状态</th>
-      <th style="text-align:right;">${escapeHtml(switchColLabel)}</th>
+      <th class="group-cell-action">${escapeHtml(switchColLabel)}</th>
     </tr></thead><tbody>`;
 
     rows.forEach((g) => {
@@ -1607,7 +1644,7 @@ async def render_text_to_image(text: str):
           </div>
         </td>
         <td>${effHtml}</td>
-        <td style="text-align:right;">
+        <td class="group-cell-action">
           <label class="m3-switch" title="切换群 ${escapeHtml(gid)} 名单状态">
             <input type="checkbox" class="group-row-switch" data-gid="${escapeHtml(gid)}" ${isSelected ? "checked" : ""} />
             <span class="switch-slider"></span>
@@ -1845,6 +1882,29 @@ async def render_text_to_image(text: str):
     }
   }
 
+  const _tabLoaded = { visual: true, fonts: false, moderation: false, groups: false, preview: false };
+  let _previewDirty = true;
+
+  async function ensureTabLoaded(tabId) {
+    if (_tabLoaded[tabId]) return;
+    _tabLoaded[tabId] = true;
+    try {
+      if (tabId === "fonts") {
+        const [st] = await Promise.all([
+          fetchFontStatus(true),
+          fetchFontFiles(),
+          fetchCuratedFonts(),
+        ]);
+        await fetchEmojiPacks(st || null);
+      } else if (tabId === "moderation") {
+        await fetchPresetUpdateStatus();
+      } else if (tabId === "groups") {
+        await fetchGroups(true, false);
+        renderSelectedGroupsFontList();
+      }
+    } catch (e) {}
+  }
+
   function switchCategoryTab(tabId) {
     document.querySelectorAll(".cat-tab").forEach((t) => {
       t.classList.toggle("active", t.getAttribute("data-tab") === tabId);
@@ -1855,7 +1915,13 @@ async def render_text_to_image(text: str):
       sec.classList.toggle("active", sec.getAttribute("data-section") === tabId);
     });
 
+    ensureTabLoaded(tabId);
+
     if (tabId === "preview") {
+      if (_previewDirty) {
+        _previewDirty = false;
+        triggerPreview();
+      }
       const prevSec = document.getElementById("previewSection");
       if (prevSec && prevSec.scrollIntoView) {
         try {
@@ -2210,7 +2276,7 @@ async def render_text_to_image(text: str):
       // 8. 拉取所有群聊按钮 / 手动添加群号按钮
       if (e.target.closest("#fetchGroupsBtn")) {
         e.preventDefault();
-        fetchGroups(false);
+        fetchGroups(false, true);
         return;
       }
       if (e.target.closest("#groupAddBtn")) {
@@ -2250,6 +2316,11 @@ async def render_text_to_image(text: str):
       if (e.target && e.target.classList.contains("group-row-switch")) {
         const gid = e.target.getAttribute("data-gid");
         if (gid) toggleGroupSelection(gid);
+        return;
+      }
+      if (e.target && e.target.id === "cfgModerationEnable") {
+        setSegmentedValue("segModerationMode", e.target.checked ? "keywords" : "none");
+        triggerAutoSave();
         return;
       }
       if (e.target && e.target.id === "cfgStarBg") {
@@ -2393,7 +2464,12 @@ async def render_text_to_image(text: str):
       if (!tag) return;
       const local = String(tag.dataset.ver || "").trim().replace(/^v/i, "");
       if (!local) return;
-      fetch("https://raw.githubusercontent.com/imsuperone/xbimg/main/metadata.yaml", { cache: "no-store" })
+      const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 4000) : null;
+      fetch("https://raw.githubusercontent.com/imsuperone/xbimg/main/metadata.yaml", {
+        cache: "no-store",
+        signal: ctrl ? ctrl.signal : undefined,
+      })
         .then((r) => (r && r.ok ? r.text() : Promise.reject(new Error("bad response"))))
         .then((t) => {
           const m = /version:\s*["']?v?([0-9]+(?:\.[0-9]+)*)/i.exec(t || "");
@@ -2407,7 +2483,8 @@ async def render_text_to_image(text: str):
         .catch((e) => {
           tag.textContent = local;
           console.warn("[msg2img] update check skipped:", e);
-        });
+        })
+        .finally(() => { if (timer) clearTimeout(timer); });
     } catch (e) {
       console.warn("[msg2img] update check error:", e);
     }
@@ -2601,7 +2678,6 @@ async def render_text_to_image(text: str):
   // ---- 页面初始化 ----
   async function startApp() {
     initTheme();
-    checkForUpdate();
     bindGlobalDelegation();
     const _picker = document.getElementById("accentPicker");
     if (_picker) {
@@ -2633,26 +2709,21 @@ async def render_text_to_image(text: str):
       inputEl.value = PRESET_TEMPLATES.normal;
     }
 
-    // B-1/L-2: 先等配置落定再首绘预览；400ms 仍保留为首绘节拍，但不再带着硬编码默认值渲染
+    // 优先加载核心配置（首屏 Tab 立即可用），其余非首屏分页数据延后静默预取
     try { await loadData(); } catch (e) {}
-    let _statusRes = null;
-    try {
-      const [st] = await Promise.all([
-        fetchFontStatus(true),
-        fetchFontFiles(),
-        fetchCuratedFonts(),
-        fetchPresetUpdateStatus(),
-        fetchGroups(true),
-      ]);
-      _statusRes = st || null;
-    } catch (e) {}
-    try { await fetchEmojiPacks(_statusRes); } catch (e) {}
 
-    // 页面初次加载时，自动触发一次极速预览，让用户进页面立刻能看到效果
     setTimeout(() => {
-      triggerPreview();
-      renderSelectedGroupsFontList();
-    }, 400);
+      ensureTabLoaded("groups");
+      ensureTabLoaded("moderation");
+    }, 300);
+
+    setTimeout(() => {
+      ensureTabLoaded("fonts");
+    }, 800);
+
+    setTimeout(() => {
+      checkForUpdate();
+    }, 2500);
   }
 
   if (document.readyState === "loading") {

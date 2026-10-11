@@ -4,9 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.3.25" />
-  <!-- 主题色/深浅色存在服务端配置里（唯一真相源，无本地副本），需等 config 回来才套用；
-       首帧先挂起，避免"先见默认色、再跳成已存色"。回填后由 revealUiPrefs() 揭开，3s 兜底。 -->
+  <link rel="stylesheet" href="./style.css?v=1.3.26" />
   <style>
     html[data-boot] { visibility: hidden; background: #f4f6f8; }
     @media (prefers-color-scheme: dark) { html[data-boot] { background: #0f1115; } }
@@ -14,8 +12,15 @@
   <script>
     (function () {
       var d = document.documentElement;
+      try {
+        var t = localStorage.getItem("xbimg_ui_theme");
+        var a = localStorage.getItem("xbimg_ui_accent");
+        if (t === "dark" || t === "light") d.setAttribute("data-theme", t);
+        if (a && /^#[0-9a-fA-F]{6}$/.test(a)) d.style.setProperty("--m3-sys-color-primary", a);
+        if (t) return;
+      } catch (e) {}
       d.setAttribute("data-boot", "");
-      setTimeout(function () { d.removeAttribute("data-boot"); }, 3000);
+      setTimeout(function () { d.removeAttribute("data-boot"); }, 150);
     })();
   </script>
 </head>
@@ -25,7 +30,7 @@
     <header class="top-bar">
       <div class="top-bar-brand">
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.25">1.3.25</span></h1>
+          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.26">1.3.26</span></h1>
         </div>
       </div>
       <div class="top-bar-actions">
@@ -374,7 +379,11 @@
               <h2 class="card-title">屏蔽词审查总开关与处置方式</h2>
               <p class="card-desc" style="margin-bottom:0;">启用后将对文本执行敏感词匹配；可配置检出违规内容后的处置方式与遮蔽样式。</p>
             </div>
-            <div class="m3-segmented-control" id="segModerationMode">
+            <label class="m3-switch">
+              <input type="checkbox" id="cfgModerationEnable" checked />
+              <span class="switch-slider"></span>
+            </label>
+            <div class="m3-segmented-control" id="segModerationMode" style="display:none;">
               <button type="button" class="seg-item active" data-val="keywords">启用审查</button>
               <button type="button" class="seg-item" data-val="none">关闭</button>
             </div>
@@ -492,7 +501,7 @@
 
           <!-- 群聊开关管理栏（对齐 xbbot_beta 样式：搜索 + 手动添加 + 刷新列表 + 表格开关） -->
           <div class="group-switch-toolbar" style="margin-top:16px;">
-            <input type="text" id="groupSearchInput" class="m3-input" placeholder="🔍 搜索群名称或群号…" style="flex: 1 1 200px; max-width: 280px;" />
+            <input type="text" id="groupSearchInput" class="m3-input group-search-input" placeholder="🔍 搜索群名称或群号…" />
             <div class="group-add-inline">
               <input type="text" id="groupAddInput" class="m3-input" placeholder="手动输入群号添加…" />
               <button id="groupAddBtn" class="m3-btn secondary-btn" type="button" style="white-space: nowrap;">+ 添加群号</button>
@@ -589,6 +598,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.3.25"></script>
+  <script src="./app.js?v=1.3.26"></script>
 </body>
 </html>

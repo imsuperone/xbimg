@@ -3,6 +3,8 @@
 
 import asyncio
 import base64
+import functools
+import inspect
 import io
 import json
 import os
@@ -175,7 +177,7 @@ class WebApiMixin:
         reg(f"/{pfx}/config", self._api_get_config, ["GET"], "获取插件配置")
         reg(f"/{pfx}/config", self._api_save_config, ["POST"], "保存插件配置")
         reg(f"/{pfx}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
-        reg(f"/{pfx}/groups", self._api_fetch_groups, ["GET"], "列出群聊列表")
+        reg(f"/{pfx}/groups", self._api_list_groups, ["GET"], "列出群聊列表")
         reg(f"/{pfx}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
         reg(f"/{pfx}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
         reg(f"/{pfx}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
@@ -280,87 +282,95 @@ class WebApiMixin:
 
 
     def _find_all_bots(self, max_age: float = 60.0) -> List[Any]:
-        """全量递归挖掘 context 中的所有 Bot / PlatformAdapter 实例（带 60s 缓存去重）"""
+        """挖掘 context 中的所有 Bot / PlatformAdapter 实例（带 60s 缓存去重，防 CQHttp partial 陷阱）"""
         now = time.time()
         if self._bots_cache and (now - self._bots_cache_time) < max_age:
             return list(self._bots_cache)
         targets = []
         visited = set()
 
-        def _traverse(obj, depth=0):
-            if depth > 4 or obj is None:
+        def _is_bot(obj) -> bool:
+            if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, dict, set, tuple)):
+                return False
+            if isinstance(obj, functools.partial) or inspect.isroutine(obj) or isinstance(obj, type):
+                return False
+            cls_mro = [c.__dict__ for c in getattr(obj, "__class__", type).__mro__]
+            inst_d = getattr(obj, "__dict__", {}) or {}
+            for m in ("call_action", "call_api", "get_group_list"):
+                if m in inst_d or any(m in d for d in cls_mro):
+                    if callable(getattr(obj, m, None)):
+                        return True
+            return False
+
+        def _add(obj):
+            if obj is None:
                 return
             oid = id(obj)
             if oid in visited:
                 return
             visited.add(oid)
-
-            try:
-                if any(callable(getattr(obj, m, None)) for m in ("call_action", "call_api", "get_group_list")):
-                    targets.append(obj)
-            except Exception:
-                pass
-
-            for attr in dir(obj):
-                if attr.startswith("__"):
-                    continue
-                lower = attr.lower()
-                if any(k in lower for k in ("platform", "adapter", "bot", "client", "connection", "ws", "manager")):
-                    try:
-                        val = getattr(obj, attr, None)
-                        if val is None or callable(val):
-                            continue
-                        if isinstance(val, (list, tuple, set)):
-                            for item in val:
-                                _traverse(item, depth + 1)
-                        elif isinstance(val, dict):
-                            for item in val.values():
-                                _traverse(item, depth + 1)
-                        else:
-                            _traverse(val, depth + 1)
-                    except Exception:
-                        pass
+            if _is_bot(obj):
+                targets.append(obj)
 
         try:
-            _traverse(self.context, 0)
+            pm = getattr(self.context, "platform_manager", None)
+            insts = (
+                getattr(pm, "platform_insts", None)
+                or getattr(pm, "platforms", None)
+                or getattr(self.context, "platforms", None)
+                or []
+            )
+            if isinstance(insts, dict):
+                insts = list(insts.values())
+            for inst in list(insts):
+                _add(inst)
+                for attr in ("bot", "client", "api", "adapter", "qq_client"):
+                    try:
+                        _add(getattr(inst, attr, None))
+                    except Exception:
+                        pass
+                try:
+                    gc = getattr(inst, "get_client", None)
+                    if callable(gc):
+                        _add(gc())
+                except Exception:
+                    pass
         except Exception:
             pass
-        # 按 id 去重
-        deduped = list({id(b): b for b in targets}.values())
-        self._bots_cache = deduped
+
+        self._bots_cache = targets
         self._bots_cache_time = now
-        return list(deduped)
+        return list(targets)
 
 
 
     async def _call_bot_group_list(self, bot: Any) -> List[Dict[str, str]]:
-        """单个 Bot 上尝试多种方式拉取群列表（call_api / 直接方法 / call_action）"""
-        # 1. 直接方法 get_group_list()
+        """单个 Bot 上拉取群列表（单次 3s 超时，避免多动作叠加卡死）"""
+        # 1. 优先 call_action / call_api("get_group_list")
+        cls_mro = [c.__dict__ for c in getattr(bot, "__class__", type).__mro__]
+        inst_d = getattr(bot, "__dict__", {}) or {}
+        for caller_name in ("call_action", "call_api"):
+            if caller_name not in inst_d and not any(caller_name in d for d in cls_mro):
+                continue
+            try:
+                caller = getattr(bot, caller_name, None)
+                if callable(caller):
+                    res = await asyncio.wait_for(caller("get_group_list"), timeout=3.0)
+                    parsed = self._parse_group_list_res(res)
+                    if parsed:
+                        return parsed
+            except Exception:
+                pass
+        # 2. 直接方法 get_group_list()
         try:
             fn = getattr(bot, "get_group_list", None)
             if callable(fn):
-                res = await asyncio.wait_for(fn(), timeout=5.0)
+                res = await asyncio.wait_for(fn(), timeout=3.0)
                 parsed = self._parse_group_list_res(res)
                 if parsed:
                     return parsed
         except Exception:
             pass
-        # 2. 通用调用器
-        for caller_name in ("call_api", "call_action"):
-            try:
-                caller = getattr(bot, caller_name, None)
-                if not callable(caller):
-                    continue
-                for act in ("get_group_list", "getGroupList", "get_groups", "list_groups"):
-                    try:
-                        res = await asyncio.wait_for(caller(act), timeout=5.0)
-                        parsed = self._parse_group_list_res(res)
-                        if parsed:
-                            return parsed
-                    except Exception:
-                        continue
-            except Exception:
-                continue
         return []
 
 
@@ -389,11 +399,43 @@ class WebApiMixin:
 
 
 
+    async def _api_list_groups(self):
+        """快速返回已缓存/已捕获的群列表（<1ms），若缓存过期则在后台静默刷新"""
+        now = time.time()
+        last_ts = float(getattr(self, "_groups_last_fetch_ts", 0.0) or 0.0)
+        if not self._seen_groups:
+            return await self._api_fetch_groups()
+        if (now - last_ts) > 120.0 and not getattr(self, "_groups_bg_refreshing", False):
+            self._groups_bg_refreshing = True
+
+            async def _bg():
+                try:
+                    await self._api_fetch_groups()
+                except Exception:
+                    pass
+                finally:
+                    self._groups_bg_refreshing = False
+
+            try:
+                asyncio.create_task(_bg())
+            except Exception:
+                self._groups_bg_refreshing = False
+
+        groups = [
+            {"gid": str(gid), "group_name": str((info or {}).get("group_name") or gid)}
+            for gid, info in self._seen_groups.items()
+            if str(gid).strip()
+        ]
+        return json_response({"ok": True, "groups": groups})
+
+
+
     async def _api_fetch_groups(self):
         """主动向适配器与已记录消息拉取所有群组信息"""
         groups: List[Dict[str, str]] = []
         seen_gids = set()
         updated_seen = False
+        self._groups_last_fetch_ts = time.time()
 
         # 1. 尝试从 Bot 实例获取真实群列表（并发拉取，3s 超时）
         try:
