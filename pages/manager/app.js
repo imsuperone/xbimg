@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.26
+// Version: 1.3.27
 // ==========================================================================
 (function () {
   "use strict";
@@ -1602,17 +1602,17 @@ async def render_text_to_image(text: str):
       rows.push({ gid, group_name: gname });
     });
 
-    const switchColLabel = mode === "blacklist" ? "黑名单开关" : "启用开关";
+    const switchColLabel = mode === "blacklist" ? "黑名单" : "启用开关";
     if (rows.length === 0) {
       boxEl.innerHTML = `<div class="font-files-empty" style="padding: 18px 12px;">${
-        searchKw ? "未找到匹配的群聊" : "暂无群聊记录，点击上方「刷新群聊列表」或手动输入群号添加"
+        searchKw ? "未找到匹配的群聊" : "暂无群聊记录，点击上方「刷新群列表」或手动输入群号添加"
       }</div>`;
       return;
     }
 
     let html = `<table class="group-switch-table"><thead><tr>
-      <th>群聊名称 / 群号</th>
-      <th>生效状态</th>
+      <th>群聊名称</th>
+      <th>群号</th>
       <th class="group-cell-action">${escapeHtml(switchColLabel)}</th>
     </tr></thead><tbody>`;
 
@@ -1620,30 +1620,13 @@ async def render_text_to_image(text: str):
       const gid = String(g.gid);
       const isSelected = curList.includes(gid);
       const hasCustom = Boolean(customCfgs && customCfgs[gid] && Object.keys(customCfgs[gid]).length > 0);
-      let effHtml = "";
-      if (mode === "all") {
-        effHtml = `<span class="group-eff-pill on">🟢 全群生效中</span>`;
-      } else if (mode === "blacklist") {
-        effHtml = isSelected
-          ? `<span class="group-eff-pill warn">🚫 黑名单已排除</span>`
-          : `<span class="group-eff-pill on">🟢 正常生效</span>`;
-      } else {
-        effHtml = isSelected
-          ? `<span class="group-eff-pill on">🟢 已启用转图</span>`
-          : `<span class="group-eff-pill off">⚪ 未启用</span>`;
-      }
       const customBadge = hasCustom
-        ? ` <span class="curated-badge badge-ready" style="margin-left:6px;">已设专属外观</span>`
+        ? ` <span class="curated-badge badge-ready" style="margin-left:4px;">专属</span>`
         : "";
       const displayName = g.group_name && g.group_name !== gid ? g.group_name : `群聊 ${gid}`;
-      html += `<tr data-gid="${escapeHtml(gid)}">
-        <td>
-          <div class="group-cell-main">
-            <span class="group-cell-name">${escapeHtml(displayName)}${customBadge}</span>
-            <span class="group-cell-gid">群号: ${escapeHtml(gid)}</span>
-          </div>
-        </td>
-        <td>${effHtml}</td>
+      html += `<tr class="${isSelected ? "is-enabled" : ""}" data-gid="${escapeHtml(gid)}">
+        <td class="group-cell-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}${customBadge}</td>
+        <td class="group-cell-id" title="${escapeHtml(gid)}">${escapeHtml(gid)}</td>
         <td class="group-cell-action">
           <label class="m3-switch" title="切换群 ${escapeHtml(gid)} 名单状态">
             <input type="checkbox" class="group-row-switch" data-gid="${escapeHtml(gid)}" ${isSelected ? "checked" : ""} />
