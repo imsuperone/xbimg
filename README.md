@@ -1,4 +1,4 @@
-# 消息转图助手 v1.3.23
+# 消息转图助手 v1.3.24
 
 > 将机器人发出的纯文本消息渲染为高品质图片，附内容审查与 Web 控制台。
 
@@ -9,7 +9,7 @@
 本插件基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开发。AstrBot 是一个松耦合、异步、支持多消息平台部署，具有易用的插件系统和完善的大语言模型（LLM）接入功能的聊天机器人及开发框架，使用文档见 [docs.astrbot.app](https://docs.astrbot.app)。
 
 - 插件 ID：`astrbot_plugin_xbimg`
-- 当前版本：`v1.3.23`
+- 当前版本：`v1.3.24`
 - 运行要求：AstrBot `>=3.4.0`，平台 `aiocqhttp`
 - 仓库：https://github.com/imsuperone/xbimg
 
@@ -19,7 +19,7 @@
 - 星空背景：随机十字星、星芒与光晕粒子，密度可调。
 - 画质档位：原画、均衡、极小三档可选。
 - 链接策略：遇 URL 转图、保留纯文本或附提取后的纯文本链接。
-- 敏感词审查：多套违规词方案按群绑定，支持 AI 双轨审查。
+- 敏感词审查：多套违规词方案按群绑定，支持字级精准打码。
 - 违规处置：打码、拦截、警示卡片，打码样式与位置可调。
 - Web 控制台：全屏仪表盘与实时文本渲染测试台。
 
@@ -34,7 +34,7 @@
 
 | 指令 | 说明 |
 | :--- | :--- |
-| `/xbimg` | 控制台状态与完整菜单 |
+| `/xbimg` / `/xbimg help` | 运行状态卡片 / 完整指令速查手册 |
 | `/xbimg on` / `off` | 总开关 |
 | `/xbimg trigger always` / `violation` | 始终转图 / 仅违规时转图 |
 | `/xbimg minlen <1-1000>` | 最小触发字数 |
@@ -55,6 +55,7 @@
 | 指令 | 说明 |
 | :--- | :--- |
 | `/xbimg group` | 本群配置卡片与指南 |
+| `/xbimg group on` / `off [群号]` | 开启或关闭指定群聊转图 |
 | `/xbimg group set <50-500> [群号]` | 单群字体大小 |
 | `/xbimg group style / theme / kw ... [群号]` | 单群风格、主题、词库（`default` 跟随全局） |
 | `/xbimg group ttf <字体id> [群号]` | 单群精选字体 |

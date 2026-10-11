@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.23
+// Version: 1.3.24
 // ==========================================================================
 (function () {
   "use strict";
@@ -787,7 +787,8 @@ async def render_text_to_image(text: str):
         const curList = (document.getElementById("cfgGroupList")?.value || "").split(/[,;\s]+/).map(s=>s.trim()).filter(Boolean);
         const existing = getGroupConfigs();
         const m = {};
-        curList.forEach(gid=>{
+        const allGids = new Set([...Object.keys(existing || {}), ...curList]);
+        allGids.forEach(gid=>{
           const prev = existing[gid] || {};
           const slider = document.querySelector(`.sg-slider[data-gid="${_gidq(gid)}"]`);
           const numEl = document.querySelector(`.sg-num[data-gid="${_gidq(gid)}"]`);
@@ -1494,7 +1495,7 @@ async def render_text_to_image(text: str):
       return await api.get("groups");
     }
   }
-  async function fetchGroups() {
+  async function fetchGroups(silent = false) {
     if (_isFetchingGroups) return;
     _isFetchingGroups = true;
 
@@ -1504,27 +1505,28 @@ async def render_text_to_image(text: str):
 
     try {
       if (btnEl) btnEl.disabled = true;
-      if (hintEl) hintEl.textContent = "正在拉取机器人所在群聊…";
+      if (hintEl && !silent) hintEl.textContent = "正在拉取机器人所在群聊…";
 
       let res = await fetchGroupsPayload();
 
       if (res && Array.isArray(res.groups)) {
         cachedGroups = res.groups;
         if (cachedGroups.length === 0) {
-          if (hintEl) hintEl.textContent = "未检出群聊，已在后台自动监听新增群聊消息";
-          showToast("暂未检出群聊，产生群聊消息后将自动识别");
+          if (hintEl) hintEl.textContent = "暂未检出机器人群聊，可手动输入群号添加";
+          if (!silent) showToast("暂未检出群聊，产生群聊消息后将自动识别");
         } else {
-          if (hintEl) hintEl.textContent = `已获取 ${cachedGroups.length} 个群聊，选择即可勾选或取消勾选`;
-          showToast(`已获取 ${cachedGroups.length} 个群聊`);
+          if (hintEl) hintEl.textContent = `已加载 ${cachedGroups.length} 个群聊，直接拨动右侧开关即可启停`;
+          if (!silent) showToast(`已获取 ${cachedGroups.length} 个群聊`);
         }
         renderGroupChips(cachedGroups);
-        if (boxEl) boxEl.style.display = "flex";
+        if (boxEl) boxEl.style.display = "block";
       } else {
         throw new Error("返回群列表格式不符");
       }
     } catch (e) {
       if (hintEl) hintEl.textContent = "拉取群聊失败: " + e.message;
-      showToast("拉取群聊失败：" + e.message);
+      if (!silent) showToast("拉取群聊失败：" + e.message);
+      renderGroupChips(cachedGroups);
     } finally {
       _isFetchingGroups = false;
       if (btnEl) btnEl.disabled = false;
@@ -1534,42 +1536,120 @@ async def render_text_to_image(text: str):
   function renderGroupChips(groups) {
     const boxEl = document.getElementById("groupPickerBox");
     if (!boxEl) return;
-    boxEl.innerHTML = "";
 
     const curList = (document.getElementById("cfgGroupList")?.value || "")
       .split(/[,;\s]+/)
       .map((g) => g.trim())
       .filter(Boolean);
+    const mode = getSegmentedValue("segGroupMode", "whitelist");
+    const customCfgs = getGroupConfigs();
+    const searchKw = (document.getElementById("groupSearchInput")?.value || "").trim().toLowerCase();
 
-    groups.forEach((g) => {
-      const isSelected = curList.includes(String(g.gid));
-      const chip = document.createElement("div");
-      chip.className = `group-select-chip ${isSelected ? "selected" : ""}`;
-      chip.setAttribute("data-gid", g.gid);
-      chip.innerHTML = `
-        <span>${escapeHtml(g.group_name || g.gid)}</span>
-        <span style="opacity: 0.6; font-size: 11px;">(${g.gid})</span>
-      `;
-      boxEl.appendChild(chip);
+    const mergedMap = new Map();
+    (Array.isArray(groups) ? groups : []).forEach((g) => {
+      const gid = String(g.gid || "").trim();
+      if (gid) mergedMap.set(gid, String(g.group_name || gid));
     });
+    curList.forEach((gid) => {
+      if (gid && !mergedMap.has(gid)) mergedMap.set(gid, gid);
+    });
+    Object.keys(customCfgs || {}).forEach((gid) => {
+      if (gid && !mergedMap.has(gid)) mergedMap.set(gid, gid);
+    });
+
+    const rows = [];
+    mergedMap.forEach((gname, gid) => {
+      if (searchKw && !gid.toLowerCase().includes(searchKw) && !String(gname).toLowerCase().includes(searchKw)) {
+        return;
+      }
+      rows.push({ gid, group_name: gname });
+    });
+
+    const switchColLabel = mode === "blacklist" ? "加入黑名单" : "本群白名单开关";
+    if (rows.length === 0) {
+      boxEl.innerHTML = `<div class="font-files-empty" style="padding: 18px 12px;">${
+        searchKw ? "未找到匹配的群聊" : "暂无群聊记录，点击上方「刷新群聊列表」或手动输入群号添加"
+      }</div>`;
+      return;
+    }
+
+    let html = `<table class="group-switch-table"><thead><tr>
+      <th>群聊名称 / 群号</th>
+      <th>生效状态</th>
+      <th style="text-align:right;">${escapeHtml(switchColLabel)}</th>
+    </tr></thead><tbody>`;
+
+    rows.forEach((g) => {
+      const gid = String(g.gid);
+      const isSelected = curList.includes(gid);
+      const hasCustom = Boolean(customCfgs && customCfgs[gid] && Object.keys(customCfgs[gid]).length > 0);
+      let effHtml = "";
+      if (mode === "all") {
+        effHtml = `<span class="group-eff-pill on">🟢 全群生效中</span>`;
+      } else if (mode === "blacklist") {
+        effHtml = isSelected
+          ? `<span class="group-eff-pill warn">🚫 黑名单已排除</span>`
+          : `<span class="group-eff-pill on">🟢 正常生效</span>`;
+      } else {
+        effHtml = isSelected
+          ? `<span class="group-eff-pill on">🟢 已启用转图</span>`
+          : `<span class="group-eff-pill off">⚪ 未启用</span>`;
+      }
+      const customBadge = hasCustom
+        ? ` <span class="curated-badge badge-ready" style="margin-left:6px;">已设专属外观</span>`
+        : "";
+      const displayName = g.group_name && g.group_name !== gid ? g.group_name : `群聊 ${gid}`;
+      html += `<tr data-gid="${escapeHtml(gid)}">
+        <td>
+          <div class="group-cell-main">
+            <span class="group-cell-name">${escapeHtml(displayName)}${customBadge}</span>
+            <span class="group-cell-gid">群号: ${escapeHtml(gid)}</span>
+          </div>
+        </td>
+        <td>${effHtml}</td>
+        <td style="text-align:right;">
+          <label class="m3-switch" title="切换群 ${escapeHtml(gid)} 名单状态">
+            <input type="checkbox" class="group-row-switch" data-gid="${escapeHtml(gid)}" ${isSelected ? "checked" : ""} />
+            <span class="switch-slider"></span>
+          </label>
+        </td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+    boxEl.innerHTML = html;
   }
 
   function updateGroupChipsSelection() {
-    const curList = (document.getElementById("cfgGroupList")?.value || "")
-      .split(/[,;\s]+/)
-      .map((g) => g.trim())
-      .filter(Boolean);
-
-    document.querySelectorAll(".group-select-chip").forEach((chip) => {
-      const gid = chip.getAttribute("data-gid");
-      if (curList.includes(gid)) {
-        chip.classList.add("selected");
-      } else {
-        chip.classList.remove("selected");
-      }
-    });
+    renderGroupChips(cachedGroups);
     // 同步刷新下方选中的群列表滑块
     renderSelectedGroupsFontList();
+  }
+
+  function addManualGroup() {
+    const addInput = document.getElementById("groupAddInput");
+    if (!addInput) return;
+    const raw = (addInput.value || "").trim();
+    const gid = raw.replace(/\D/g, "") || raw;
+    if (!gid) {
+      showToast("请输入有效的群号");
+      return;
+    }
+    if (!cachedGroups.some((g) => String(g.gid) === gid)) {
+      cachedGroups.unshift({ gid: gid, group_name: gid });
+    }
+    const input = document.getElementById("cfgGroupList");
+    if (input) {
+      const list = input.value.split(/[,;\s]+/).map((g) => g.trim()).filter(Boolean);
+      if (!list.includes(gid)) {
+        list.push(gid);
+        input.value = list.join(", ");
+      }
+      updateGroupChipsSelection();
+      updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), input.value);
+      triggerAutoSave();
+    }
+    addInput.value = "";
+    showToast(`已添加并启用群聊 ${gid}`);
   }
 
   function toggleGroupSelection(gid) {
@@ -2066,10 +2146,11 @@ async def render_text_to_image(text: str):
             return;
           }
 
-          // 生效模式切换动态更新底部提示
+          // 生效模式切换动态更新底部提示与群聊开关表状态
           if (parent.id === "segGroupMode") {
             const curList = document.getElementById("cfgGroupList")?.value || "";
             updateGroupModeStatusUI(val, curList);
+            renderGroupChips(cachedGroups);
           }
 
           // 字体来源切换显隐自定义输入区
@@ -2126,10 +2207,15 @@ async def render_text_to_image(text: str):
         return;
       }
 
-      // 8. 拉取所有群聊按钮
+      // 8. 拉取所有群聊按钮 / 手动添加群号按钮
       if (e.target.closest("#fetchGroupsBtn")) {
         e.preventDefault();
-        fetchGroups();
+        fetchGroups(false);
+        return;
+      }
+      if (e.target.closest("#groupAddBtn")) {
+        e.preventDefault();
+        addManualGroup();
         return;
       }
 
@@ -2161,6 +2247,11 @@ async def render_text_to_image(text: str):
 
     // 开关状态联动
     document.addEventListener("change", function (e) {
+      if (e.target && e.target.classList.contains("group-row-switch")) {
+        const gid = e.target.getAttribute("data-gid");
+        if (gid) toggleGroupSelection(gid);
+        return;
+      }
       if (e.target && e.target.id === "cfgStarBg") {
         const starDensityGroup = document.getElementById("starDensityGroup");
         if (starDensityGroup) {
@@ -2204,6 +2295,10 @@ async def render_text_to_image(text: str):
 
     // 输入类即时保存
     document.addEventListener("input", function (e) {
+      if (e.target && e.target.id === "groupSearchInput") {
+        renderGroupChips(cachedGroups);
+        return;
+      }
       if (e.target && e.target.id === "cfgGroupList") {
         updateGroupChipsSelection();
         updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), e.target.value);
@@ -2521,6 +2616,15 @@ async def render_text_to_image(text: str):
         showToast("已恢复默认主题色");
       });
     }
+    const _groupAddInput = document.getElementById("groupAddInput");
+    if (_groupAddInput) {
+      _groupAddInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          addManualGroup();
+        }
+      });
+    }
     initAccentPopover();
     notifyReady();
 
@@ -2538,6 +2642,7 @@ async def render_text_to_image(text: str):
         fetchFontFiles(),
         fetchCuratedFonts(),
         fetchPresetUpdateStatus(),
+        fetchGroups(true),
       ]);
       _statusRes = st || null;
     } catch (e) {}

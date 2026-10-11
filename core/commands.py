@@ -172,52 +172,68 @@ class CommandsMixin:
             "dense": "星海 (~60颗)",
         }
 
-        if not sub or sub in ("help", "status", "菜单"):
+        if not sub or sub in ("status", "状态", "info"):
+            cur_gid = self._extract_group_id(event)
+            if cur_gid:
+                grp_allowed = self._is_gid_allowed(cur_gid)
+                grp_eff = "🟢 本群生效" if (cfg.get("enable", True) and grp_allowed) else ("🔴 全局已暂停" if not cfg.get("enable", True) else "⚪ 本群未开启")
+                grp_line = f"• 当前群聊：{self._get_group_display_name(event, cur_gid)} ({cur_gid}) · {grp_eff}\n"
+            else:
+                grp_line = "• 当前会话：私聊会话（默认生效）\n"
+            g_tokens = self._parsed_group_list()
+            g_mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
+            g_mode_label = group_map.get(g_mode, "🛡️ 仅白名单群生效")
+            if g_mode in ("whitelist", "blacklist"):
+                g_mode_label += f"（已设 {len(g_tokens)} 群）"
+            stats = getattr(self.cfg_mgr, "stats", {}) or {}
+            total_r = int(stats.get("total_rendered", 0) or 0)
+            total_v = int(stats.get("violations_blocked", 0) or 0)
+            mod_on = bool(cfg.get("enable_keywords_moderation", True) and cfg.get("moderation_mode") != "none")
+            star_str = f"✨ 开启({density_map.get(cfg.get('star_density', 'medium'), '标准').split()[0]})" if cfg.get("star_background") else "关闭"
             yield event.plain_result(
-                "🎨【消息转图助手 · 控制台】\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                f"• 总开关状态：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'}\n"
-                f"• 触发时机：{'🔄 始终转图' if cfg.get('render_trigger') == 'always' else '🛡️ 仅违规时转图'}\n"
-                f"• 最少字数：{cfg.get('min_length_threshold', 1)} 字\n"
-                f"• 视觉风格：{cfg.get('style', 'ios').upper()}\n"
-                f"• 配色主题：{'🌞 浅色明亮' if cfg.get('theme_mode') == 'light' else '🌙 深色暗黑'}\n"
-                f"• 星空背景：{'✨ 开启' if cfg.get('star_background') else '❌ 关闭'} ({density_map.get(cfg.get('star_density', 'medium'), '标准')})\n"
-                f"• 文件体积：{comp_map.get(_compress_level(cfg), '均衡适中')}\n"
-                f"• 链接策略：{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
-                f"• 屏蔽词审查：{'🟢 开启' if cfg.get('enable_keywords_moderation', True) and cfg.get('moderation_mode') != 'none' else '⚪ 关闭'}\n"
-                f"• 违规处置：{action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
-                f"• 全局字体：{cfg.get('font_scale', 100)}%\n"
-                f"• 群生效模式：{group_map.get(cfg.get('group_mode', 'whitelist'), '仅白名单群生效')}\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "💡 常用修改指令：\n"
-                "• /xbimg on / off - 总开关\n"
-                "• /xbimg trigger always / violation - 触发时机\n"
-                "• /xbimg minlen <字数> - 最小字数门槛\n"
-                "• /xbimg style ios / android16 - 全局风格\n"
-                "• /xbimg theme light / dark - 全局配色\n"
-                "• /xbimg star on / off - 背景星空开关\n"
-                "• /xbimg density sparse / medium / dense - 星星密度\n"
-                "• /xbimg quality lossless / balanced / compact - 输出文件大小档位\n"
-                "• /xbimg maxkb 800 - 单张体积上限KB（超限自动降质，0 关闭）\n"
-                "• /xbimg link image / text / append - 链接策略\n"
-                "• /xbimg mod on / off - 屏蔽词审查开关\n"
-                "• /xbimg action half / full / block / notice - 违规处置\n"
-                "• /xbimg mosaic pixel / blur - 马赛克颗粒/模糊\n"
-                "• /xbimg mosaicpos bottom / top / random - 半字打码位置\n"
-                "• /xbimg groupmode whitelist / all / blacklist - 群生效模式\n"
-                "• /xbimg kwset <方案ID> - 全局词库切换\n"
-                "• /xbimg kwupdate [apply|keep] - 官方词库更新检测与覆盖\n"
-                "• /xbimg size [群号] 50-500 - 字体百分比\n"
-                "• /xbimg group - 本群专属配置卡片\n"
-                "• /xbimg group set <50-500> [群号] - 单群字体大小\n"
-                "• /xbimg group style ios / android16 / default [群号] - 单群风格\n"
-                "• /xbimg group theme light / dark / default [群号] - 单群主题\n"
-                "• /xbimg group kw <方案ID> / default [群号] - 单群词库\n"
-                "• /xbimg group ttf <字体id> [群号] - 单群精选字体\n"
-                "• /xbimg group list - 字体与词库列表\n"
-                "• /xbimg group reset [群号] - 单群恢复跟随全局\n"
-                "• /xbimg group test [群号] - 单群效果测试图\n"
-                "• /xbimg test [文本] - 立即生成测试效果图（支持多行长文本）"
+                "🎨【xbimg · 消息转图状态】\n"
+                f"{grp_line}"
+                f"• 全局开关：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'} ｜ 触发：{'始终转图' if cfg.get('render_trigger') == 'always' else '仅违规转图'} (≥{cfg.get('min_length_threshold', 1)}字)\n"
+                f"• 视觉排版：{cfg.get('style', 'ios').upper()} · {'浅色' if cfg.get('theme_mode') == 'light' else '深色'} · 星空{star_str} · 字号 {cfg.get('font_scale', 100)}%\n"
+                f"• 输出策略：{comp_map.get(_compress_level(cfg), '均衡适中').split()[0]} · 链接{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
+                f"• 安全审查：{'🟢 开启' if mod_on else '⚪ 关闭'} · {action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
+                f"• 群聊范围：{g_mode_label}\n"
+                f"• 累计统计：已渲染 {total_r} 次 · 触发审查 {total_v} 次\n"
+                "💡 发送 /xbimg help 查看配置指令 · /xbimg group 管理本群开关与专属配置"
+            )
+            return
+
+        if sub in ("help", "菜单", "帮助"):
+            yield event.plain_result(
+                "🎨【xbimg · 指令速查】\n"
+                "▸ 基础与测试\n"
+                "  /xbimg [status] — 查看运行状态面板\n"
+                "  /xbimg on | off — 开启/暂停全局转图\n"
+                "  /xbimg test [文本] — 立即生成测试效果图\n"
+                "▸ 视觉与排版\n"
+                "  /xbimg style ios | android16 — 切换全局卡片风格\n"
+                "  /xbimg theme light | dark — 切换浅色/深色主题\n"
+                "  /xbimg size [群号] <50-500> — 调整字体缩放百分比\n"
+                "  /xbimg star on | off — 开启/关闭星空背景\n"
+                "  /xbimg density sparse | medium | dense — 星星密度\n"
+                "▸ 触发与输出\n"
+                "  /xbimg trigger always | violation — 始终/仅违规转图\n"
+                "  /xbimg minlen <字数> — 触发转图最小字数\n"
+                "  /xbimg quality lossless | balanced | compact — 画质体积档位\n"
+                "  /xbimg maxkb <KB> — 单图体积上限(0关闭)\n"
+                "  /xbimg link image | text | append — 链接处理方式\n"
+                "▸ 审查与词库\n"
+                "  /xbimg mod on | off — 开启/关闭敏感词审查\n"
+                "  /xbimg action half | full | block | notice — 违规处置\n"
+                "  /xbimg mosaic pixel | blur — 像素/高斯模糊打码\n"
+                "  /xbimg mosaicpos bottom | top | random — 半字打码位置\n"
+                "  /xbimg kwset <方案ID> — 切换全局词库方案\n"
+                "  /xbimg kwupdate [apply|keep] — 检测/更新官方词库\n"
+                "▸ 群聊与单群配置\n"
+                "  /xbimg groupmode whitelist | all | blacklist — 群生效模式\n"
+                "  /xbimg group [群号] — 查看单群状态与专属设置\n"
+                "  /xbimg group on | off [群号] — 开启/关闭指定群转图\n"
+                "  /xbimg group set|style|theme|kw|ttf|reset|test — 单群定制"
             )
             return
 
@@ -587,24 +603,41 @@ class CommandsMixin:
                 cur_theme = grp_c.get("theme_mode", cfg.get("theme_mode", "light"))
                 cur_kw = grp_c.get("keyword_preset", "")
                 kw_name = "跟随全局默认" if not cur_kw else cur_kw
+                grp_on = self._is_gid_allowed(target)
+                g_mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
                 yield event.plain_result(
-                    f"🎨【{_gname(target)} · 转图专属设置】\n"
-                    "--------------------\n"
-                    f"当前字体大小：{cur_scale}%\n"
-                    f"当前视觉风格：{str(cur_style).upper()}\n"
-                    f"当前配色主题：{'浅色' if cur_theme == 'light' else '深色'}\n"
-                    f"绑定词库方案：{kw_name}\n"
-                    "--------------------\n"
-                    "💡 单群指令（均可追加工号操作异地群）：\n"
-                    "• /xbimg group set <50-500> [群号] - 单群字体\n"
-                    "• /xbimg group style ios / android16 / default [群号]\n"
-                    "• /xbimg group theme light / dark / default [群号]\n"
-                    "• /xbimg group kw <词库ID> / default [群号]\n"
-                    "• /xbimg group ttf <字体id> [群号]\n"
-                    "• /xbimg group list - 字体与词库列表\n"
-                    "• /xbimg group reset [群号] - 恢复跟随全局\n"
-                    "• /xbimg group test [群号] - 单群效果测试图"
+                    f"🎨【{_gname(target)} ({target}) · 单群设置】\n"
+                    f"• 本群状态：{'🟢 已启用' if grp_on else '⚪ 未启用'}（全局模式：{g_mode}）\n"
+                    f"• 视觉排版：{str(cur_style).upper()} · {'浅色' if cur_theme == 'light' else '深色'} · 字号 {cur_scale}%\n"
+                    f"• 绑定词库：{kw_name}\n"
+                    "▸ 单群指令（末尾可加 [群号] 操作指定群）\n"
+                    "  /xbimg group on | off [群号] — 开启/关闭本群转图\n"
+                    "  /xbimg group set <50-500> [群号] — 单群字号\n"
+                    "  /xbimg group style ios|android16|default [群号]\n"
+                    "  /xbimg group theme light|dark|default [群号]\n"
+                    "  /xbimg group kw <词库ID>|default [群号]\n"
+                    "  /xbimg group ttf <字体ID> [群号] ｜ /xbimg group list\n"
+                    "  /xbimg group reset [群号] ｜ /xbimg group test [群号]"
                 )
+                return
+            if action in ("on", "off", "enable", "disable", "开启", "关闭"):
+                target = _target_gid(rest)
+                if not target:
+                    yield event.plain_result("请指定群号或在群聊中使用，例如：/xbimg group on 123456")
+                    return
+                want_on = action in ("on", "enable", "开启")
+                g_mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
+                if g_mode == "all" and not want_on:
+                    cfg["group_mode"] = "blacklist"
+                    g_mode = "blacklist"
+                tokens = [t for t in self._parsed_group_list() if re.sub(r"\D", "", t) != target and t != target]
+                if (g_mode == "whitelist" and want_on) or (g_mode == "blacklist" and not want_on):
+                    tokens.append(target)
+                cfg["group_list"] = "\n".join(tokens)
+                self._group_cache_sig = None
+                self.cfg_mgr.save({"group_mode": cfg.get("group_mode", "whitelist"), "group_list": cfg["group_list"]})
+                state_str = "🟢 已开启" if self._is_gid_allowed(target) else "⚪ 已关闭"
+                yield event.plain_result(f"✅ {_gname(target)} ({target}) 转图已设为：{state_str}")
                 return
             if action in ("list", "列表"):
                 try:

@@ -393,6 +393,7 @@ class WebApiMixin:
         """主动向适配器与已记录消息拉取所有群组信息"""
         groups: List[Dict[str, str]] = []
         seen_gids = set()
+        updated_seen = False
 
         # 1. 尝试从 Bot 实例获取真实群列表（并发拉取，3s 超时）
         try:
@@ -405,13 +406,28 @@ class WebApiMixin:
                 for res in results:
                     if isinstance(res, list):
                         for g in res:
-                            if g["gid"] not in seen_gids:
-                                seen_gids.add(g["gid"])
+                            gid = g["gid"]
+                            gname = g.get("group_name") or gid
+                            if gid not in seen_gids:
+                                seen_gids.add(gid)
                                 groups.append(g)
+                            cur_info = self._seen_groups.get(gid)
+                            if not isinstance(cur_info, dict) or (gname != gid and cur_info.get("group_name") != gname):
+                                self._seen_groups[gid] = {
+                                    "group_name": gname,
+                                    "last_seen": int((cur_info or {}).get("last_seen") or time.time()),
+                                }
+                                updated_seen = True
                         if groups:
                             break
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 探测平台群列表异常: {e}")
+
+        if updated_seen:
+            try:
+                self._save_seen_groups()
+            except Exception:
+                pass
 
         # 2. 合并历史已捕获群聊
         for gid, info in self._seen_groups.items():

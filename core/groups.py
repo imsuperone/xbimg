@@ -29,7 +29,11 @@ class GroupsMixin:
             grp_name = ""
             grp = getattr(getattr(event, "message_obj", None), "group", None)
             if grp:
-                grp_name = str(getattr(grp, "group_name", "") or "")
+                grp_name = str(getattr(grp, "group_name", "") or "").strip()
+            prev_info = self._seen_groups.get(gid)
+            prev_name = str(prev_info.get("group_name", "") or "").strip() if isinstance(prev_info, dict) else ""
+            if not grp_name and prev_name and prev_name != gid:
+                grp_name = prev_name
             self._seen_groups[gid] = {"gid": gid, "group_name": grp_name or gid}
             # 有界增长：超限淘汰最早记录，避免常年运行内存膨胀
             while len(self._seen_groups) > 2000:

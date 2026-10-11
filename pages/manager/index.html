@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.3.23" />
+  <link rel="stylesheet" href="./style.css?v=1.3.24" />
   <!-- 主题色/深浅色存在服务端配置里（唯一真相源，无本地副本），需等 config 回来才套用；
        首帧先挂起，避免"先见默认色、再跳成已存色"。回填后由 revealUiPrefs() 揭开，3s 兜底。 -->
   <style>
@@ -25,7 +25,7 @@
     <header class="top-bar">
       <div class="top-bar-brand">
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.23">1.3.23</span></h1>
+          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.24">1.3.24</span></h1>
         </div>
       </div>
       <div class="top-bar-actions">
@@ -490,22 +490,27 @@
             </div>
           </div>
 
-          <!-- 主动拉取群聊操作区 -->
-          <div class="group-fetch-row" style="margin-top:16px;">
-            <button id="fetchGroupsBtn" class="m3-btn primary-btn" type="button">
+          <!-- 群聊开关管理栏（对齐 xbbot_beta 样式：搜索 + 手动添加 + 刷新列表 + 表格开关） -->
+          <div class="group-switch-toolbar" style="margin-top:16px;">
+            <input type="text" id="groupSearchInput" class="m3-input" placeholder="🔍 搜索群名称或群号…" style="flex: 1 1 200px; max-width: 280px;" />
+            <div class="group-add-inline">
+              <input type="text" id="groupAddInput" class="m3-input" placeholder="手动输入群号添加…" />
+              <button id="groupAddBtn" class="m3-btn secondary-btn" type="button" style="white-space: nowrap;">+ 添加群号</button>
+            </div>
+            <button id="fetchGroupsBtn" class="m3-btn primary-btn" type="button" style="white-space: nowrap;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
-              拉取机器人所在群聊（选择标签即可勾选）
+              刷新群聊列表
             </button>
-            <span id="groupFetchHint" class="field-hint" style="margin: 0; color: var(--m3-sys-color-primary); font-weight: 600;">选择后拉取已加入的群聊</span>
+            <span id="groupFetchHint" class="field-hint" style="margin: 0; color: var(--m3-sys-color-primary); font-weight: 600;">自动加载机器人所在群聊</span>
           </div>
 
-          <div id="groupPickerBox" class="group-chips-wrap" style="display: none;">
-            <!-- 动态填充群胶囊 -->
+          <div id="groupPickerBox" class="group-switch-table-wrap">
+            <!-- 动态填充群聊开关列表 -->
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label class="form-label">当前生效群号（以英文逗号分隔，可通过上方标签选择）</label>
-            <input type="text" id="cfgGroupList" class="m3-input" placeholder="留空则全部群聊均不转换。示例：12345678, 88776655" />
+            <label class="form-label">当前名单群号（以英文逗号分隔，与上方群聊开关实时同步）</label>
+            <input type="text" id="cfgGroupList" class="m3-input" placeholder="留空则白名单模式下全部群聊均不转换。示例：12345678, 88776655" />
             <span class="field-hint" id="groupHelpNote" style="color: var(--m3-status-amber);">当前未填写群号，群聊将以纯文本发送，不执行图片转换。</span>
           </div>
         </div>
@@ -584,6 +589,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.3.23"></script>
+  <script src="./app.js?v=1.3.24"></script>
 </body>
 </html>
