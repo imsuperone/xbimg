@@ -69,9 +69,9 @@ class CommandsMixin:
             names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
             spec = {
                 "key": "keyword_preset", "hit": hit,
-                "reset_ok": "✅ 已将【{t}】绑定的敏感词库恢复为：跟随全局默认。",
+                "reset_ok": "已将【{t}】绑定的敏感词库恢复为：跟随全局默认。",
                 "reset_no_target": "当前不在群聊中，请附带群号。",
-                "set_ok": f"✅ 已将【{{t}}】绑定的敏感词库切换为：{pname}",
+                "set_ok": f"已将【{{t}}】绑定的敏感词库切换为：{pname}",
                 "set_no_target": "当前不在群聊中，请附带群号。",
                 "usage": "用法：/xbimg group kw <词库方案ID> / default [群号]\n当前可用词库：\n" + "\n".join(names),
             }
@@ -80,18 +80,18 @@ class CommandsMixin:
                 "style": {
                     "key": "style",
                     "aliases": {"ios": "ios", "android16": "android16", "android": "android16"},
-                    "reset_ok": "✅ 已将【{t}】的视觉风格恢复为跟随全局默认。",
+                    "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
-                    "set_ok": "✅ 已将【{t}】的视觉风格设置为：{v}",
+                    "set_ok": "已将【{t}】的视觉风格设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
                     "usage": "用法：/xbimg group style ios / android16 / default [群号]",
                 },
                 "theme": {
                     "key": "theme_mode",
                     "aliases": {"light": "light", "dark": "dark", "浅色": "light", "深色": "dark"},
-                    "reset_ok": "✅ 已将【{t}】的配色主题恢复为跟随全局默认。",
+                    "reset_ok": "已将【{t}】的配色主题恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group theme default 123456",
-                    "set_ok": "✅ 已将【{t}】的配色主题设置为：{v}",
+                    "set_ok": "已将【{t}】的配色主题设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
                     "usage": "用法：/xbimg group theme light / dark / default [群号]",
                 },
@@ -119,12 +119,6 @@ class CommandsMixin:
     # ==========================================
     # 管理指令交互 (仅保留纯净的 /xbimg 指令)
     # ==========================================
-
-
-
-    # ==========================================
-    # 管理指令交互 (仅保留纯净的 /xbimg 指令)
-    # ==========================================
     async def cmd_xbimg(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
         """消息转图助手管理指令"""
         sub = sub.strip().lower()
@@ -146,20 +140,20 @@ class CommandsMixin:
             pass
 
         comp_map = {
-            "compact": "⚡ 极小文件 (省流紧凑)",
-            "balanced": "⚖️ 均衡适中 (推荐)",
-            "lossless": "💎 原画无损 (高清大图)",
+            "compact": "极小文件 (省流紧凑)",
+            "balanced": "均衡适中 (推荐)",
+            "lossless": "原画无损 (高清大图)",
         }
         action_map = {
-            "mosaic_half": "🎭 打一半马赛克",
-            "mosaic_full": "🔒 全图正文打码",
-            "block": "🚫 彻底拦截静默",
-            "notice": "⚠️ 替换合规警示卡片",
+            "mosaic_half": "打一半马赛克",
+            "mosaic_full": "全图正文打码",
+            "block": "彻底拦截静默",
+            "notice": "替换合规警示卡片",
         }
         group_map = {
-            "whitelist": "🛡️ 仅白名单群生效",
-            "all": "🌐 全部所有群直接生效",
-            "blacklist": "🚫 黑名单排除模式",
+            "whitelist": "仅白名单群生效",
+            "all": "全部所有群直接生效",
+            "blacklist": "黑名单排除模式",
         }
         link_map = {
             "as_image": "图片渲染",
@@ -176,60 +170,60 @@ class CommandsMixin:
             cur_gid = self._extract_group_id(event)
             if cur_gid:
                 grp_allowed = self._is_gid_allowed(cur_gid)
-                grp_eff = "🟢 本群生效" if (cfg.get("enable", True) and grp_allowed) else ("🔴 全局已暂停" if not cfg.get("enable", True) else "⚪ 本群未开启")
-                grp_line = f"• 当前群聊：{self._get_group_display_name(event, cur_gid)} ({cur_gid}) · {grp_eff}\n"
+                grp_eff = "本群生效" if (cfg.get("enable", True) and grp_allowed) else ("全局已暂停" if not cfg.get("enable", True) else "本群未开启")
+                grp_line = f"- 当前群聊：{self._get_group_display_name(event, cur_gid)} ({cur_gid}) · {grp_eff}\n"
             else:
-                grp_line = "• 当前会话：私聊会话（默认生效）\n"
+                grp_line = "- 当前会话：私聊会话（默认生效）\n"
             g_tokens = self._parsed_group_list()
             g_mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
-            g_mode_label = group_map.get(g_mode, "🛡️ 仅白名单群生效")
+            g_mode_label = group_map.get(g_mode, "仅白名单群生效")
             if g_mode in ("whitelist", "blacklist"):
                 g_mode_label += f"（已设 {len(g_tokens)} 群）"
             stats = getattr(self.cfg_mgr, "stats", {}) or {}
             total_r = int(stats.get("total_rendered", 0) or 0)
             total_v = int(stats.get("violations_blocked", 0) or 0)
             mod_on = bool(cfg.get("enable_keywords_moderation", True) and cfg.get("moderation_mode") != "none")
-            star_str = f"✨ 开启({density_map.get(cfg.get('star_density', 'medium'), '标准').split()[0]})" if cfg.get("star_background") else "关闭"
+            star_str = f"开启({density_map.get(cfg.get('star_density', 'medium'), '标准').split()[0]})" if cfg.get("star_background") else "关闭"
             yield event.plain_result(
-                "🎨【xbimg · 消息转图状态】\n"
+                "【xbimg · 消息转图状态】\n"
                 f"{grp_line}"
-                f"• 全局开关：{'🟢 运行中' if cfg.get('enable', True) else '🔴 已暂停'} ｜ 触发：{'始终转图' if cfg.get('render_trigger') == 'always' else '仅违规转图'} (≥{cfg.get('min_length_threshold', 1)}字)\n"
-                f"• 视觉排版：{cfg.get('style', 'ios').upper()} · {'浅色' if cfg.get('theme_mode') == 'light' else '深色'} · 星空{star_str} · 字号 {cfg.get('font_scale', 100)}%\n"
-                f"• 输出策略：{comp_map.get(_compress_level(cfg), '均衡适中').split()[0]} · 链接{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
-                f"• 安全审查：{'🟢 开启' if mod_on else '⚪ 关闭'} · {action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
-                f"• 群聊范围：{g_mode_label}\n"
-                f"• 累计统计：已渲染 {total_r} 次 · 触发审查 {total_v} 次\n"
-                "💡 发送 /xbimg help 查看配置指令 · /xbimg group 管理本群开关与专属配置"
+                f"- 全局开关：{'运行中' if cfg.get('enable', True) else '已暂停'} ｜ 触发：{'始终转图' if cfg.get('render_trigger') == 'always' else '仅违规转图'} (≥{cfg.get('min_length_threshold', 1)}字)\n"
+                f"- 视觉排版：{cfg.get('style', 'ios').upper()} · {'浅色' if cfg.get('theme_mode') == 'light' else '深色'} · 星空{star_str} · 字号 {cfg.get('font_scale', 100)}%\n"
+                f"- 输出策略：{comp_map.get(_compress_level(cfg), '均衡适中').split()[0]} · 链接{link_map.get(cfg.get('link_mode', 'as_image'), '图片渲染')}\n"
+                f"- 安全审查：{'开启' if mod_on else '关闭'} · {action_map.get(cfg.get('violation_action', 'mosaic_half'), '打一半马赛克')}\n"
+                f"- 群聊范围：{g_mode_label}\n"
+                f"- 累计统计：已渲染 {total_r} 次 · 触发审查 {total_v} 次\n"
+                "提示：发送 /xbimg help 查看配置指令 · /xbimg group 管理本群开关与专属配置"
             )
             return
 
         if sub in ("help", "菜单", "帮助"):
             yield event.plain_result(
-                "🎨【xbimg · 指令速查】\n"
-                "▸ 基础与测试\n"
+                "【xbimg · 指令速查】\n"
+                "[基础与测试]\n"
                 "  /xbimg [status] — 查看运行状态面板\n"
                 "  /xbimg on | off — 开启/暂停全局转图\n"
                 "  /xbimg test [文本] — 立即生成测试效果图\n"
-                "▸ 视觉与排版\n"
+                "[视觉与排版]\n"
                 "  /xbimg style ios | android16 — 切换全局卡片风格\n"
                 "  /xbimg theme light | dark — 切换浅色/深色主题\n"
                 "  /xbimg size [群号] <50-500> — 调整字体缩放百分比\n"
                 "  /xbimg star on | off — 开启/关闭星空背景\n"
                 "  /xbimg density sparse | medium | dense — 星星密度\n"
-                "▸ 触发与输出\n"
+                "[触发与输出]\n"
                 "  /xbimg trigger always | violation — 始终/仅违规转图\n"
                 "  /xbimg minlen <字数> — 触发转图最小字数\n"
                 "  /xbimg quality lossless | balanced | compact — 画质体积档位\n"
                 "  /xbimg maxkb <KB> — 单图体积上限(0关闭)\n"
                 "  /xbimg link image | text | append — 链接处理方式\n"
-                "▸ 审查与词库\n"
+                "[审查与词库]\n"
                 "  /xbimg mod on | off — 开启/关闭敏感词审查\n"
                 "  /xbimg action half | full | block | notice — 违规处置\n"
                 "  /xbimg mosaic pixel | blur — 像素/高斯模糊打码\n"
                 "  /xbimg mosaicpos bottom | top | random — 半字打码位置\n"
                 "  /xbimg kwset <方案ID> — 切换全局词库方案\n"
                 "  /xbimg kwupdate [apply|keep] — 检测/更新官方词库\n"
-                "▸ 群聊与单群配置\n"
+                "[群聊与单群配置]\n"
                 "  /xbimg groupmode whitelist | all | blacklist — 群生效模式\n"
                 "  /xbimg group [群号] — 查看单群状态与专属设置\n"
                 "  /xbimg group on | off [群号] — 开启/关闭指定群转图\n"
@@ -247,26 +241,26 @@ class CommandsMixin:
             _first_act = ""
         _readonly = (sub == "test") or (sub == "group" and _first_act in _readonly_group)
         if not _readonly and not self._is_admin_event(event):
-            yield event.plain_result("⛔ 仅群管理员可修改转图配置。")
+            yield event.plain_result("仅群管理员可修改转图配置。")
             return
 
         if sub in ("on", "start", "开启"):
             cfg["enable"] = True
             self.cfg_mgr.save()
-            yield event.plain_result("✅ 消息转图助手已开启！后续文本消息将自动渲染为美观图片。")
+            yield event.plain_result("消息转图助手已开启，后续文本消息将自动渲染为图片。")
         elif sub in ("off", "stop", "关闭"):
             cfg["enable"] = False
             self.cfg_mgr.save()
-            yield event.plain_result("⏸️ 消息转图助手已暂停。")
+            yield event.plain_result("消息转图助手已暂停。")
         elif sub in ("trigger", "trig"):
             if arg in ("violation", "violation_only", "仅违规", "违规"):
                 cfg["render_trigger"] = "violation_only"
                 self.cfg_mgr.save()
-                yield event.plain_result("✅ 转图触发时机已设为：🛡️ 仅违规时转图（普通消息保持纯文本）")
+                yield event.plain_result("转图触发时机已设为：仅违规时转图（普通消息保持纯文本）")
             elif arg in ("always", "所有", "始终", "全部"):
                 cfg["render_trigger"] = "always"
                 self.cfg_mgr.save()
-                yield event.plain_result("✅ 转图触发时机已设为：🔄 始终转图")
+                yield event.plain_result("转图触发时机已设为：始终转图")
             else:
                 yield event.plain_result("用法：/xbimg trigger always 或 /xbimg trigger violation")
         elif sub in ("minlen", "minlength", "len"):
@@ -274,25 +268,25 @@ class CommandsMixin:
                 num = max(1, min(1000, int(arg)))
                 cfg["min_length_threshold"] = num
                 self.cfg_mgr.save()
-                yield event.plain_result(f"✅ 触发转图字数门槛已设为：{num} 字")
+                yield event.plain_result(f"触发转图字数门槛已设为：{num} 字")
             except Exception:
                 yield event.plain_result("用法：/xbimg minlen <1-1000>")
         elif sub == "style":
             if arg in ("ios", "android16"):
                 cfg["style"] = arg
                 self.cfg_mgr.save()
-                yield event.plain_result(f"🎨 全局视觉风格已切换为：{arg.upper()}")
+                yield event.plain_result(f"全局视觉风格已切换为：{arg.upper()}")
             else:
                 yield event.plain_result("用法：/xbimg style ios 或 /xbimg style android16")
         elif sub in ("theme", "配色"):
             if arg in ("light", "浅色"):
                 cfg["theme_mode"] = "light"
                 self.cfg_mgr.save()
-                yield event.plain_result("🎨 全局配色已设为：☀️ 浅色明亮")
+                yield event.plain_result("全局配色已设为：浅色明亮")
             elif arg in ("dark", "深色"):
                 cfg["theme_mode"] = "dark"
                 self.cfg_mgr.save()
-                yield event.plain_result("🎨 全局配色已设为：🌙 深色暗黑")
+                yield event.plain_result("全局配色已设为：深色暗黑")
             else:
                 yield event.plain_result("用法：/xbimg theme light 或 /xbimg theme dark")
         elif sub == "star":
@@ -304,20 +298,20 @@ class CommandsMixin:
                 yield event.plain_result("用法：/xbimg star on 或 /xbimg star off")
                 return
             self.cfg_mgr.save()
-            yield event.plain_result(f"✨ 星空背景已设置为：{'开启' if cfg.get('star_background') else '关闭'}")
+            yield event.plain_result(f"星空背景已设置为：{'开启' if cfg.get('star_background') else '关闭'}")
         elif sub in ("density", "stardensity"):
             if arg in ("sparse", "稀疏"):
                 cfg["star_density"] = "sparse"
                 self.cfg_mgr.save()
-                yield event.plain_result("✨ 小星星密度已设为：稀疏 (~18颗)")
+                yield event.plain_result("小星星密度已设为：稀疏 (~18颗)")
             elif arg in ("dense", "星海", "密集"):
                 cfg["star_density"] = "dense"
                 self.cfg_mgr.save()
-                yield event.plain_result("✨ 小星星密度已设为：星海 (~60颗)")
+                yield event.plain_result("小星星密度已设为：星海 (~60颗)")
             elif arg in ("medium", "标准"):
                 cfg["star_density"] = "medium"
                 self.cfg_mgr.save()
-                yield event.plain_result("✨ 小星星密度已设为：标准 (~36颗)")
+                yield event.plain_result("小星星密度已设为：标准 (~36颗)")
             else:
                 yield event.plain_result("用法：/xbimg density sparse / medium / dense")
         elif sub in ("quality", "compress", "压缩", "文件大小"):
@@ -325,15 +319,15 @@ class CommandsMixin:
             if canon == "lossless":
                 cfg["img_compress_level"] = "lossless"
                 self.cfg_mgr.save()
-                yield event.plain_result("💾 文件体积优化已设为：原画无损 (PNG · 最高画质)")
+                yield event.plain_result("文件体积优化已设为：原画无损 (PNG · 最高画质)")
             elif canon == "compact":
                 cfg["img_compress_level"] = "compact"
                 self.cfg_mgr.save()
-                yield event.plain_result("💾 文件体积优化已设为：极小文件 (JPEG 86% · 极致省流量)")
+                yield event.plain_result("文件体积优化已设为：极小文件 (JPEG 86% · 极致省流量)")
             elif canon == "balanced":
                 cfg["img_compress_level"] = "balanced"
                 self.cfg_mgr.save()
-                yield event.plain_result("💾 文件体积优化已设为：均衡适中 (JPEG 94% · 推荐)")
+                yield event.plain_result("文件体积优化已设为：均衡适中 (JPEG 94% · 推荐)")
             else:
                 yield event.plain_result("用法：/xbimg quality lossless / balanced / compact")
         elif sub in ("maxkb", "max_kb", "体积上限"):
@@ -347,21 +341,21 @@ class CommandsMixin:
             cfg["img_max_kb"] = num
             self.cfg_mgr.save()
             yield event.plain_result(
-                f"💾 单张图片体积上限已设为：{'关闭' if num == 0 else f'{num}KB（超限自动降质）'}"
+                f"单张图片体积上限已设为：{'关闭' if num == 0 else f'{num}KB（超限自动降质）'}"
             )
         elif sub in ("link", "linkmode", "链接"):
             if arg in ("image", "as_image", "图", "图片"):
                 cfg["link_mode"] = "as_image"
                 self.cfg_mgr.save()
-                yield event.plain_result("🔗 链接策略已设为：链接一并转为图片")
+                yield event.plain_result("链接策略已设为：链接一并转为图片")
             elif arg in ("text", "keep_text", "纯文本"):
                 cfg["link_mode"] = "keep_text"
                 self.cfg_mgr.save()
-                yield event.plain_result("🔗 链接策略已设为：包含链接时保持纯文本直接发送")
+                yield event.plain_result("链接策略已设为：包含链接时保持纯文本直接发送")
             elif arg in ("append", "extract_append", "兼得", "提取"):
                 cfg["link_mode"] = "extract_append"
                 self.cfg_mgr.save()
-                yield event.plain_result("🔗 链接策略已设为：转图后附带提取纯文本链接")
+                yield event.plain_result("链接策略已设为：转图后附带提取纯文本链接")
             else:
                 yield event.plain_result("用法：/xbimg link image / text / append")
         elif sub in ("mod", "审查"):
@@ -370,58 +364,58 @@ class CommandsMixin:
                 cfg["moderation_mode"] = "keywords"
                 self.cfg_mgr.save()
                 self.moderator = ContentModerator(cfg)
-                yield event.plain_result("🛡️ 敏感屏蔽词库审查已开启。")
+                yield event.plain_result("敏感屏蔽词库审查已开启。")
             elif arg in ("off", "关闭", "0"):
                 cfg["enable_keywords_moderation"] = False
                 cfg["moderation_mode"] = "none"
                 self.cfg_mgr.save()
                 self.moderator = ContentModerator(cfg)
-                yield event.plain_result("⚪ 敏感屏蔽词库审查已关闭。")
+                yield event.plain_result("敏感屏蔽词库审查已关闭。")
             else:
                 yield event.plain_result("用法：/xbimg mod on 或 /xbimg mod off")
         elif sub in ("action", "处置"):
             if arg in ("half", "mosaic_half", "半打码", "半马赛克"):
                 cfg["violation_action"] = "mosaic_half"
                 self.cfg_mgr.save()
-                yield event.plain_result("🎭 违规处置动作已设为：打一半马赛克 (Half Mosaic)")
+                yield event.plain_result("违规处置动作已设为：打一半马赛克 (Half Mosaic)")
             elif arg in ("full", "mosaic_full", "全打码"):
                 cfg["violation_action"] = "mosaic_full"
                 self.cfg_mgr.save()
-                yield event.plain_result("🔒 违规处置动作已设为：全图正文打码")
+                yield event.plain_result("违规处置动作已设为：全图正文打码")
             elif arg in ("block", "拦截", "静默"):
                 cfg["violation_action"] = "block"
                 self.cfg_mgr.save()
-                yield event.plain_result("🚫 违规处置动作已设为：彻底拦截静默不发")
+                yield event.plain_result("违规处置动作已设为：彻底拦截静默不发")
             elif arg in ("notice", "警示", "卡片"):
                 cfg["violation_action"] = "notice"
                 self.cfg_mgr.save()
-                yield event.plain_result("⚠️ 违规处置动作已设为：替换为合规警示卡片")
+                yield event.plain_result("违规处置动作已设为：替换为合规警示卡片")
             else:
                 yield event.plain_result("用法：/xbimg action half / full / block / notice")
         elif sub in ("mosaic", "打码类型"):
             if arg in ("pixel", "像素"):
                 cfg["mosaic_type"] = "pixel"
                 self.cfg_mgr.save()
-                yield event.plain_result("🧱 马赛克类型已设为：复古像素颗粒块")
+                yield event.plain_result("马赛克类型已设为：复古像素颗粒块")
             elif arg in ("blur", "模糊", "毛玻璃"):
                 cfg["mosaic_type"] = "blur"
                 self.cfg_mgr.save()
-                yield event.plain_result("🌫️ 马赛克类型已设为：高斯磨砂毛玻璃")
+                yield event.plain_result("马赛克类型已设为：高斯磨砂毛玻璃")
             else:
                 yield event.plain_result("用法：/xbimg mosaic pixel 或 /xbimg mosaic blur")
         elif sub in ("mosaicpos", "半码位置"):
             if arg in ("bottom", "下半", "下"):
                 cfg["mosaic_half_pos"] = "bottom"
                 self.cfg_mgr.save()
-                yield event.plain_result("⬇️ 半字打码位置已设为：遮下半")
+                yield event.plain_result("半字打码位置已设为：遮下半")
             elif arg in ("top", "上半", "上"):
                 cfg["mosaic_half_pos"] = "top"
                 self.cfg_mgr.save()
-                yield event.plain_result("⬆️ 半字打码位置已设为：遮上半")
+                yield event.plain_result("半字打码位置已设为：遮上半")
             elif arg in ("random", "随机"):
                 cfg["mosaic_half_pos"] = "random"
                 self.cfg_mgr.save()
-                yield event.plain_result("🎲 半字打码位置已设为：每字随机上下")
+                yield event.plain_result("半字打码位置已设为：每字随机上下")
             else:
                 yield event.plain_result("用法：/xbimg mosaicpos bottom / top / random")
         elif sub in ("groupmode", "群模式"):
@@ -429,17 +423,17 @@ class CommandsMixin:
                 cfg["group_mode"] = "whitelist"
                 self._group_cache_sig = None
                 self.cfg_mgr.save()
-                yield event.plain_result("🛡️ 群生效模式已设为：仅白名单群生效")
+                yield event.plain_result("群生效模式已设为：仅白名单群生效")
             elif arg in ("all", "全群", "全部"):
                 cfg["group_mode"] = "all"
                 self._group_cache_sig = None
                 self.cfg_mgr.save()
-                yield event.plain_result("🌐 群生效模式已设为：所有群聊直接生效")
+                yield event.plain_result("群生效模式已设为：所有群聊直接生效")
             elif arg in ("blacklist", "黑名单"):
                 cfg["group_mode"] = "blacklist"
                 self._group_cache_sig = None
                 self.cfg_mgr.save()
-                yield event.plain_result("🚫 群生效模式已设为：黑名单排除模式")
+                yield event.plain_result("群生效模式已设为：黑名单排除模式")
             else:
                 yield event.plain_result("用法：/xbimg groupmode whitelist / all / blacklist")
         elif sub in ("kwset", "preset", "词库"):
@@ -453,9 +447,9 @@ class CommandsMixin:
                 self.cfg_mgr.save()
                 self.moderator = ContentModerator(cfg)
                 name = item.get("name", arg) if isinstance(item, dict) else arg
-                yield event.plain_result(f"✅ 全局词库方案已切换为：{name}")
+                yield event.plain_result(f"全局词库方案已切换为：{name}")
             else:
-                names = [f"• {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
+                names = [f"- {k} - {(v.get('name') if isinstance(v, dict) else k)}" for k, v in presets.items()]
                 yield event.plain_result("用法：/xbimg kwset <方案ID>\n当前可用词库：\n" + "\n".join(names))
         elif sub in ("kwupdate", "词库更新"):
             # /xbimg kwupdate [apply [方案ID]|keep]：检测官方词库更新并确认覆盖
@@ -477,26 +471,26 @@ class CommandsMixin:
                 except Exception:
                     pass
                 if st.get("update_available"):
-                    left = [f"• {c['id']} - {c['name']}" for c in st.get("changed", [])]
-                    yield event.plain_result("✅ 已覆盖更新指定方案，剩余差异：\n" + "\n".join(left))
+                    left = [f"- {c['id']} - {c['name']}" for c in st.get("changed", [])]
+                    yield event.plain_result("已覆盖更新指定方案，剩余差异：\n" + "\n".join(left))
                 else:
-                    yield event.plain_result("✅ 官方词库已是最新，本地已同步。")
+                    yield event.plain_result("官方词库已是最新，本地已同步。")
                 return
             if action in ("keep", "dismiss", "保留", "忽略"):
                 self.cfg_mgr.dismiss_builtin_presets_update()
-                yield event.plain_result("✅ 已保留本地词库，不再提示本次更新。")
+                yield event.plain_result("已保留本地词库，不再提示本次更新。")
                 return
             st = self.cfg_mgr.get_presets_update_status()
             if not st.get("update_available"):
-                yield event.plain_result("✅ 本地词库与官方一致，无需更新。")
+                yield event.plain_result("本地词库与官方一致，无需更新。")
                 return
-            lines = ["🎨【官方词库更新检测】以下方案与官方不一致："]
+            lines = ["【官方词库更新检测】以下方案与官方不一致："]
             for c in st.get("changed", []):
                 flag = "（本地缺失）" if c.get("missing") else ""
-                lines.append(f"• {c['id']} - {c['name']}{flag}：官方新增 {c['added_total']} 词，本地独有 {c['removed_total']} 词")
+                lines.append(f"- {c['id']} - {c['name']}{flag}：官方新增 {c['added_total']} 词，本地独有 {c['removed_total']} 词")
                 if c.get("added_sample"):
                     lines.append("  新增示例：" + "、".join(c["added_sample"][:5]))
-            lines.append("💡 /xbimg kwupdate apply [方案ID] - 覆盖更新（不填则全部）\n• /xbimg kwupdate keep - 保留本地不再提示")
+            lines.append("提示：/xbimg kwupdate apply [方案ID] - 覆盖更新（不填则全部）\n- /xbimg kwupdate keep - 保留本地不再提示")
             yield event.plain_result("\n".join(lines))
             return
         elif sub in ("fontsize", "groupfont", "gscale", "font", "size", "字号", "文字大小"):
@@ -542,7 +536,7 @@ class CommandsMixin:
                 # 私聊则改全局
                 cfg["font_scale"] = scale
                 self.cfg_mgr.save({"font_scale": scale})
-                yield event.plain_result(f"✅ 全局字体已设为 {scale}%")
+                yield event.plain_result(f"全局字体已设为 {scale}%")
             else:
                 # 只写新位置 group_configs.font_scale（旧 group_font_scales 仅读兼容，不再写入）
                 if scale == 100:
@@ -560,7 +554,7 @@ class CommandsMixin:
                             self.cfg_mgr.save({"group_configs": raw_gc})
                 else:
                     self._update_group_custom(str(target_gid), {"font_scale": scale})
-                yield event.plain_result(f"✅ 群 {target_gid} 字体已设为 {scale}%（100% 为默认，自动移除）")
+                yield event.plain_result(f"群 {target_gid} 字体已设为 {scale}%（100% 为默认，自动移除）")
             return
         elif sub in ("group", "群组", "群"):
             # /xbimg group 单群专属配置（原 /text、/style、/theme 已合并至此）
@@ -606,11 +600,11 @@ class CommandsMixin:
                 grp_on = self._is_gid_allowed(target)
                 g_mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
                 yield event.plain_result(
-                    f"🎨【{_gname(target)} ({target}) · 单群设置】\n"
-                    f"• 本群状态：{'🟢 已启用' if grp_on else '⚪ 未启用'}（全局模式：{g_mode}）\n"
-                    f"• 视觉排版：{str(cur_style).upper()} · {'浅色' if cur_theme == 'light' else '深色'} · 字号 {cur_scale}%\n"
-                    f"• 绑定词库：{kw_name}\n"
-                    "▸ 单群指令（末尾可加 [群号] 操作指定群）\n"
+                    f"【{_gname(target)} ({target}) · 单群设置】\n"
+                    f"- 本群状态：{'已启用' if grp_on else '未启用'}（全局模式：{g_mode}）\n"
+                    f"- 视觉排版：{str(cur_style).upper()} · {'浅色' if cur_theme == 'light' else '深色'} · 字号 {cur_scale}%\n"
+                    f"- 绑定词库：{kw_name}\n"
+                    "[单群指令]（末尾可加 [群号] 操作指定群）\n"
                     "  /xbimg group on | off [群号] — 开启/关闭本群转图\n"
                     "  /xbimg group set <50-500> [群号] — 单群字号\n"
                     "  /xbimg group style ios|android16|default [群号]\n"
@@ -636,8 +630,8 @@ class CommandsMixin:
                 cfg["group_list"] = "\n".join(tokens)
                 self._group_cache_sig = None
                 self.cfg_mgr.save({"group_mode": cfg.get("group_mode", "whitelist"), "group_list": cfg["group_list"]})
-                state_str = "🟢 已开启" if self._is_gid_allowed(target) else "⚪ 已关闭"
-                yield event.plain_result(f"✅ {_gname(target)} ({target}) 转图已设为：{state_str}")
+                state_str = "已开启" if self._is_gid_allowed(target) else "已关闭"
+                yield event.plain_result(f"{_gname(target)} ({target}) 转图已设为：{state_str}")
                 return
             if action in ("list", "列表"):
                 try:
@@ -650,14 +644,14 @@ class CommandsMixin:
                 presets = cfg.get("keyword_presets", {})
                 if not isinstance(presets, dict):
                     presets = {}
-                lines = [f"🔤【可用字体列表】（共 {len(_CF)} 款）:"]
+                lines = [f"【可用字体列表】（共 {len(_CF)} 款）:"]
                 for idx, item in enumerate(_CF, 1):
                     lines.append(f"{idx}. {item['name']} - id: {item['id']}")
-                lines.append("\n🛡️【可用敏感词库方案】:")
+                lines.append("\n【可用敏感词库方案】:")
                 for pk, pv in presets.items():
                     pname = pv.get("name", pk) if isinstance(pv, dict) else pk
-                    lines.append(f"• {pk} - {pname}")
-                lines.append("\n💡 切换指令：\n• /xbimg group ttf <字体id> [群号]\n• /xbimg group kw <词库id> [群号]")
+                    lines.append(f"- {pk} - {pname}")
+                lines.append("\n切换指令：\n- /xbimg group ttf <字体id> [群号]\n- /xbimg group kw <词库id> [群号]")
                 yield event.plain_result("\n".join(lines))
                 return
             if action in ("set", "size", "font", "fontsize", "字号"):
@@ -679,10 +673,10 @@ class CommandsMixin:
                 if not target:
                     cfg["font_scale"] = scale
                     self.cfg_mgr.save({"font_scale": scale})
-                    yield event.plain_result(f"✅ 全局字体已设为 {scale}%")
+                    yield event.plain_result(f"全局字体已设为 {scale}%")
                 else:
                     self._update_group_custom(target, {"font_scale": scale})
-                    yield event.plain_result(f"✅ 已将【{_gname(target)}】的字体大小设置为 {scale}%")
+                    yield event.plain_result(f"已将【{_gname(target)}】的字体大小设置为 {scale}%")
                 return
             if action in ("style", "风格"):
                 yield event.plain_result(self._apply_group_field(
@@ -711,25 +705,25 @@ class CommandsMixin:
                         _CF2 = []
                         _dl2 = None
                 if _dl2 is None:
-                    yield event.plain_result("❌ 字体模块不可用，无法准备字体包。")
+                    yield event.plain_result("字体模块不可用，无法准备字体包。")
                     return
                 hit = next((x for x in _CF2 if x["id"].lower() == fid.lower()), None)
                 if not hit:
-                    yield event.plain_result(f"❌ 未找到字体 id「{fid}」，请发送 /xbimg group list 查看支持的列表。")
+                    yield event.plain_result(f"未找到字体 id「{fid}」，请发送 /xbimg group list 查看支持的列表。")
                     return
-                yield event.plain_result(f"⏳ 正在检查【{hit['name']}】字体包…")
+                yield event.plain_result(f"正在检查【{hit['name']}】字体包…")
                 res = await asyncio.to_thread(_dl2, hit["id"])
                 if not res.get("ok"):
-                    yield event.plain_result(f"❌ 字体准备失败: {res.get('error', '网络异常')}")
+                    yield event.plain_result(f"字体准备失败: {res.get('error', '网络异常')}")
                     return
                 fname = res.get("downloaded", [""])[0] or hit["files"][0][0]
                 if target:
                     self._update_group_custom(target, {"custom_font_path": fname})
-                    yield event.plain_result(f"✅ 成功将【{_gname(target)}】的字体切换为：{hit['name']}")
+                    yield event.plain_result(f"成功将【{_gname(target)}】的字体切换为：{hit['name']}")
                 else:
                     self.cfg_mgr.save({"font_source": "custom", "custom_font_path": fname})
                     configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-                    yield event.plain_result(f"✅ 全局字体已切换为：{hit['name']}")
+                    yield event.plain_result(f"全局字体已切换为：{hit['name']}")
                 return
             if action in ("reset", "default", "恢复默认", "重置"):
                 target = _target_gid(rest) or cur_gid
@@ -746,11 +740,11 @@ class CommandsMixin:
                     raw_sc.pop(str(target), None)
                     raw_sc.pop(target, None)
                     self.cfg_mgr.save({"group_font_scales": raw_sc})
-                yield event.plain_result(f"✅ 已恢复【{_gname(target)}】的所有专属设置，完全跟随全局默认。")
+                yield event.plain_result(f"已恢复【{_gname(target)}】的所有专属设置，完全跟随全局默认。")
                 return
             if action == "test":
                 if not self._test_cooldown_ok(event, "grouptest"):
-                    yield event.plain_result("⏳ 测试太频繁，请 15 秒后再试。")
+                    yield event.plain_result("测试太频繁，请 15 秒后再试。")
                     return
                 target = _target_gid(rest) or cur_gid
                 eff_scale = self._get_group_font_scale(target) if target else int(cfg.get("font_scale", 100) or 100)
@@ -789,7 +783,7 @@ class CommandsMixin:
                             perf_out=_pt_g.perf_out,
                         )
                     except Exception as e:
-                        yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                        yield event.plain_result(f"测试图生成失败: {e}")
                         return
                     chain_imgs = []
                     chain_pairs = []
@@ -806,7 +800,7 @@ class CommandsMixin:
                             logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
                     _pt_g.set_result([p[0] for p in chain_pairs], [p[1] for p in chain_pairs])
                     if not chain_imgs:
-                        yield event.plain_result("❌ 测试图生成失败：图片为空。")
+                        yield event.plain_result("测试图生成失败：图片为空。")
                         return
                     yield event.chain_result(chain_imgs)
                 return
@@ -815,7 +809,7 @@ class CommandsMixin:
         elif sub == "test":
             test_content = arg or "这是一条来自 AstrBot 消息转图助手的测试消息！✨\n祝您使用愉快~"
             if not self._test_cooldown_ok(event, "test"):
-                yield event.plain_result("⏳ 测试太频繁，请 15 秒后再试。")
+                yield event.plain_result("测试太频繁，请 15 秒后再试。")
                 return
             _gid_t = self._extract_group_id(event)
             with self._perf_track(f"群{_gid_t}" if _gid_t else "私聊") as _pt_t:
@@ -823,13 +817,13 @@ class CommandsMixin:
                     # 测试文本同样过审查：block 直接拒绝，mosaic 则如实打出马赛克效果
                     _tmod, _teff, _tmosaic = await self._moderate_text(test_content)
                 except Exception as e:
-                    yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                    yield event.plain_result(f"测试图生成失败: {e}")
                     return
                 _pt_t.after_moderate()
                 if _tmod.is_violated and _tmod.action == "block":
                     self.cfg_mgr.record_render(is_violated=True, count_total=False)
                     _pt_t.set_blocked()
-                    yield event.plain_result("🚫 测试文本触发安全审查，已拦截不生成。")
+                    yield event.plain_result("测试文本触发安全审查，已拦截不生成。")
                     return
                 try:
                     _tfs = int(cfg.get("font_scale", 100) or 100)
@@ -841,7 +835,7 @@ class CommandsMixin:
                         perf_out=_pt_t.perf_out,
                     )
                 except Exception as e:
-                    yield event.plain_result(f"❌ 测试图生成失败: {e}")
+                    yield event.plain_result(f"测试图生成失败: {e}")
                     return
                 test_imgs = []
                 test_pairs = []
@@ -858,7 +852,7 @@ class CommandsMixin:
                         logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
                 _pt_t.set_result([p[0] for p in test_pairs], [p[1] for p in test_pairs])
                 if not test_imgs:
-                    yield event.plain_result("❌ 测试图生成失败：图片为空。")
+                    yield event.plain_result("测试图生成失败：图片为空。")
                     return
                 yield event.chain_result(test_imgs)
         else:

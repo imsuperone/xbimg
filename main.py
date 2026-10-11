@@ -20,6 +20,29 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import importlib
+import sys as _sys_reload
+
+for _submod in (
+    "core.common",
+    "core.config",
+    "core.moderation",
+    "core.renderer",
+    "core.groups",
+    "core.handlers",
+    "core.commands",
+    "core.webapi",
+):
+    for _prefix in (f"{__package__}." if __package__ else "", "astrbot_plugin_xbimg."):
+        if not _prefix:
+            continue
+        _full_name = _prefix + _submod
+        if _full_name in _sys_reload.modules:
+            try:
+                importlib.reload(_sys_reload.modules[_full_name])
+            except Exception:
+                pass
+
 try:
     from .core.common import (
         AstrMessageEvent, Context, Star, PLUGIN_NAME, _HAS_WEB_API, filter, logger,

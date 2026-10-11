@@ -546,6 +546,8 @@ button.m3-accent-picker:focus-visible {
 .group-switch-table-wrap {
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--m3-sys-color-surface-container);
   border: 1px solid var(--m3-sys-color-divider);
   border-radius: var(--m3-radius-medium);
@@ -1378,6 +1380,33 @@ button, .m3-btn, .m3-icon-btn, .seg-item, .m3-chip, .m3-radio-card, .m3-switch {
   .card-row-split {
     flex-direction: column;
     align-items: stretch;
+  }
+  .card-row-split:has(> .m3-switch) {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .group-switch-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .group-search-input,
+  .group-add-inline {
+    flex: 1 1 100%;
+    max-width: none;
+    width: 100%;
+  }
+  .group-switch-table th,
+  .group-switch-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .group-cell-name {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   #segModerationMode {
     max-width: none;

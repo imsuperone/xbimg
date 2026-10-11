@@ -264,6 +264,13 @@ class HandlersMixin:
         slot[key] = now
 
     def _is_cmd_reply_skip(self, full_text: str) -> bool:
+        _t = (full_text or "").lstrip()
+        if _t.startswith((
+            "【xbimg", "🎨【xbimg",
+            "📚【文档记忆助手", "【文档记忆助手",
+            "🧩【XBNEXT", "【XBNEXT", "[XBNEXT]",
+        )):
+            return True
         key = self._text_hash(full_text)
         if not key:
             return False
@@ -734,12 +741,12 @@ class HandlersMixin:
             if callable(orig_call):
                 resp = await asyncio.wait_for(
                     orig_call("get_group_msg_history", group_id=gid_val, count=6, **extra),
-                    timeout=3.0,
+                    timeout=5.0,
                 )
             elif callable(hist_fn):
                 resp = await asyncio.wait_for(
                     hist_fn(group_id=gid_val, count=6, **extra),
-                    timeout=3.0,
+                    timeout=5.0,
                 )
         except asyncio.CancelledError:
             raise
@@ -803,9 +810,8 @@ class HandlersMixin:
         - retcode=1200 超时时：
           1) 若可通过 get_group_msg_history 核实：
              - 已送达：直接返回合成回执（不抛异常、不重发，阻断下游 xbnext 回退双发）；
-             - 确认未送达：原地降质图片并剥离 reply 引用段后安全补发一次，解决超时漏发图；
-          2) 无法核实且为 reply+image 组合超时（EventRet: {}）：剥离 reply 并降质补发一次；
-          3) 其余无法核实场景：只记日志不盲目重发，避免重复发图。"""
+             - 确认未送达 (not_delivered)：原地降质图片并剥离 reply 引用段后安全补发一次，解决超时漏发图；
+          2) 无法核实 (unknown)：只记日志不盲目重发，杜绝已送达时因历史查询同样超时导致的双图。"""
         _msg = self._extract_send_message(args, kwargs)
         if _msg is not None:
             limit = self._send_shrink_limit_bytes()
@@ -841,11 +847,7 @@ class HandlersMixin:
                             f"群历史确认图片已送达(message_id={v_mid})，跳过重发"
                         )
                         return {"message_id": v_mid, "status": "ok", "retcode": 0}
-                    if v_status == "not_delivered" or (
-                        v_status == "unknown"
-                        and self._has_reply_and_image(_msg)
-                        and "EventRet" in str(e)
-                    ):
+                    if v_status == "not_delivered":
                         try:
                             await asyncio.to_thread(
                                 self._shrink_oversized_images, _msg, 1
@@ -1842,9 +1844,13 @@ class HandlersMixin:
         if not full_text:
             return
 
-        # /xbimg 命令回执：登记跳过表后直接放行纯文本（避免 on_decorating 与
-        # _transform 对同一菜单文本双重渲染/双重发送）
-        if bool(getattr(event, "_xbimg_cmd_reply", False)):
+        # /xbimg、/xbdoc、/xbnext 命令回执：登记跳过表后直接放行纯文本
+        _in_msg = str(getattr(event, "message_str", "") or "").strip().lower()
+        if (
+            bool(getattr(event, "_xbimg_cmd_reply", False))
+            or self._is_cmd_reply_skip(full_text)
+            or _in_msg.startswith(("/xbimg", "/xbdoc", "/xbnext"))
+        ):
             self._mark_cmd_reply_skip(full_text)
             return
 
