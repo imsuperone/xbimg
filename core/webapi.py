@@ -465,12 +465,6 @@ class WebApiMixin:
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 探测平台群列表异常: {e}")
 
-        if updated_seen:
-            try:
-                self._save_seen_groups()
-            except Exception:
-                pass
-
         # 2. 合并历史已捕获群聊
         for gid, info in self._seen_groups.items():
             if gid not in seen_gids:

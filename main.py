@@ -110,18 +110,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体配置初始化异常: {e}")
 
-        # 同步预载常用字号字体：保证首条消息 get_font 命中（避免与预热线程抢 GIL）
-        try:
-            try:
-                from .core.renderer import preload_font_sizes
-            except ImportError:
-                from core.renderer import preload_font_sizes
-            preload_font_sizes()
-        except Exception as e:
-            logger.warning(f"[{PLUGIN_NAME}] 字体同步预载异常: {e}")
-
-        # 预热只走 _prewarm_render 后台任务（星空/非星空双路径全覆盖），此处不再另起线程，避免双倍预热
-
         if _HAS_WEB_API:
             try:
                 self._register_web_apis()
@@ -136,8 +124,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             _on = False
         if _on:
             logger.info("[xbimg] [性能] 性能日志已开启，每张图片一行分段计时（grep [性能] 捞取）")
-
-
 
     def _ensure_bg_tasks(self):
         """首次事件触发时启动后台任务（兼容 __init__ 无 running loop 的情况）"""
@@ -156,58 +142,43 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             asyncio.create_task(self._prewarm_render()),
         ]
 
-
-
     async def _prewarm_render(self):
-        """后台预热：基础 emoji 落盘 + 一次渲染（字体/字形/度量/星空层缓存就绪），首条真实消息不再付冷启动费"""
+        """后台轻量预热：字号缓存 + 基础 emoji + 按当前配置单次预热渲染，不阻塞启动且不抢占双倍算力。"""
         try:
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.2)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
-            # 先补基础表情包（BASE_EMOJIS 并行落盘），菜单/常用消息不再现拉 CDN
-            def _warm_emoji():
+            def _warm_assets():
                 try:
-                    from core.renderer import _data_subdir, _ensure_base_pngs
+                    from .core.renderer import preload_font_sizes, _data_subdir, _ensure_base_pngs
                 except Exception:
                     try:
-                        from .core.renderer import _data_subdir, _ensure_base_pngs
+                        from core.renderer import preload_font_sizes, _data_subdir, _ensure_base_pngs
                     except Exception:
                         return
+                try:
+                    preload_font_sizes()
+                except Exception:
+                    pass
                 try:
                     d = _data_subdir("emoji")
                     if d is not None:
                         _ensure_base_pngs(d)
                 except Exception:
                     pass
-            await asyncio.to_thread(_warm_emoji)
+            await asyncio.to_thread(_warm_assets)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
             _style = str(self.cfg_mgr.config.get("style", "ios"))
             _theme = str(self.cfg_mgr.config.get("theme_mode", "light"))
-            # 富文本 + 星空：暖排版分支/星空层缓存/emoji 通道，首条真实消息零冷启动
-            _rich = (
-                "# 预热标题\n"
-                "预热Abc123中文测试💰✨✅\n"
-                "- 列表条目\n"
-                "> 引用行\n"
-                "```python\nprint('ok')\n```"
-            )
+            _star = bool(self.cfg_mgr.config.get("star_background", False))
             await asyncio.to_thread(
                 MessageImageRenderer.render_pages,
-                text=_rich,
+                text="# 预热\n预热Abc123中文测试✨",
                 style=_style,
                 theme_mode=_theme,
-                star_background=True,
+                star_background=_star,
                 star_density=str(self.cfg_mgr.config.get("star_density", "medium")),
-                emoji_remote=True,
-            )
-            # 再暖一版无星空（覆盖 star_background=False 路径，渐变/投影缓存独立）
-            await asyncio.to_thread(
-                MessageImageRenderer.render_pages,
-                text="预热Abc123中文测试💰✨✅",
-                style=_style,
-                theme_mode=_theme,
-                star_background=False,
                 emoji_remote=True,
             )
         except Exception:

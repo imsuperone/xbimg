@@ -454,20 +454,18 @@ class HandlersMixin:
 
     @staticmethod
     def _local_image_path(ref: Any) -> Optional[Path]:
-        """把 image 段引用解析为「可校验的本地绝对路径」。
-        远程 URL / base64 / file://+URL / 相对文件名（平台虚拟引用）返回 None，
-        表示无法确定本地性，调用方应原样保留该段，避免误杀正常图片。"""
+        """把 image 段引用解析为「可校验的本地绝对路径」。"""
         try:
             if not isinstance(ref, str) or not ref or "\x00" in ref:
                 return None
             s = ref
             if s.startswith("file://"):
-                s = s[7:]
+                from urllib.parse import unquote
+                s = unquote(s[7:])
                 if s.startswith(("http://", "https://", "base64://")):
                     return None
             if s.startswith(("http://", "https://", "base64://")):
                 return None
-            # file:///C:/path → /C:/path → C:/path（去掉盘符前多余斜杠）
             if len(s) >= 3 and s[0] in "/\\" and s[2] == ":" and s[1].isalpha():
                 s = s[1:]
             is_abs = s.startswith(("/", "\\")) or (
@@ -481,9 +479,7 @@ class HandlersMixin:
 
     @classmethod
     def _drop_dead_local_images(cls, message: Any) -> Any:
-        """发送前兜底：本地 image 段引用的文件已不存在时剥离，死路径不进发送链。
-        仅剥离可确认缺失的本地绝对路径；http/base64/虚拟引用原样保留；
-        全部剥空则降级为空白文本段（结构有效、不炸发送）。"""
+        """发送前兜底：本地 image 段引用的文件已不存在时剥离，死路径不进发送链。"""
         if not isinstance(message, list):
             return message
         out: List[Any] = []
@@ -495,9 +491,7 @@ class HandlersMixin:
                 p = cls._local_image_path(ref)
                 if p is not None and not p.is_file():
                     dropped += 1
-                    logger.warning(
-                        f"[{PLUGIN_NAME}] 发送前兜底：丢弃失效缓存图 {p}"
-                    )
+                    logger.warning(f"[{PLUGIN_NAME}] 发送前兜底：丢弃失效缓存图 {p}")
                     continue
             out.append(seg)
         if not dropped:
@@ -506,18 +500,25 @@ class HandlersMixin:
             out = [{"type": "text", "data": {"text": " "}}]
         return out
 
-    @staticmethod
-    def _image_segs_from_paths(img_paths: List[Any], _prevalidated: bool = False) -> List[Dict[str, Any]]:
-        """img_paths 转 image 段。_prevalidated=True 时调用方已用 _alive_prior_paths
-        做过存活校验，不再二次 stat（单次校验即返回可用 Path）。"""
+    def _image_segs_from_paths(self, img_paths: List[Any], _prevalidated: bool = False) -> List[Dict[str, Any]]:
+        """img_paths 转 OneBot image 段（优先编码为 base64://，防止跨容器 NapCat 读不到宿主机本地路径导致发送失败）。"""
+        import base64 as _b64
         segs: List[Dict[str, Any]] = []
         for p in img_paths or []:
             try:
                 pp = p if isinstance(p, Path) else Path(p)
-                if not _prevalidated:
-                    if not pp.is_file():
-                        logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
+                if not _prevalidated and not pp.is_file():
+                    logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
+                    continue
+                try:
+                    raw = pp.read_bytes()
+                    if raw:
+                        self._record_rendered_image_bytes(raw)
+                        b64_str = "base64://" + _b64.b64encode(raw).decode("ascii")
+                        segs.append({"type": "image", "data": {"file": b64_str}})
                         continue
+                except Exception:
+                    pass
                 segs.append({"type": "image", "data": {"file": str(pp.resolve())}})
             except Exception:
                 continue
@@ -525,118 +526,16 @@ class HandlersMixin:
 
     @staticmethod
     def _block_adapter_message(message: Any) -> Any:
-        """适配器路径 block 复用：剥离文本段，保留 at/reply/媒体，剥空则留空文本段。"""
-        if isinstance(message, str):
-            return " "
-        if not isinstance(message, list):
+        """适配器路径 block 复用：剥离文本段，保留 at/reply/媒体，剥空则留单空格文本段（避免空串引发 OneBot 1200 报错）。"""
+        if isinstance(message, str) or not isinstance(message, list):
             return " "
         kept = [
             seg for seg in message
             if isinstance(seg, dict) and seg.get("type") in ("at", "reply", "image", "record", "video", "file")
         ]
         if not kept:
-            kept = [{"type": "text", "data": {"text": ""}}]
+            kept = [{"type": "text", "data": {"text": " "}}]
         return kept
-
-    @staticmethod
-    def _prepare_shrunk_image(img) -> Optional[Image.Image]:
-        """降质共用前处理：尺寸校验→展平 RGB→0.75 缩放（BILINEAR 比 LANCZOS 快数倍，
-        重试图只求送达，锐度次要）。不适用（过小/解码失败）返回 None。"""
-        try:
-            w, h = img.size
-            if w < 64 and h < 64:
-                return None
-            if img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGBA")
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[-1])
-                img = bg
-            elif img.mode != "RGB":
-                img = img.convert("RGB")
-            return img.resize(
-                (max(1, int(w * 0.75)), max(1, int(h * 0.75))), Image.BILINEAR
-            )
-        except Exception:
-            return None
-
-    @staticmethod
-    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
-        """base64:// 图段原地降质：解码→缩放 0.75→统一重编码 JPEG。
-
-        AstrBot aiocqhttp 适配器发送前把本地图统一转成 base64://。
-        输出统一 JPEG（比 PNG optimize 快数倍且更小，上传更快），
-        失败（解码/编码异常）返回 False 不动原段。"""
-        try:
-            import base64 as _b64
-            raw = _b64.b64decode(file_ref[9:])
-            if not raw:
-                return False
-            img = Image.open(io.BytesIO(raw))
-            img.load()
-            shrunk = HandlersMixin._prepare_shrunk_image(img)
-            if shrunk is None:
-                return False
-            buf = io.BytesIO()
-            shrunk.save(buf, format="JPEG", quality=72, subsampling=1)
-            data["file"] = "base64://" + _b64.b64encode(buf.getvalue()).decode("ascii")
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def _shrink_oversized_images(message: Any, max_bytes: int) -> bool:
-        """发送前体积守卫：仅对超过 max_bytes 的图段原地降质（0.75 缩放）。
-
-        http 段与未超限段不动。由 _invoke_send_with_guard 经 asyncio.to_thread
-        调用，不阻塞事件循环。返回是否修改了任何段。"""
-        if not isinstance(message, list) or max_bytes <= 0:
-            return False
-        changed = False
-        for seg in message:
-            if not isinstance(seg, dict) or seg.get("type") != "image":
-                continue
-            data = seg.get("data")
-            if not isinstance(data, dict):
-                continue
-            file_ref = data.get("file") or data.get("url") or ""
-            if not isinstance(file_ref, str) or not file_ref:
-                continue
-            if file_ref.startswith("base64://"):
-                # base64 长度估算解码字节，超限才解码降质
-                if (len(file_ref) - 9) * 3 // 4 <= max_bytes:
-                    continue
-                if HandlersMixin._shrink_base64_image(data, file_ref):
-                    changed = True
-                continue
-            if file_ref.startswith(("http://", "https://")):
-                continue
-            path = HandlersMixin._local_image_path(file_ref)
-            if path is None:
-                path = Path(file_ref[7:] if file_ref.startswith("file://") else file_ref)
-            try:
-                if not path.is_file() or path.stat().st_size <= max_bytes:
-                    continue
-                shrunk = HandlersMixin._prepare_shrunk_image(Image.open(path))
-                if shrunk is None:
-                    continue
-                # 原子发布：先写唯一 sibling 临时文件再 os.replace，避免并发发送碰撞或读到半截图
-                tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{os.urandom(3).hex()}")
-                try:
-                    suffix = path.suffix.lower()
-                    if suffix == ".png":
-                        shrunk.save(tmp, format="PNG", compress_level=6)
-                    else:
-                        shrunk.save(tmp, format="JPEG", quality=72, subsampling=1)
-                    os.replace(str(tmp), str(path))
-                finally:
-                    try:
-                        tmp.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                changed = True
-            except Exception:
-                continue
-        return changed
 
     @staticmethod
     def _extract_send_message(args, kwargs) -> Any:
@@ -652,26 +551,6 @@ class HandlersMixin:
         return None
 
     @staticmethod
-    def _extract_send_gid(args, kwargs, fallback_gid: Any = None) -> Any:
-        """从 send_group_msg/call_action 调用参数中提取群号。"""
-        if fallback_gid is not None and str(fallback_gid).strip():
-            return fallback_gid
-        if "group_id" in kwargs and kwargs["group_id"] is not None:
-            return kwargs["group_id"]
-        for a in args:
-            if isinstance(a, dict) and a.get("group_id") is not None:
-                return a.get("group_id")
-        if args and not isinstance(args[0], dict) and str(args[0]).isdigit():
-            return args[0]
-        return None
-
-    @staticmethod
-    def _has_image_seg(message: Any) -> bool:
-        if not isinstance(message, list):
-            return False
-        return any(isinstance(s, dict) and s.get("type") == "image" for s in message)
-
-    @staticmethod
     def _has_reply_and_image(message: Any) -> bool:
         if not isinstance(message, list):
             return False
@@ -681,7 +560,7 @@ class HandlersMixin:
 
     @staticmethod
     def _strip_reply_from_image_msg(message: Any) -> bool:
-        """超时补发前原地剥离 reply 段（NTQQ 下 reply+image 组合极易引起 sendMsg 超时丢消息）。"""
+        """当引用消息已被撤回或失效导致 NTQQ 立即拒绝 reply+image 时，剥离 reply 段后重试一次。"""
         if not HandlersMixin._has_reply_and_image(message):
             return False
         kept = [
@@ -693,135 +572,36 @@ class HandlersMixin:
             return True
         return False
 
-    async def _verify_group_image_delivered(
-        self, gid: Any, since_ts: float, bot_inst: Any = None, self_id: Any = None
-    ) -> Tuple[str, Optional[Any]]:
-        """发送超时后通过 get_group_msg_history 核实图片是否实际送达群聊。
-
-        返回 ("delivered", message_id) / ("not_delivered", None) / ("unknown", None)。
-        """
-        if bot_inst is None:
-            bot_inst = getattr(self, "_latest_bot", None)
-        if bot_inst is None or not gid:
-            return ("unknown", None)
-        try:
-            gid_str = str(gid).strip()
-            gid_val: Any = int(gid_str) if gid_str.isdigit() else gid_str
-        except Exception:
-            return ("unknown", None)
-        orig_call = (
-            getattr(bot_inst, "_msg2img_orig_call_action", None)
-            or getattr(bot_inst, "call_action", None)
-        )
-        hist_fn = getattr(bot_inst, "get_group_msg_history", None)
-        # 仅当 bot 真实具备历史查询接口时才探测（避免触发 MagicMock 或未知属性）
-        has_real_hist = (
-            isinstance(getattr(bot_inst, "__dict__", None), dict)
-            and (
-                "_msg2img_orig_call_action" in bot_inst.__dict__
-                or "call_action" in bot_inst.__dict__
-                or "get_group_msg_history" in bot_inst.__dict__
-            )
-        ) or any(
-            "call_action" in getattr(c, "__dict__", {})
-            or "get_group_msg_history" in getattr(c, "__dict__", {})
-            for c in getattr(type(bot_inst), "__mro__", ())
-        )
-        if not has_real_hist:
-            return ("unknown", None)
-        try:
-            await asyncio.sleep(0.8)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            pass
-        extra = {"self_id": self_id} if self_id is not None else {}
-        resp = None
-        try:
-            if callable(orig_call):
-                resp = await asyncio.wait_for(
-                    orig_call("get_group_msg_history", group_id=gid_val, count=6, **extra),
-                    timeout=5.0,
-                )
-            elif callable(hist_fn):
-                resp = await asyncio.wait_for(
-                    hist_fn(group_id=gid_val, count=6, **extra),
-                    timeout=5.0,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return ("unknown", None)
-        msgs = None
-        if isinstance(resp, dict):
-            if isinstance(resp.get("messages"), list):
-                msgs = resp["messages"]
-            elif isinstance(resp.get("data"), dict) and isinstance(resp["data"].get("messages"), list):
-                msgs = resp["data"]["messages"]
-            elif isinstance(resp.get("data"), list):
-                msgs = resp["data"]
-        elif isinstance(resp, list):
-            msgs = resp
-        if not isinstance(msgs, list):
-            return ("unknown", None)
-        floor_ts = int(since_ts) - 5
-        for m in reversed(msgs):
-            if not isinstance(m, dict):
-                continue
-            try:
-                m_time = int(m.get("time") or 0)
-            except Exception:
-                m_time = 0
-            if m_time > 0 and m_time < floor_ts:
-                continue
-            sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
-            uid = m.get("user_id") or sender.get("user_id")
-            sid = m.get("self_id") or self_id
-            if uid is not None and sid is not None and str(uid) != str(sid):
-                continue
-            m_segs = m.get("message")
-            has_img = False
-            if isinstance(m_segs, list):
-                has_img = any(
-                    isinstance(s, dict) and s.get("type") == "image" for s in m_segs
-                )
-            elif isinstance(m_segs, str):
-                has_img = "[CQ:image" in m_segs
-            if not has_img and "[CQ:image" in str(m.get("raw_message") or ""):
-                has_img = True
-            if has_img:
-                return ("delivered", m.get("message_id"))
-        return ("not_delivered", None)
-
-    def _send_shrink_limit_bytes(self) -> int:
-        """发送前预降质体积阈值（字节），0=关闭。"""
-        try:
-            kb = int(self.cfg_mgr.config.get("img_send_shrink_kb", 250))
-        except Exception:
-            kb = 250
-        return max(0, kb) * 1024
-
     async def _invoke_send_with_guard(
         self, fn, label: str, *args, _bot: Any = None, _gid: Any = None, **kwargs
     ):
-        """发送前置体积守卫 + 超时防双发守卫。
-
-        - 图段超过 img_send_shrink_kb：先在工作线程降质再发，减小 NTQQ 上传耗时。
-        - retcode=1200 超时时：NTQQ 底层 NodeIKernelMsgService/sendMsg 并未取消，
-          图片仍在后台上传或实际已送达（此时查 get_group_msg_history 往往尚未入库而误判未送达），
-          若再次调用 send_group_msg 补发必然导致群内先后收到两张图。
-          因此超时后直接返回合成回执（不抛异常、绝不二次重发），彻底阻断本插件及下游回退双发。"""
+        """发送守卫（兼顾「防发两张图」与「防因失效引用导致发不出去」）：
+        1. 若快速失败（耗时 < 4.5s 且非 NTEvent 监听超时）且消息同时含 reply + image（常见于原消息被撤回或引用 ID 失效），
+           原地剥离 reply 段后补发一次，确保图片能发出去。
+        2. 若为 NTQQ 慢上传监听超时（Timeout: NTEvent 或耗时 >= 4.5s 的 retcode=1200），NTQQ 内核实际仍在后台上传首张图片，
+           此时绝不重试，直接返回合成回执，杜绝发出两张图片。
+        """
         _msg = self._extract_send_message(args, kwargs)
-        if _msg is not None:
-            limit = self._send_shrink_limit_bytes()
-            if limit > 0:
-                try:
-                    await asyncio.to_thread(self._shrink_oversized_images, _msg, limit)
-                except Exception:
-                    pass
+        t0 = time.monotonic()
         try:
             return await fn(*args, **kwargs)
         except Exception as e:
+            elapsed = time.monotonic() - t0
+            err_s = f"{e} {repr(e)}"
+            is_nt_listener_timeout = "Timeout: NTEvent" in err_s or "timed out" in err_s.lower()
+            if (
+                _msg is not None
+                and elapsed < 4.5
+                and not is_nt_listener_timeout
+                and self._strip_reply_from_image_msg(_msg)
+            ):
+                logger.warning(
+                    f"[{PLUGIN_NAME}] {label} 含引用发送快速失败({elapsed:.2f}s: {e})，已剥离失效 reply 段后重试一次"
+                )
+                try:
+                    return await fn(*args, **kwargs)
+                except Exception as e_retry:
+                    e = e_retry
             if self._is_send_timeout_error(e):
                 logger.warning(
                     f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
@@ -836,7 +616,7 @@ class HandlersMixin:
 
     @staticmethod
     def _describe_callable(fn: Any, _depth: int = 0) -> str:
-        """调用链点名：类型/qualname/模块/partial 链（最多 3 层），用于定位中间包装器"""
+        """调用链点名：类型/qualname/模块/partial 链（最多 3 层）"""
         try:
             if _depth > 3:
                 return "..."
@@ -857,54 +637,8 @@ class HandlersMixin:
             except Exception:
                 return "<?>"
 
-    @classmethod
-    def _resolve_genuine_call(cls, bot_inst: Any) -> Any:
-        """沿 MRO 找真正的 call_action：跳过我们标记的包装器，解开 __wrapped__ 链，
-        返回绑定到实例的 genuine 方法；找不到返回 None。"""
-        try:
-            mro = type(bot_inst).__mro__
-        except Exception:
-            return None
-        for klass in mro:
-            try:
-                fn = klass.__dict__.get("call_action", None)
-            except Exception:
-                continue
-            if fn is None:
-                continue
-            if isinstance(fn, (staticmethod, classmethod)):
-                try:
-                    fn = fn.__func__
-                except Exception:
-                    continue
-            cur, bad, depth = fn, False, 0
-            while depth < 8:
-                try:
-                    if getattr(cur, "_xbimg_wrapper_", False):
-                        bad = True
-                        break
-                    nxt = getattr(cur, "__wrapped__", None)
-                except Exception:
-                    break
-                if nxt is None:
-                    break
-                cur, depth = nxt, depth + 1
-            if bad:
-                continue
-            try:
-                return cur.__get__(bot_inst, type(bot_inst))
-            except Exception:
-                continue
-        return None
-
     def _patch_bot_send(self, bot_inst: Any):
-        """为 OneBot/aiocqhttp 等适配器实例挂载无损转图补丁。
-
-        包装器必须签名透明 (*args/**kwargs 原样转发)：CQHttp 系客户端内部多为
-        `self.call_action(action, params)` 位置参数调用，写死签名会直接炸掉全量发送。
-        首次原样转发若抛参数绑定型 TypeError（I/O 之前失败，不会重复发送），
-        则归一化为关键字形式重试一次，适配各种历史客户端签名。
-        """
+        """为 OneBot/aiocqhttp 适配器实例挂载转图补丁。"""
         import functools as _ft
 
         def _safe_wraps(orig):
@@ -916,27 +650,27 @@ class HandlersMixin:
         if self._is_bot_patched(bot_inst):
             return
 
-        # 1. 拦截 bot.send_group_msg（存原函数，重载时可还原）
+        # 1. 拦截 bot.send_group_msg
         if hasattr(bot_inst, "send_group_msg") and callable(getattr(bot_inst, "send_group_msg")):
             orig_send_group = bot_inst.send_group_msg
 
             @_safe_wraps(orig_send_group)
             async def patched_send_group(*args, **kwargs):
                 _gid = None
-                try:
-                    # 兼容位置/关键字两种调用：send_group_msg(group_id, message[, ...])
-                    _gid = kwargs.get("group_id", args[0] if len(args) > 0 else None)
-                    _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
-                    if _gid is not None and _msg is not None:
-                        _new = await self._transform_onebot_message(str(_gid), _msg)
-                        if "message" in kwargs:
-                            kwargs["message"] = _new
-                        elif len(args) > 1:
-                            args = (args[0], _new) + tuple(args[2:])
-                        else:
-                            kwargs["message"] = _new
-                except Exception as e:
-                    logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
+                if not _IN_XBIMG_SEND.get():
+                    try:
+                        _gid = kwargs.get("group_id", args[0] if len(args) > 0 else None)
+                        _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
+                        if _gid is not None and _msg is not None:
+                            _new = await self._transform_onebot_message(str(_gid), _msg)
+                            if "message" in kwargs:
+                                kwargs["message"] = _new
+                            elif len(args) > 1:
+                                args = (args[0], _new) + tuple(args[2:])
+                            else:
+                                kwargs["message"] = _new
+                    except Exception as e:
+                        logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
                 _tok = _IN_XBIMG_SEND.set(True)
                 try:
                     try:
@@ -947,7 +681,6 @@ class HandlersMixin:
                     except TypeError as e:
                         if not self._is_bind_error(e):
                             raise
-                        # 归一化重试：位置参数按 OneBot 顺序具名化（group_id, message, auto_escape）
                         _rk = dict(kwargs)
                         if "group_id" not in _rk and len(args) > 0:
                             _rk["group_id"] = args[0]
@@ -955,45 +688,10 @@ class HandlersMixin:
                             _rk["message"] = args[1]
                         if len(args) > 2 and "auto_escape" not in _rk and isinstance(args[2], bool):
                             _rk["auto_escape"] = args[2]
-                        try:
-                            logger.warning(
-                                f"[{PLUGIN_NAME}] send_group_msg 原样转发失败({e})，"
-                                f"已归一化为关键字重试 args={len(args)} keys={sorted(_rk)}"
-                            )
-                            return await self._invoke_send_with_guard(
-                                orig_send_group, "send_group_msg(norm)",
-                                _bot=bot_inst, _gid=_gid, **_rk
-                            )
-                        except TypeError as e2:
-                            if not self._is_bind_error(e2):
-                                raise
-                            # 终极兜底：orig 链下游仍有位置委托中间件时，绕过它直调 genuine；
-                            # 找不到 genuine 则抛归一化错误（附调用链点名供定位）
-                            _genuine = self._resolve_genuine_call(bot_inst)
-                            try:
-                                _same = bool(_genuine is not None and _genuine == orig_send_group)
-                            except Exception:
-                                _same = True
-                            if _genuine is None or _same:
-                                logger.error(
-                                    f"[{PLUGIN_NAME}] send_group_msg 归一化重试仍失败({e2})，"
-                                    f"orig={self._describe_callable(orig_send_group)}"
-                                )
-                                raise
-                            logger.warning(
-                                f"[{PLUGIN_NAME}] send_group_msg 归一化重试仍失败({e2})，"
-                                f"orig={self._describe_callable(orig_send_group)}，"
-                                f"直调 genuine 兜底"
-                            )
-                            try:
-                                return await _genuine("send_group_msg", **_rk)
-                            except TypeError as e3:
-                                logger.error(
-                                    f"[{PLUGIN_NAME}] send_group_msg genuine 直调仍失败({e3})，"
-                                    f"orig={self._describe_callable(orig_send_group)} "
-                                    f"genuine={self._describe_callable(_genuine)}"
-                                )
-                                raise
+                        return await self._invoke_send_with_guard(
+                            orig_send_group, "send_group_msg(norm)",
+                            _bot=bot_inst, _gid=_gid, **_rk
+                        )
                 finally:
                     _IN_XBIMG_SEND.reset(_tok)
 
@@ -1015,11 +713,7 @@ class HandlersMixin:
                 if not _reentrant:
                     try:
                         if action in ("send_group_msg", "send_msg"):
-                            # 形式 A：call_action(action, group_id=.., message=..)
-                            # 形式 B：call_action(action, {"group_id":.., "message":..})
-                            _params = None
-                            if args and isinstance(args[0], dict):
-                                _params = args[0]
+                            _params = args[0] if (args and isinstance(args[0], dict)) else None
                             _gid = kwargs.get("group_id", (_params.get("group_id") if _params else None))
                             _msg = kwargs.get("message", (_params.get("message") if _params else None))
                             if _gid and _msg is not None:
@@ -1046,8 +740,6 @@ class HandlersMixin:
                     except TypeError as e:
                         if not self._is_bind_error(e):
                             raise
-                        # 归一化重试：位置 params 字典并入关键字（调用方关键字优先）；
-                        # 无可归一化的位置参数时直接抛原错，避免静默丢参数
                         _rk = dict(kwargs)
                         _merged = False
                         for _a in args:
@@ -1057,45 +749,12 @@ class HandlersMixin:
                                 _merged = True
                         if not _merged:
                             raise
-                        try:
-                            logger.warning(
-                                f"[{PLUGIN_NAME}] call_action({action}) 原样转发失败({e})，"
-                                f"已归一化为关键字重试 keys={sorted(_rk)}"
-                            )
-                            if _reentrant:
-                                return await orig_call_action(action, **_rk)
-                            return await self._invoke_send_with_guard(
-                                orig_call_action, f"call_action({action}/norm)", action,
-                                _bot=bot_inst, _gid=_gid, **_rk
-                            )
-                        except TypeError as e2:
-                            if not self._is_bind_error(e2):
-                                raise
-                            _genuine = self._resolve_genuine_call(bot_inst)
-                            try:
-                                _same = bool(_genuine is not None and _genuine == orig_call_action)
-                            except Exception:
-                                _same = True
-                            if _genuine is None or _same:
-                                logger.error(
-                                    f"[{PLUGIN_NAME}] call_action({action}) 归一化重试仍失败({e2})，"
-                                    f"orig={self._describe_callable(orig_call_action)}"
-                                )
-                                raise
-                            logger.warning(
-                                f"[{PLUGIN_NAME}] call_action({action}) 归一化重试仍失败({e2})，"
-                                f"orig={self._describe_callable(orig_call_action)}，"
-                                f"直调 genuine 兜底"
-                            )
-                            try:
-                                return await _genuine(action, **_rk)
-                            except TypeError as e3:
-                                logger.error(
-                                    f"[{PLUGIN_NAME}] call_action({action}) genuine 直调仍失败({e3})，"
-                                    f"orig={self._describe_callable(orig_call_action)} "
-                                    f"genuine={self._describe_callable(_genuine)}"
-                                )
-                                raise
+                        if _reentrant:
+                            return await orig_call_action(action, **_rk)
+                        return await self._invoke_send_with_guard(
+                            orig_call_action, f"call_action({action}/norm)", action,
+                            _bot=bot_inst, _gid=_gid, **_rk
+                        )
                 finally:
                     _IN_XBIMG_SEND.reset(_tok)
 
@@ -1310,41 +969,6 @@ class HandlersMixin:
             logger.error(f"[{PLUGIN_NAME}] 渲染失败: {e}")
             return []
         return imgs or []
-
-
-
-    async def _review_and_render(
-        self,
-        full_text: str,
-        font_scale: Optional[int] = None,
-        style: Optional[str] = None,
-        theme_mode: Optional[str] = None,
-        keyword_preset: Optional[str] = None,
-        custom_font_path: str = "",
-        custom_bold_font_path: str = "",
-    ):
-        """统一审查+渲染管线：返回 (List[Image], violated, mosaic, blocked)。
-
-        主路径与适配器劫持路径共用，消灭重复代码，保证统计口径一致。
-        支持传入群级别覆盖的 style / theme_mode / font_scale / keyword_preset。
-        超长内容分页输出多图，不再丢弃截断部分。
-        """
-        mod_res, eff_text, mosaic_mode = await self._moderate_text(
-            full_text, keyword_preset=keyword_preset
-        )
-        if mod_res.is_violated and mod_res.action == "block":
-            return [], True, False, True
-        imgs = await self._render_moderated(
-            eff_text, mod_res, mosaic_mode,
-            font_scale=font_scale, style=style, theme_mode=theme_mode,
-            custom_font_path=custom_font_path,
-            custom_bold_font_path=custom_bold_font_path,
-        )
-        if not imgs:
-            return [], mod_res.is_violated, mosaic_mode != "none", False
-        return imgs, mod_res.is_violated, mosaic_mode != "none", False
-
-
 
     async def _save_render_image(self, img) -> Optional[Path]:
         """保存渲染图到缓存并返回路径（按三档力度压缩，用完即删：90 秒后自动清理）
