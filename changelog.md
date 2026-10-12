@@ -1,5 +1,11 @@
 # 更新日志
 
+## v1.3.28
+
+- 彻底修复发送两张图片的问题：移除 NapCat/NTQQ `retcode=1200`（`NodeIKernelMsgService/sendMsg` 监听超时）后的二次补发逻辑（NTQQ 内核实际仍在后台上传首张图片，0.8 秒内查历史尚未入库会导致重发产生双图），改为在首次发送前预压缩大图、超时吞异常并返回回执。
+- 修复 `AiocqhttpMessageEvent._parse_onebot_json` 将本地渲染图片转为 `base64://` 后 `_has_xbimg_rendered_image` 无法识别的问题（新增渲染产物 base64 头部签名缓存匹配）。
+- 补齐 `patched_call_action` 的 `_IN_XBIMG_SEND` 重入锁，并扩充对 `xbdoc` / `xbnext` 状态输出文本的跳过识别。
+
 ## v1.3.27
 
 - 重构群聊开关列表为与 `xbnext` 一致的无滚动条三列固定布局（`群聊名称` / `群号` / `启用开关`），移除冗余的「生效状态」列，移动端无需左右拖动即可完整展示。
