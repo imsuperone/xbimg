@@ -572,17 +572,77 @@ class HandlersMixin:
             return True
         return False
 
+    async def _verify_group_msg_delivered(
+        self, bot_inst: Any, gid: Any, send_start_ts: int
+    ) -> Optional[Any]:
+        """当 OneBot/NapCat 返回 retcode=1200 或超时异常时，通过 get_group_msg_history 真实校验本条图片消息是否已在群内送达。
+        返回:
+          - 真实送达的 message_id（int/str）：确认已送达
+          - None：确认未在群历史中查到送达记录（或无法核验时返回 None 交由上层决定）
+        """
+        if bot_inst is None or not gid:
+            return None
+        try:
+            gid_int = int(str(gid).strip())
+        except Exception:
+            return None
+        try:
+            await asyncio.sleep(1.5)
+            orig_call = getattr(bot_inst, "_msg2img_orig_call_action", None) or getattr(bot_inst, "call_action", None)
+            resp = None
+            if callable(orig_call):
+                try:
+                    resp = await asyncio.wait_for(
+                        orig_call("get_group_msg_history", group_id=gid_int, count=6),
+                        timeout=4.0,
+                    )
+                except TypeError:
+                    resp = await asyncio.wait_for(
+                        orig_call("get_group_msg_history", {"group_id": gid_int, "count": 6}),
+                        timeout=4.0,
+                    )
+            if not isinstance(resp, dict):
+                return None
+            data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+            msgs = data.get("messages") if isinstance(data, dict) else None
+            if not isinstance(msgs, list):
+                return None
+            for m in reversed(msgs):
+                if not isinstance(m, dict):
+                    continue
+                m_time = int(m.get("time") or 0)
+                if m_time and m_time < send_start_ts - 4:
+                    continue
+                self_id = str(m.get("self_id") or "").strip()
+                sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
+                uid = str(sender.get("user_id") or m.get("user_id") or "").strip()
+                if self_id and uid and uid != self_id:
+                    continue
+                raw_m = str(m.get("raw_message") or "")
+                m_segs = m.get("message")
+                has_img = "[CQ:image" in raw_m or (
+                    isinstance(m_segs, list)
+                    and any(isinstance(s, dict) and s.get("type") == "image" for s in m_segs)
+                )
+                if has_img:
+                    return m.get("message_id") or True
+        except Exception as e:
+            logger.debug(f"[{PLUGIN_NAME}] 校验群 {gid} 历史消息送达状态异常: {e}")
+        return None
+
     async def _invoke_send_with_guard(
         self, fn, label: str, *args, _bot: Any = None, _gid: Any = None, **kwargs
     ):
-        """发送守卫（兼顾「防发两张图」与「防因失效引用导致发不出去」）：
+        """发送守卫（兼顾「真实送达校验防发两张图」与「未送达自动补发兜底」）：
         1. 若快速失败（耗时 < 4.5s 且非 NTEvent 监听超时）且消息同时含 reply + image（常见于原消息被撤回或引用 ID 失效），
            原地剥离 reply 段后补发一次，确保图片能发出去。
-        2. 若为 NTQQ 慢上传监听超时（Timeout: NTEvent 或耗时 >= 4.5s 的 retcode=1200），NTQQ 内核实际仍在后台上传首张图片，
-           此时绝不重试，直接返回合成回执，杜绝发出两张图片。
+        2. 若发生发送超时（retcode=1200 或 timeout），调用 get_group_msg_history 真实核验群内是否已发出：
+           - 已实际送达：返回已送达回执，绝不重复补发；
+           - 确认未送达：剥离可能失效的 reply 段后重试补发一次，避免消息被吞！
         """
         _msg = self._extract_send_message(args, kwargs)
         t0 = time.monotonic()
+        send_start_ts = int(time.time())
         try:
             return await fn(*args, **kwargs)
         except Exception as e:
@@ -603,15 +663,38 @@ class HandlersMixin:
                 except Exception as e_retry:
                     e = e_retry
             if self._is_send_timeout_error(e):
+                delivered_mid = await self._verify_group_msg_delivered(_bot, _gid, send_start_ts)
+                if delivered_mid is not None:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
+                        f"经群历史消息真实校验确认已送达(message_id={delivered_mid})，不重复补发"
+                    )
+                    return {
+                        "message_id": None if delivered_mid is True else delivered_mid,
+                        "status": "ok",
+                        "retcode": 0,
+                    }
                 logger.warning(
                     f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
-                    f"NTQQ 后台仍在传输或已实际送达，不重复补发以避免发送两张图"
+                    f"经群历史消息真实校验确认未送达，正在执行补发兜底..."
                 )
-                return {
-                    "message_id": None,
-                    "status": "timeout",
-                    "retcode": 1200,
-                }
+                if _msg is not None:
+                    self._strip_reply_from_image_msg(_msg)
+                try:
+                    return await fn(*args, **kwargs)
+                except Exception as e2:
+                    delivered_mid2 = await self._verify_group_msg_delivered(_bot, _gid, send_start_ts)
+                    if delivered_mid2 is not None:
+                        logger.info(
+                            f"[{PLUGIN_NAME}] {label} 补发后经群历史消息校验确认已送达(message_id={delivered_mid2})"
+                        )
+                        return {
+                            "message_id": None if delivered_mid2 is True else delivered_mid2,
+                            "status": "ok",
+                            "retcode": 0,
+                        }
+                    logger.error(f"[{PLUGIN_NAME}] {label} 补发仍失败且未送达: {e2}")
+                    raise e2
             raise
 
     @staticmethod
@@ -656,13 +739,20 @@ class HandlersMixin:
 
             @_safe_wraps(orig_send_group)
             async def patched_send_group(*args, **kwargs):
-                _gid = None
+                _gid = kwargs.get("group_id", args[0] if len(args) > 0 else None)
+                _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
+                # 未启用本插件或该群不在生效范围内时，直接透传原函数，不拦截也不吞错
+                if not bool(self.cfg_mgr.config.get("enable", True)) or (
+                    _gid is not None and not self._is_gid_allowed(str(_gid))
+                ):
+                    return await orig_send_group(*args, **kwargs)
+                _use_guard = False
                 if not _IN_XBIMG_SEND.get():
                     try:
-                        _gid = kwargs.get("group_id", args[0] if len(args) > 0 else None)
-                        _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
                         if _gid is not None and _msg is not None:
                             _new = await self._transform_onebot_message(str(_gid), _msg)
+                            if _new is not _msg or self._has_xbimg_rendered_image(_new):
+                                _use_guard = True
                             if "message" in kwargs:
                                 kwargs["message"] = _new
                             elif len(args) > 1:
@@ -671,6 +761,8 @@ class HandlersMixin:
                                 kwargs["message"] = _new
                     except Exception as e:
                         logger.debug(f"[{PLUGIN_NAME}] 拦截 send_group_msg 失败: {e}")
+                if not _use_guard and not self._has_xbimg_rendered_image(_msg):
+                    return await orig_send_group(*args, **kwargs)
                 _tok = _IN_XBIMG_SEND.set(True)
                 try:
                     try:
@@ -708,31 +800,40 @@ class HandlersMixin:
 
             @_safe_wraps(orig_call_action)
             async def patched_call_action(action, *args, **kwargs):
+                # 非群普通消息发送动作（如 send_group_forward_msg、delete_msg、get_group_msg_history 等）直接原样透传
+                if action not in ("send_group_msg", "send_msg"):
+                    return await orig_call_action(action, *args, **kwargs)
                 _reentrant = _IN_XBIMG_SEND.get()
-                _gid = None
-                if not _reentrant:
-                    try:
-                        if action in ("send_group_msg", "send_msg"):
-                            _params = args[0] if (args and isinstance(args[0], dict)) else None
-                            _gid = kwargs.get("group_id", (_params.get("group_id") if _params else None))
-                            _msg = kwargs.get("message", (_params.get("message") if _params else None))
-                            if _gid and _msg is not None:
-                                _new = await self._transform_onebot_message(str(_gid), _msg)
-                                if "message" in kwargs:
-                                    kwargs["message"] = _new
-                                elif _params is not None:
-                                    _params = dict(_params)
-                                    _params["message"] = _new
-                                    args = (_params,) + tuple(args[1:])
-                                else:
-                                    kwargs["message"] = _new
-                    except Exception as e:
-                        logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
+                if _reentrant:
+                    return await orig_call_action(action, *args, **kwargs)
+                _params = args[0] if (args and isinstance(args[0], dict)) else None
+                _gid = kwargs.get("group_id", (_params.get("group_id") if _params else None))
+                _msg = kwargs.get("message", (_params.get("message") if _params else None))
+                if not bool(self.cfg_mgr.config.get("enable", True)) or (
+                    _gid is not None and not self._is_gid_allowed(str(_gid))
+                ):
+                    return await orig_call_action(action, *args, **kwargs)
+                _use_guard = False
+                try:
+                    if _gid and _msg is not None:
+                        _new = await self._transform_onebot_message(str(_gid), _msg)
+                        if _new is not _msg or self._has_xbimg_rendered_image(_new):
+                            _use_guard = True
+                        if "message" in kwargs:
+                            kwargs["message"] = _new
+                        elif _params is not None:
+                            _params = dict(_params)
+                            _params["message"] = _new
+                            args = (_params,) + tuple(args[1:])
+                        else:
+                            kwargs["message"] = _new
+                except Exception as e:
+                    logger.debug(f"[{PLUGIN_NAME}] 拦截 call_action 失败: {e}")
+                if not _use_guard and not self._has_xbimg_rendered_image(_msg):
+                    return await orig_call_action(action, *args, **kwargs)
                 _tok = _IN_XBIMG_SEND.set(True)
                 try:
                     try:
-                        if _reentrant:
-                            return await orig_call_action(action, *args, **kwargs)
                         return await self._invoke_send_with_guard(
                             orig_call_action, f"call_action({action})", action, *args,
                             _bot=bot_inst, _gid=_gid, **kwargs
@@ -749,8 +850,6 @@ class HandlersMixin:
                                 _merged = True
                         if not _merged:
                             raise
-                        if _reentrant:
-                            return await orig_call_action(action, **_rk)
                         return await self._invoke_send_with_guard(
                             orig_call_action, f"call_action({action}/norm)", action,
                             _bot=bot_inst, _gid=_gid, **_rk
@@ -1450,6 +1549,8 @@ class HandlersMixin:
 
         result = event.get_result()
         if result is None or not getattr(result, "chain", None):
+            return
+        if getattr(getattr(result, "result_content_type", None), "name", None) == "STREAMING_FINISH":
             return
 
         # 1. 检查群组黑白名单过滤

@@ -219,9 +219,17 @@ class GroupsMixin:
 
 
     def _is_group_allowed(self, event: AstrMessageEvent) -> bool:
+        try:
+            _fn = getattr(event, "get_platform_name", None)
+            pname = str(_fn() or "").lower() if callable(_fn) else ""
+            umo = str(getattr(event, "unified_msg_origin", "") or "").lower()
+            if pname == "webchat" or umo.startswith("webchat") or ":webchat:" in umo:
+                return False
+        except Exception:
+            pass
         gid = self._remember_group(event)
         if not gid:
-            # 私聊默认生效
+            # 私聊默认生效（非 webchat）
             return True
 
         cfg = self.cfg_mgr.config
