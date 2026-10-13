@@ -422,7 +422,11 @@ class WebApiMixin:
                 self._groups_bg_refreshing = False
 
         groups = [
-            {"gid": str(gid), "group_name": str((info or {}).get("group_name") or gid)}
+            {
+                "gid": str(gid),
+                "group_name": str((info or {}).get("group_name") or gid),
+                "platform": str((info or {}).get("platform") or ""),
+            }
             for gid, info in self._seen_groups.items()
             if str(gid).strip()
         ]
@@ -450,13 +454,16 @@ class WebApiMixin:
                         for g in res:
                             gid = g["gid"]
                             gname = g.get("group_name") or gid
+                            plat = g.get("platform") or "onebot"
                             if gid not in seen_gids:
                                 seen_gids.add(gid)
-                                groups.append(g)
+                                groups.append({"gid": gid, "group_name": gname, "platform": plat})
                             cur_info = self._seen_groups.get(gid)
                             if not isinstance(cur_info, dict) or (gname != gid and cur_info.get("group_name") != gname):
                                 self._seen_groups[gid] = {
+                                    "gid": gid,
                                     "group_name": gname,
+                                    "platform": (cur_info or {}).get("platform") or plat,
                                     "last_seen": int((cur_info or {}).get("last_seen") or time.time()),
                                 }
                                 updated_seen = True
@@ -465,11 +472,18 @@ class WebApiMixin:
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 探测平台群列表异常: {e}")
 
-        # 2. 合并历史已捕获群聊
+        # 2. 合并历史已捕获群聊（含 Matrix 等其它平台群聊）
         for gid, info in self._seen_groups.items():
             if gid not in seen_gids:
                 seen_gids.add(gid)
-                groups.append({"gid": gid, "group_name": str(info.get("group_name") or gid)})
+                groups.append({
+                    "gid": gid,
+                    "group_name": str(info.get("group_name") or gid),
+                    "platform": str(info.get("platform") or ""),
+                })
+
+        if updated_seen:
+            self._save_seen_groups()
 
         return json_response({"ok": True, "groups": groups})
 

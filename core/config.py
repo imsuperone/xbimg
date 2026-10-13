@@ -157,7 +157,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ui_accent_color": "",
     "ui_theme_mode": "",
     "group_configs": {},
-    "group_mode": "whitelist",
+    "group_mode": "all",
     "group_list": "",
     "render_trigger": "always",
     "mosaic_half_pos": "bottom",
@@ -170,7 +170,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "custom_font_url": "",
     "emoji_remote": True,
     "perf_log": False,
-    "enable_private": False,
+    "enable_private": True,
     "platform_preset": "onebot",
     "allowed_platforms": "onebot, aiocqhttp",
 }

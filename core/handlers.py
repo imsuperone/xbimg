@@ -970,29 +970,84 @@ class HandlersMixin:
             except Exception:
                 pass
 
-        # 2. 拦截通用 call_action("send_group_msg", ...) 或 call_action("send_msg", ...)
+        # 1.5 拦截 bot.send_private_msg
+        if hasattr(bot_inst, "send_private_msg") and callable(getattr(bot_inst, "send_private_msg")):
+            orig_send_private = bot_inst.send_private_msg
+
+            @_safe_wraps(orig_send_private)
+            async def patched_send_private(*args, **kwargs):
+                _uid = kwargs.get("user_id", args[0] if len(args) > 0 else None)
+                _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
+                if not bool(self.cfg_mgr.config.get("enable", True)) or not bool(self.cfg_mgr.config.get("enable_private", True)):
+                    return await orig_send_private(*args, **kwargs)
+                _use_guard = False
+                if not _IN_XBIMG_SEND.get():
+                    try:
+                        if _msg is not None:
+                            _new = await self._transform_onebot_message("", _msg)
+                            if _new is not _msg or self._has_xbimg_rendered_image(_new):
+                                _use_guard = True
+                            if "message" in kwargs:
+                                kwargs["message"] = _new
+                            elif len(args) > 1:
+                                args = (args[0], _new) + tuple(args[2:])
+                            else:
+                                kwargs["message"] = _new
+                    except Exception as e:
+                        logger.debug(f"[{PLUGIN_NAME}] 拦截 send_private_msg 失败: {e}")
+                if not _use_guard and not self._has_xbimg_rendered_image(_msg):
+                    return await orig_send_private(*args, **kwargs)
+                _tok = _IN_XBIMG_SEND.set(True)
+                try:
+                    return await self._invoke_send_with_guard(
+                        orig_send_private, "send_private_msg", *args,
+                        _bot=bot_inst, _gid="", **kwargs
+                    )
+                finally:
+                    _IN_XBIMG_SEND.reset(_tok)
+
+            patched_send_private._xbimg_wrapper_ = True
+            bot_inst.send_private_msg = patched_send_private
+            try:
+                bot_inst._msg2img_orig_send_private_msg = orig_send_private
+            except Exception:
+                pass
+
+        # 2. 拦截通用 call_action("send_group_msg", ...), ("send_private_msg", ...) 或 ("send_msg", ...)
         if hasattr(bot_inst, "call_action") and callable(getattr(bot_inst, "call_action")):
             orig_call_action = bot_inst.call_action
 
             @_safe_wraps(orig_call_action)
             async def patched_call_action(action, *args, **kwargs):
-                # 非群普通消息发送动作（如 send_group_forward_msg、delete_msg、get_group_msg_history 等）直接原样透传
-                if action not in ("send_group_msg", "send_msg"):
+                # 非普通消息发送动作直接原样透传
+                if action not in ("send_group_msg", "send_msg", "send_private_msg"):
                     return await orig_call_action(action, *args, **kwargs)
                 _reentrant = _IN_XBIMG_SEND.get()
                 if _reentrant:
                     return await orig_call_action(action, *args, **kwargs)
                 _params = args[0] if (args and isinstance(args[0], dict)) else None
                 _gid = kwargs.get("group_id", (_params.get("group_id") if _params else None))
+                _uid = kwargs.get("user_id", (_params.get("user_id") if _params else None))
                 _msg = kwargs.get("message", (_params.get("message") if _params else None))
-                if not bool(self.cfg_mgr.config.get("enable", True)) or (
-                    _gid is not None and not self._is_gid_allowed(str(_gid))
-                ):
+
+                _is_priv = False
+                _target_gid = ""
+                if _gid is not None:
+                    _target_gid = str(_gid)
+                elif action == "send_private_msg" or _uid is not None:
+                    _is_priv = True
+
+                if not bool(self.cfg_mgr.config.get("enable", True)):
                     return await orig_call_action(action, *args, **kwargs)
+                if _is_priv and not bool(self.cfg_mgr.config.get("enable_private", True)):
+                    return await orig_call_action(action, *args, **kwargs)
+                if not _is_priv and _target_gid and not self._is_gid_allowed(_target_gid):
+                    return await orig_call_action(action, *args, **kwargs)
+
                 _use_guard = False
                 try:
-                    if _gid and _msg is not None:
-                        _new = await self._transform_onebot_message(str(_gid), _msg)
+                    if _msg is not None:
+                        _new = await self._transform_onebot_message(_target_gid, _msg)
                         if _new is not _msg or self._has_xbimg_rendered_image(_new):
                             _use_guard = True
                         if "message" in kwargs:
@@ -1012,7 +1067,7 @@ class HandlersMixin:
                     try:
                         return await self._invoke_send_with_guard(
                             orig_call_action, f"call_action({action})", action, *args,
-                            _bot=bot_inst, _gid=_gid, **kwargs
+                            _bot=bot_inst, _gid=_target_gid, **kwargs
                         )
                     except TypeError as e:
                         if not self._is_bind_error(e):
@@ -1028,7 +1083,7 @@ class HandlersMixin:
                             raise
                         return await self._invoke_send_with_guard(
                             orig_call_action, f"call_action({action}/norm)", action,
-                            _bot=bot_inst, _gid=_gid, **_rk
+                            _bot=bot_inst, _gid=_target_gid, **_rk
                         )
                 finally:
                     _IN_XBIMG_SEND.reset(_tok)
@@ -1411,21 +1466,38 @@ class HandlersMixin:
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
         """三入口共用准入判断：字数门槛 → keep_text 放行 → violation_only 关键词预检。
 
+        支持各群独立配置 render_trigger 与 min_length_threshold；私聊严格绑定全局设置。
         通过返回 (render_trigger, grp_custom)，不通过返回 None（调用方原样放行）。
         入口特有的检查（cmd 回执跳过、链接块识别、媒体占比）留在各调用方。
         """
         cfg = self.cfg_mgr.config
+        grp_custom = self._get_group_custom_config(gid) if gid else {}
+
+        # 字数下限优先级：群专属配置 > 全局配置（私聊走全局）
         try:
-            min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
+            if gid and "min_length_threshold" in grp_custom and grp_custom["min_length_threshold"] not in (None, "", "default"):
+                min_threshold = int(grp_custom["min_length_threshold"])
+            else:
+                min_threshold = int(cfg.get("min_length_threshold", 1) or 1)
         except Exception:
             min_threshold = 1
+
         if len(full_text) < min_threshold:
             return None
+
         if str(cfg.get("link_mode", "as_image") or "as_image") == "keep_text" \
                 and self._has_link(full_text):
             return None
-        render_trigger = str(cfg.get("render_trigger", "always") or "always")
-        grp_custom = self._get_group_custom_config(gid)
+
+        # 触发时机优先级：群专属配置 > 全局配置（私聊走全局）
+        if gid and "render_trigger" in grp_custom and grp_custom["render_trigger"] not in (None, "", "default"):
+            render_trigger = str(grp_custom["render_trigger"])
+        else:
+            render_trigger = str(cfg.get("render_trigger", "always") or "always")
+
+        if render_trigger == "never":
+            return None
+
         if render_trigger == "violation_only":
             _qp = grp_custom.get("keyword_preset") if isinstance(grp_custom, dict) else None
             quick_hit, _ = self.moderator.check_keywords(full_text, _qp)

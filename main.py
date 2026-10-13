@@ -84,6 +84,7 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         self.moderator = ContentModerator(self.cfg_mgr.config)
         self.cache_dir = self.cfg_mgr.cache_dir
         self._seen_groups: Dict[str, Dict[str, Any]] = {}
+        self._load_seen_groups()
         # 预览图 nonce 锁：nonce -> 过期时间戳（10 分钟），防 preview_img 被任意人直读
         self._preview_nonces: Dict[str, float] = {}
         # 测试指令冷却：name:gid -> 上次时间戳，防任意成员刷测试图

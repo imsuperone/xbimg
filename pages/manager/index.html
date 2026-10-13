@@ -487,10 +487,10 @@
           <div class="card-row-split">
             <div>
               <h2 class="card-title">私聊消息独立开关</h2>
-              <p class="card-desc">开启后私聊消息也会自动转为图片发送；关闭后私聊保持纯文本发送，仅在允许的群聊中转换。默认关闭。</p>
+              <p class="card-desc">开启后私聊消息也会自动转为图片发送（遵循全局触发时机与字数下限）；关闭后私聊保持纯文本发送。默认开启。</p>
             </div>
             <label class="m3-switch">
-              <input type="checkbox" id="cfgEnablePrivate" />
+              <input type="checkbox" id="cfgEnablePrivate" checked />
               <span class="switch-slider"></span>
             </label>
           </div>
@@ -565,16 +565,16 @@
         <div class="m3-card group-focus-card">
           <div class="card-header-badge-row">
             <h2 class="card-title">群聊生效范围</h2>
-            <span class="m3-badge-highlight" id="groupStatusPill">生效范围受限（仅所选群聊）</span>
+            <span class="m3-badge-highlight" id="groupStatusPill">全部群聊生效</span>
           </div>
-          <p class="card-desc">核心规则：为避免在无关群聊中发送图片，默认情况下群聊不执行图片转换（仅私聊生效）。请选择白名单模式，并于下方拉取或手动勾选需要生效的群聊。</p>
+          <p class="card-desc">控制本插件在群聊中的生效范围。可设置为全群生效、仅白名单群生效或全部群聊关闭。</p>
 
           <div class="form-group">
             <label class="form-label">群聊生效模式</label>
             <div class="m3-segmented-control" id="segGroupMode">
-              <button type="button" class="seg-item active" data-val="whitelist">仅白名单群聊生效（默认，推荐）</button>
-              <button type="button" class="seg-item" data-val="all">全部群聊生效</button>
-              <button type="button" class="seg-item" data-val="blacklist">黑名单排除模式</button>
+              <button type="button" class="seg-item active" data-val="all">全部群聊生效（默认）</button>
+              <button type="button" class="seg-item" data-val="whitelist">仅白名单群生效</button>
+              <button type="button" class="seg-item" data-val="disabled">全部群聊关闭</button>
             </div>
           </div>
 

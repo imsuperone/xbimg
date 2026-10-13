@@ -709,8 +709,8 @@ async def render_text_to_image(text: str):
     // 填充与同步多预设词库
     populateKeywordPresets();
 
-    // 默认白名单模式
-    const grpMode = cfg.group_mode || "whitelist";
+    // 默认全群生效模式
+    const grpMode = cfg.group_mode || "all";
     setSegmentedValue("segGroupMode", grpMode);
 
     const grpListEl = document.getElementById("cfgGroupList");
@@ -992,7 +992,7 @@ async def render_text_to_image(text: str):
         }
         return presets;
       })(),
-      group_mode: getSegmentedValue("segGroupMode", "whitelist"),
+      group_mode: getSegmentedValue("segGroupMode", "all"),
       group_list: grpListEl ? grpListEl.value.trim() : "",
       font_source: getSegmentedValue("segFontSource", "auto"),
       custom_font_path: cfEl ? cfEl.value.trim() : "",
@@ -1018,6 +1018,8 @@ async def render_text_to_image(text: str):
           const thSel = document.querySelector(`.sg-theme[data-gid="${_gidq(gid)}"]`);
           const ftSel = document.querySelector(`.sg-font[data-gid="${_gidq(gid)}"]`);
           const kwSel = document.querySelector(`.sg-kw[data-gid="${_gidq(gid)}"]`);
+          const trigSel = document.querySelector(`.sg-trigger[data-gid="${_gidq(gid)}"]`);
+          const minLenInput = document.querySelector(`.sg-minlen[data-gid="${_gidq(gid)}"]`);
 
           let scaleVal = null;
           if (numEl && numEl.value !== "") {
@@ -1032,6 +1034,13 @@ async def render_text_to_image(text: str):
           const themeVal = thSel ? thSel.value : (prev.theme_mode || "");
           const fontVal = ftSel ? ftSel.value : (prev.custom_font_path || "");
           const kwVal = kwSel ? kwSel.value : (prev.keyword_preset || "");
+          const trigVal = trigSel ? trigSel.value : (prev.render_trigger || "");
+          let minLenVal = null;
+          if (minLenInput && minLenInput.value !== "") {
+            minLenVal = parseInt(minLenInput.value, 10);
+          } else if (prev.min_length_threshold !== undefined && prev.min_length_threshold !== null && prev.min_length_threshold !== "") {
+            minLenVal = parseInt(prev.min_length_threshold, 10);
+          }
 
           const item = {};
           if (scaleVal && scaleVal !== 100) item.font_scale = scaleVal;
@@ -1039,6 +1048,8 @@ async def render_text_to_image(text: str):
           if (themeVal) item.theme_mode = themeVal;
           if (fontVal) item.custom_font_path = fontVal;
           if (kwVal) item.keyword_preset = kwVal;
+          if (trigVal) item.render_trigger = trigVal;
+          if (minLenVal !== null && !isNaN(minLenVal) && minLenVal > 0) item.min_length_threshold = minLenVal;
 
           if (Object.keys(item).length > 0) {
             m[gid] = item;
@@ -1443,6 +1454,8 @@ async def render_text_to_image(text: str):
       const curTheme = c.theme_mode || "";
       const curFont = c.custom_font_path || "";
       const curKw = c.keyword_preset || "";
+      const curTrig = c.render_trigger || "";
+      const curMinLen = (c.min_length_threshold !== undefined && c.min_length_threshold !== null && c.min_length_threshold !== "") ? c.min_length_threshold : "";
       const globalStyleName = (currentConfig.style || "ios").toUpperCase();
       const globalThemeName = (currentConfig.theme_mode === "dark") ? "深色" : "浅色";
 
@@ -1479,6 +1492,19 @@ async def render_text_to_image(text: str):
         `      <option value="light"${curTheme === "light" ? " selected" : ""}>浅色明亮</option>` +
         `      <option value="dark"${curTheme === "dark" ? " selected" : ""}>深色暗黑</option>` +
         `    </select>` +
+        `  </div>` +
+        `  <div class="sg-item">` +
+        `    <label>触发时机</label>` +
+        `    <select class="sg-select sg-trigger" data-gid="${escapeHtml(gid)}">` +
+        `      <option value=""${!curTrig ? " selected" : ""}>跟随全局 (默认)</option>` +
+        `      <option value="always"${curTrig === "always" ? " selected" : ""}>始终转图</option>` +
+        `      <option value="violation_only"${curTrig === "violation_only" ? " selected" : ""}>仅审查违规转图</option>` +
+        `      <option value="never"${curTrig === "never" ? " selected" : ""}>从不转图</option>` +
+        `    </select>` +
+        `  </div>` +
+        `  <div class="sg-item">` +
+        `    <label>字数下限</label>` +
+        `    <input type="number" class="m3-input sg-minlen" min="1" max="9999" placeholder="跟随全局" value="${curMinLen !== "" ? escapeHtml(String(curMinLen)) : ""}" data-gid="${escapeHtml(gid)}" style="width:100%; padding:4px 8px; font-size:12px; font-weight:600;">` +
         `  </div>` +
         `  <div class="sg-item">` +
         `    <label>字体设置</label>` +
@@ -1785,7 +1811,7 @@ async def render_text_to_image(text: str):
       rows.push({ gid, group_name: gname });
     });
 
-    const switchColLabel = mode === "blacklist" ? "黑名单" : "启用开关";
+    const switchColLabel = "启用开关";
     if (rows.length === 0) {
       boxEl.innerHTML = `<div class="font-files-empty" style="padding: 18px 12px;">${
         searchKw ? "未找到匹配的群聊" : "暂无群聊记录，点击上方「刷新群列表」或手动输入群号添加"
@@ -1889,15 +1915,15 @@ async def render_text_to_image(text: str):
         note.textContent = "当前已启用全群生效，机器人在各群聊中的文本回复将自动转为图片。";
         note.style.color = "var(--m3-status-green)";
       }
-    } else if (mode === "blacklist") {
+    } else if (mode === "disabled") {
       if (pill) {
-        pill.textContent = `黑名单模式（已排除 ${list.length} 个群聊）`;
+        pill.textContent = "全部群聊关闭（仅私聊生效）";
         pill.style.background = "var(--m3-status-amber-bg)";
         pill.style.color = "var(--m3-status-amber)";
       }
       if (note) {
-        note.textContent = `除黑名单中的 ${list.length} 个群聊外，其余群聊均正常转换。`;
-        note.style.color = "var(--m3-sys-color-outline)";
+        note.textContent = "已关闭全部群聊的图片转换，群聊回复保持纯文本。若开启了私聊开关，私聊仍会转图。";
+        note.style.color = "var(--m3-status-amber)";
       }
     } else {
       // whitelist
@@ -2517,8 +2543,8 @@ async def render_text_to_image(text: str):
         // 持久化目录字体下拉选择即时生效
         applySelectedFont();
       }
-      if (e.target && (e.target.classList.contains("sg-style") || e.target.classList.contains("sg-theme") || e.target.classList.contains("sg-font") || e.target.classList.contains("sg-kw"))) {
-        // 群专属风格/主题/字体/词库即时保存
+      if (e.target && (e.target.classList.contains("sg-style") || e.target.classList.contains("sg-theme") || e.target.classList.contains("sg-font") || e.target.classList.contains("sg-kw") || e.target.classList.contains("sg-trigger") || e.target.classList.contains("sg-minlen"))) {
+        // 群专属风格/主题/字体/词库/触发时机/字数下限即时保存
         triggerAutoSave();
       }
       if (e.target && (e.target.name === "linkMode" || e.target.name === "violationAction")) {
@@ -2538,7 +2564,10 @@ async def render_text_to_image(text: str):
       }
       if (e.target && e.target.id === "cfgGroupList") {
         updateGroupChipsSelection();
-        updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "whitelist"), e.target.value);
+        updateGroupModeStatusUI(getSegmentedValue("segGroupMode", "all"), e.target.value);
+        triggerAutoSave();
+      }
+      if (e.target && e.target.classList.contains("sg-minlen")) {
         triggerAutoSave();
       }
       if (e.target && e.target.classList.contains("sg-slider")) {
