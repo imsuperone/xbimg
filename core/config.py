@@ -170,6 +170,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "custom_font_url": "",
     "emoji_remote": True,
     "perf_log": False,
+    "enable_private": False,
+    "platform_preset": "onebot",
+    "allowed_platforms": "onebot, aiocqhttp",
 }
 
 

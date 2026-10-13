@@ -745,6 +745,194 @@ async def render_text_to_image(text: str):
     }
     // 主题色：后端配置优先，其次本地记录
     initAccentColor(cfg.ui_accent_color);
+
+    const enablePrivEl = document.getElementById("cfgEnablePrivate");
+    if (enablePrivEl) enablePrivEl.checked = Boolean(cfg.enable_private);
+    const allowedPlatEl = document.getElementById("cfgAllowedPlatforms");
+    if (allowedPlatEl) allowedPlatEl.value = cfg.allowed_platforms || "onebot, aiocqhttp";
+    renderPlatformManager(cfg);
+  }
+
+  const PRESET_PLATFORMS = ["onebot", "aiocqhttp", "matrix", "telegram", "discord", "lark", "all"];
+  let _customPlatforms = [];
+
+  function parseAllowedPlatforms(raw) {
+    if (!raw) return [];
+    const parts = String(raw).split(/[,，、;；\s]+/);
+    const list = [];
+    parts.forEach((p) => {
+      p = p.trim().toLowerCase();
+      if (p && list.indexOf(p) === -1) list.push(p);
+    });
+    return list;
+  }
+
+  function renderPlatformManager(cfg) {
+    const raw = String((cfg && cfg.allowed_platforms) == null ? "onebot, aiocqhttp" : cfg.allowed_platforms).trim();
+    const tokens = parseAllowedPlatforms(raw);
+    const isAll = tokens.indexOf("all") !== -1 || tokens.indexOf("*") !== -1;
+
+    const cbs = document.querySelectorAll(".plat-cb");
+    cbs.forEach((cb) => {
+      const val = cb.value;
+      if (val === "all") {
+        cb.checked = isAll;
+      } else {
+        cb.checked = !isAll && tokens.indexOf(val) !== -1;
+      }
+    });
+
+    _customPlatforms = [];
+    tokens.forEach((t) => {
+      if (t !== "all" && t !== "*" && PRESET_PLATFORMS.indexOf(t) === -1) {
+        if (_customPlatforms.indexOf(t) === -1) _customPlatforms.push(t);
+      }
+    });
+
+    const wrap = document.getElementById("customPlatTagsWrap");
+    if (wrap) {
+      wrap.innerHTML = _customPlatforms.map((tag) => {
+        return `<span class="platform-tag-pill">${tag}<span class="tag-rm" data-tag="${tag}">×</span></span>`;
+      }).join("");
+    }
+
+    const sel = document.getElementById("sel_platform_preset");
+    if (sel && document.activeElement !== sel) {
+      const preset = String((cfg && cfg.platform_preset) || "").toLowerCase();
+      if (preset && ["onebot", "onebot_matrix", "all", "custom"].indexOf(preset) !== -1) {
+        sel.value = preset;
+      } else {
+        if (isAll) sel.value = "all";
+        else if (tokens.indexOf("matrix") !== -1 && (tokens.indexOf("onebot") !== -1 || tokens.indexOf("aiocqhttp") !== -1) && _customPlatforms.length === 0) sel.value = "onebot_matrix";
+        else if ((tokens.indexOf("onebot") !== -1 || tokens.indexOf("aiocqhttp") !== -1) && tokens.length <= 2 && _customPlatforms.length === 0) sel.value = "onebot";
+        else sel.value = "custom";
+      }
+    }
+  }
+
+  function savePlatformSelection(fromPreset) {
+    const sel = document.getElementById("sel_platform_preset");
+    const presetVal = sel ? sel.value : "custom";
+    let finalStr = "";
+
+    if (fromPreset && presetVal === "onebot") {
+      finalStr = "onebot, aiocqhttp";
+      _customPlatforms = [];
+    } else if (fromPreset && presetVal === "onebot_matrix") {
+      finalStr = "onebot, aiocqhttp, matrix";
+      _customPlatforms = [];
+    } else if (fromPreset && presetVal === "all") {
+      finalStr = "all";
+      _customPlatforms = [];
+    } else {
+      const selected = [];
+      let isAll = false;
+      const cbs = document.querySelectorAll(".plat-cb");
+      cbs.forEach((cb) => {
+        if (cb.checked) {
+          if (cb.value === "all") isAll = true;
+          else selected.push(cb.value);
+        }
+      });
+      if (isAll) {
+        finalStr = "all";
+      } else {
+        _customPlatforms.forEach((p) => {
+          if (selected.indexOf(p) === -1) selected.push(p);
+        });
+        finalStr = selected.join(", ");
+      }
+    }
+
+    const inp = document.getElementById("cfgAllowedPlatforms");
+    if (inp) inp.value = finalStr;
+    currentConfig.allowed_platforms = finalStr;
+    currentConfig.platform_preset = presetVal;
+
+    triggerAutoSave();
+    renderPlatformManager(currentConfig);
+  }
+
+  function initPlatformManager() {
+    const sel = document.getElementById("sel_platform_preset");
+    if (sel) {
+      sel.addEventListener("change", () => {
+        savePlatformSelection(true);
+      });
+    }
+
+    const chipsWrap = document.getElementById("platformChips");
+    if (chipsWrap) {
+      chipsWrap.addEventListener("change", (ev) => {
+        if (ev.target && ev.target.classList.contains("plat-cb")) {
+          const cb = ev.target;
+          if (cb.value === "all" && cb.checked) {
+            document.querySelectorAll(".plat-cb").forEach((other) => {
+              if (other !== cb) other.checked = false;
+            });
+          } else if (cb.checked) {
+            const allCb = document.querySelector('.plat-cb[value="all"]');
+            if (allCb) allCb.checked = false;
+          }
+          if (sel) sel.value = "custom";
+          savePlatformSelection(false);
+        }
+      });
+    }
+
+    const btnAdd = document.getElementById("btn_add_custom_plat");
+    const inpAdd = document.getElementById("inp_custom_plat");
+    function doAddCustom() {
+      if (!inpAdd) return;
+      const val = inpAdd.value.trim().toLowerCase();
+      if (!val) return;
+      if (val === "all") {
+        showToast("全部平台请直接勾选「全部平台 (All)」", "info");
+        return;
+      }
+      if (PRESET_PLATFORMS.indexOf(val) !== -1) {
+        const targetCb = document.querySelector(`.plat-cb[value="${val}"]`);
+        if (targetCb) targetCb.checked = true;
+      } else {
+        if (_customPlatforms.indexOf(val) === -1) {
+          _customPlatforms.push(val);
+        }
+      }
+      inpAdd.value = "";
+      if (sel) sel.value = "custom";
+      savePlatformSelection(false);
+    }
+    if (btnAdd) btnAdd.addEventListener("click", doAddCustom);
+    if (inpAdd) {
+      inpAdd.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          doAddCustom();
+        }
+      });
+    }
+
+    const tagsWrap = document.getElementById("customPlatTagsWrap");
+    if (tagsWrap) {
+      tagsWrap.addEventListener("click", (ev) => {
+        const rm = ev.target.closest ? ev.target.closest(".tag-rm") : null;
+        if (rm) {
+          const tag = rm.getAttribute("data-tag");
+          _customPlatforms = _customPlatforms.filter((t) => t !== tag);
+          if (sel) sel.value = "custom";
+          savePlatformSelection(false);
+        }
+      });
+    }
+
+    const rawInp = document.getElementById("cfgAllowedPlatforms");
+    if (rawInp) {
+      rawInp.addEventListener("input", () => {
+        currentConfig.allowed_platforms = rawInp.value;
+        renderPlatformManager(currentConfig);
+        triggerAutoSave();
+      });
+    }
   }
 
   // data-gid 选择器安全转义（gid 可能含引号等破坏选择器的字符）
@@ -766,6 +954,9 @@ async def render_text_to_image(text: str):
 
     return {
       enable: enableEl ? enableEl.checked : true,
+      enable_private: Boolean(document.getElementById("cfgEnablePrivate")?.checked),
+      platform_preset: document.getElementById("sel_platform_preset")?.value || "custom",
+      allowed_platforms: document.getElementById("cfgAllowedPlatforms")?.value.trim() || "onebot, aiocqhttp",
       render_trigger: getSegmentedValue("segRenderTrigger", "always"),
       style: getSegmentedValue("segStyle", "ios"),
       theme_mode: getSegmentedValue("segTheme", "light"),
@@ -2677,6 +2868,11 @@ async def render_text_to_image(text: str):
       });
     }
     initAccentPopover();
+    initPlatformManager();
+    const enablePrivEl = document.getElementById("cfgEnablePrivate");
+    if (enablePrivEl) {
+      enablePrivEl.addEventListener("change", triggerAutoSave);
+    }
     notifyReady();
 
     const inputEl = document.getElementById("previewInput");

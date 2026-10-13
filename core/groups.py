@@ -77,8 +77,11 @@ class GroupsMixin:
                 cleaned = [_NON_DIGIT_RE.sub("", t) for t in tokens]
             except Exception:
                 cleaned = [""] * len(tokens)
+        gid_lower = gid.lower()
         for t, clean_t in zip(tokens, cleaned):
-            if gid == t:
+            if gid == t or gid_lower == t.lower():
+                return True
+            if t.endswith(":" + gid) or t.lower().endswith(":" + gid_lower):
                 return True
             if clean_t and clean_gid and clean_gid == clean_t:
                 return True
@@ -218,19 +221,61 @@ class GroupsMixin:
 
 
 
+    def is_platform_allowed(self, platform: str = "") -> bool:
+        """检查指定平台是否允许运行本插件（支持 platform_preset 下拉预设与 allowed_platforms 自定义）。"""
+        cfg = self.cfg_mgr.config
+        preset = str(cfg.get("platform_preset", "") or "").strip().lower()
+        p = (platform or "").strip().lower()
+        if preset == "all":
+            return True
+        if preset in ("onebot", "qq"):
+            if not p:
+                return True
+            return p in ("onebot", "aiocqhttp", "aihttpcq", "cqhttp", "onebot11", "onebot_v11")
+        if preset in ("onebot_matrix", "onebot,matrix", "matrix_onebot"):
+            if not p:
+                return True
+            return p in ("onebot", "aiocqhttp", "aihttpcq", "cqhttp", "onebot11", "onebot_v11", "matrix")
+
+        allowed = str(cfg.get("allowed_platforms", "onebot, aiocqhttp") or "onebot, aiocqhttp").strip()
+        if not allowed or allowed.lower() in ("all", "*", "any"):
+            return True
+        import re as _re
+        tokens = [t.strip().lower() for t in _re.split(r"[,，、;；\s]+", allowed) if t.strip()]
+        if not p:
+            return True
+        if "all" in tokens or "*" in tokens:
+            return True
+        if p in tokens:
+            return True
+        if p in ("aiocqhttp", "aihttpcq", "cqhttp", "onebot11", "onebot_v11") and ("onebot" in tokens or "aiocqhttp" in tokens):
+            return True
+        if p == "onebot" and "aiocqhttp" in tokens:
+            return True
+        return False
+
     def _is_group_allowed(self, event: AstrMessageEvent) -> bool:
+        pname = ""
         try:
             _fn = getattr(event, "get_platform_name", None)
             pname = str(_fn() or "").lower() if callable(_fn) else ""
+            if not pname:
+                pname = str(getattr(event, "platform_id", getattr(event, "platform", "")) or "").lower()
             umo = str(getattr(event, "unified_msg_origin", "") or "").lower()
+            if not pname and umo:
+                pname = umo.split("/")[0].split(":")[0].strip()
             if pname == "webchat" or umo.startswith("webchat") or ":webchat:" in umo:
                 return False
         except Exception:
             pass
+
+        if not self.is_platform_allowed(pname):
+            return False
+
         gid = self._remember_group(event)
         if not gid:
-            # 私聊默认生效（非 webchat）
-            return True
+            # 私聊是否生效由 enable_private 控制（默认关闭）
+            return bool(self.cfg_mgr.config.get("enable_private", False))
 
         cfg = self.cfg_mgr.config
         mode = str(cfg.get("group_mode", "whitelist") or "whitelist")
