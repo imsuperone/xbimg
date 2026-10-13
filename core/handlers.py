@@ -500,9 +500,10 @@ class HandlersMixin:
             out = [{"type": "text", "data": {"text": " "}}]
         return out
 
-    def _image_segs_from_paths(self, img_paths: List[Any], _prevalidated: bool = False) -> List[Dict[str, Any]]:
-        """img_paths 转 OneBot image 段（优先编码为 base64://，防止跨容器 NapCat 读不到宿主机本地路径导致发送失败）。"""
-        import base64 as _b64
+    @staticmethod
+    def _image_segs_from_paths(img_paths: List[Any], _prevalidated: bool = False) -> List[Dict[str, Any]]:
+        """img_paths 转 image 段。_prevalidated=True 时调用方已用 _alive_prior_paths
+        做过存活校验，不再二次 stat（单次校验即返回可用 Path）。"""
         segs: List[Dict[str, Any]] = []
         for p in img_paths or []:
             try:
@@ -510,15 +511,6 @@ class HandlersMixin:
                 if not _prevalidated and not pp.is_file():
                     logger.warning(f"[{PLUGIN_NAME}] 丢弃不存在的缓存图片路径: {pp}")
                     continue
-                try:
-                    raw = pp.read_bytes()
-                    if raw:
-                        self._record_rendered_image_bytes(raw)
-                        b64_str = "base64://" + _b64.b64encode(raw).decode("ascii")
-                        segs.append({"type": "image", "data": {"file": b64_str}})
-                        continue
-                except Exception:
-                    pass
                 segs.append({"type": "image", "data": {"file": str(pp.resolve())}})
             except Exception:
                 continue
@@ -538,6 +530,97 @@ class HandlersMixin:
         return kept
 
     @staticmethod
+    def _prepare_shrunk_image(img) -> Optional[Image.Image]:
+        """降质共用前处理：尺寸校验→展平 RGB→0.75 缩放（BILINEAR 比 LANCZOS 快数倍，
+        重试图只求送达，锐度次要）。不适用（过小/解码失败）返回 None。"""
+        try:
+            w, h = img.size
+            if w < 64 and h < 64:
+                return None
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGBA")
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[-1])
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            return img.resize(
+                (max(1, int(w * 0.75)), max(1, int(h * 0.75))), Image.BILINEAR
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _shrink_base64_image(data: dict, file_ref: str) -> bool:
+        """base64:// 图段原地降质：解码→缩放 0.75→统一重编码 JPEG。"""
+        try:
+            import base64 as _b64
+            raw = _b64.b64decode(file_ref[9:])
+            if not raw:
+                return False
+            img = Image.open(io.BytesIO(raw))
+            img.load()
+            shrunk = HandlersMixin._prepare_shrunk_image(img)
+            if shrunk is None:
+                return False
+            buf = io.BytesIO()
+            shrunk.save(buf, format="JPEG", quality=72, subsampling=1)
+            data["file"] = "base64://" + _b64.b64encode(buf.getvalue()).decode("ascii")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _shrink_oversized_images(message: Any, max_bytes: int) -> bool:
+        """发送前体积守卫：仅对超过 max_bytes 的图段原地降质（0.75 缩放）。"""
+        if not isinstance(message, list) or max_bytes <= 0:
+            return False
+        changed = False
+        for seg in message:
+            if not isinstance(seg, dict) or seg.get("type") != "image":
+                continue
+            data = seg.get("data")
+            if not isinstance(data, dict):
+                continue
+            file_ref = data.get("file") or data.get("url") or ""
+            if not isinstance(file_ref, str) or not file_ref:
+                continue
+            if file_ref.startswith("base64://"):
+                if (len(file_ref) - 9) * 3 // 4 <= max_bytes:
+                    continue
+                if HandlersMixin._shrink_base64_image(data, file_ref):
+                    changed = True
+                continue
+            if file_ref.startswith(("http://", "https://")):
+                continue
+            path = HandlersMixin._local_image_path(file_ref)
+            if path is None:
+                path = Path(file_ref[7:] if file_ref.startswith("file://") else file_ref)
+            try:
+                if not path.is_file() or path.stat().st_size <= max_bytes:
+                    continue
+                shrunk = HandlersMixin._prepare_shrunk_image(Image.open(path))
+                if shrunk is None:
+                    continue
+                tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{os.urandom(3).hex()}")
+                try:
+                    suffix = path.suffix.lower()
+                    if suffix == ".png":
+                        shrunk.save(tmp, format="PNG", compress_level=6)
+                    else:
+                        shrunk.save(tmp, format="JPEG", quality=72, subsampling=1)
+                    os.replace(str(tmp), str(path))
+                finally:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                changed = True
+            except Exception:
+                continue
+        return changed
+
+    @staticmethod
     def _extract_send_message(args, kwargs) -> Any:
         """从 send_group_msg/call_action 调用参数中取出 message 段列表。"""
         _msg = kwargs.get("message")
@@ -551,6 +634,26 @@ class HandlersMixin:
         return None
 
     @staticmethod
+    def _extract_send_gid(args, kwargs, fallback_gid: Any = None) -> Any:
+        """从 send_group_msg/call_action 调用参数中提取群号。"""
+        if fallback_gid is not None and str(fallback_gid).strip():
+            return fallback_gid
+        if "group_id" in kwargs and kwargs["group_id"] is not None:
+            return kwargs["group_id"]
+        for a in args:
+            if isinstance(a, dict) and a.get("group_id") is not None:
+                return a.get("group_id")
+        if args and not isinstance(args[0], dict) and str(args[0]).isdigit():
+            return args[0]
+        return None
+
+    @staticmethod
+    def _has_image_seg(message: Any) -> bool:
+        if not isinstance(message, list):
+            return False
+        return any(isinstance(s, dict) and s.get("type") == "image" for s in message)
+
+    @staticmethod
     def _has_reply_and_image(message: Any) -> bool:
         if not isinstance(message, list):
             return False
@@ -560,7 +663,7 @@ class HandlersMixin:
 
     @staticmethod
     def _strip_reply_from_image_msg(message: Any) -> bool:
-        """当引用消息已被撤回或失效导致 NTQQ 立即拒绝 reply+image 时，剥离 reply 段后重试一次。"""
+        """当引用消息已被撤回或超时未送达时，原地剥离 reply 段后重试一次。"""
         if not HandlersMixin._has_reply_and_image(message):
             return False
         kept = [
@@ -572,87 +675,141 @@ class HandlersMixin:
             return True
         return False
 
-    async def _verify_group_msg_delivered(
-        self, bot_inst: Any, gid: Any, send_start_ts: int
-    ) -> Optional[Any]:
-        """当 OneBot/NapCat 返回 retcode=1200 或超时异常时，通过 get_group_msg_history 真实校验本条图片消息是否已在群内送达。
-        返回:
-          - 真实送达的 message_id（int/str）：确认已送达
-          - None：确认未在群历史中查到送达记录（或无法核验时返回 None 交由上层决定）
+    async def _verify_group_image_delivered(
+        self, gid: Any, since_ts: float, bot_inst: Any = None, self_id: Any = None
+    ) -> Tuple[str, Optional[Any]]:
+        """发送超时后通过 get_group_msg_history 核实图片是否实际送达群聊。
+
+        返回 ("delivered", message_id) / ("not_delivered", None) / ("unknown", None)。
         """
+        if bot_inst is None:
+            bot_inst = getattr(self, "_latest_bot", None)
         if bot_inst is None or not gid:
-            return None
+            return ("unknown", None)
         try:
-            gid_int = int(str(gid).strip())
+            gid_str = str(gid).strip()
+            gid_val: Any = int(gid_str) if gid_str.isdigit() else gid_str
         except Exception:
-            return None
+            return ("unknown", None)
+        orig_call = (
+            getattr(bot_inst, "_msg2img_orig_call_action", None)
+            or getattr(bot_inst, "call_action", None)
+        )
+        hist_fn = getattr(bot_inst, "get_group_msg_history", None)
+        has_real_hist = (
+            isinstance(getattr(bot_inst, "__dict__", None), dict)
+            and (
+                "_msg2img_orig_call_action" in bot_inst.__dict__
+                or "call_action" in bot_inst.__dict__
+                or "get_group_msg_history" in bot_inst.__dict__
+            )
+        ) or any(
+            "call_action" in getattr(c, "__dict__", {})
+            or "get_group_msg_history" in getattr(c, "__dict__", {})
+            for c in getattr(type(bot_inst), "__mro__", ())
+        )
+        if not has_real_hist:
+            return ("unknown", None)
         try:
-            await asyncio.sleep(1.5)
-            orig_call = getattr(bot_inst, "_msg2img_orig_call_action", None) or getattr(bot_inst, "call_action", None)
-            resp = None
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        extra = {"self_id": self_id} if self_id is not None else {}
+        resp = None
+        try:
             if callable(orig_call):
                 try:
                     resp = await asyncio.wait_for(
-                        orig_call("get_group_msg_history", group_id=gid_int, count=6),
-                        timeout=4.0,
+                        orig_call("get_group_msg_history", group_id=gid_val, count=6, **extra),
+                        timeout=5.0,
                     )
                 except TypeError:
                     resp = await asyncio.wait_for(
-                        orig_call("get_group_msg_history", {"group_id": gid_int, "count": 6}),
-                        timeout=4.0,
+                        orig_call("get_group_msg_history", {"group_id": gid_val, "count": 6, **extra}),
+                        timeout=5.0,
                     )
-            if not isinstance(resp, dict):
-                return None
-            data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
-            msgs = data.get("messages") if isinstance(data, dict) else None
-            if not isinstance(msgs, list):
-                return None
-            for m in reversed(msgs):
-                if not isinstance(m, dict):
-                    continue
-                m_time = int(m.get("time") or 0)
-                if m_time and m_time < send_start_ts - 4:
-                    continue
-                self_id = str(m.get("self_id") or "").strip()
-                sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
-                uid = str(sender.get("user_id") or m.get("user_id") or "").strip()
-                if self_id and uid and uid != self_id:
-                    continue
-                raw_m = str(m.get("raw_message") or "")
-                m_segs = m.get("message")
-                has_img = "[CQ:image" in raw_m or (
-                    isinstance(m_segs, list)
-                    and any(isinstance(s, dict) and s.get("type") == "image" for s in m_segs)
+            elif callable(hist_fn):
+                resp = await asyncio.wait_for(
+                    hist_fn(group_id=gid_val, count=6, **extra),
+                    timeout=5.0,
                 )
-                if has_img:
-                    return m.get("message_id") or True
-        except Exception as e:
-            logger.debug(f"[{PLUGIN_NAME}] 校验群 {gid} 历史消息送达状态异常: {e}")
-        return None
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return ("unknown", None)
+        msgs = None
+        if isinstance(resp, dict):
+            if isinstance(resp.get("messages"), list):
+                msgs = resp["messages"]
+            elif isinstance(resp.get("data"), dict) and isinstance(resp["data"].get("messages"), list):
+                msgs = resp["data"]["messages"]
+            elif isinstance(resp.get("data"), list):
+                msgs = resp["data"]
+        elif isinstance(resp, list):
+            msgs = resp
+        if not isinstance(msgs, list):
+            return ("unknown", None)
+        floor_ts = int(since_ts) - 5
+        for m in reversed(msgs):
+            if not isinstance(m, dict):
+                continue
+            try:
+                m_time = int(m.get("time") or 0)
+            except Exception:
+                m_time = 0
+            if m_time > 0 and m_time < floor_ts:
+                continue
+            sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
+            uid = m.get("user_id") or sender.get("user_id")
+            sid = m.get("self_id") or self_id
+            if uid is not None and sid is not None and str(uid) != str(sid):
+                continue
+            m_segs = m.get("message")
+            has_img = False
+            if isinstance(m_segs, list):
+                has_img = any(
+                    isinstance(s, dict) and s.get("type") == "image" for s in m_segs
+                )
+            elif isinstance(m_segs, str):
+                has_img = "[CQ:image" in m_segs
+            if not has_img and "[CQ:image" in str(m.get("raw_message") or ""):
+                has_img = True
+            if has_img:
+                return ("delivered", m.get("message_id"))
+        return ("not_delivered", None)
+
+    def _send_shrink_limit_bytes(self) -> int:
+        """发送前预降质体积阈值（字节），0=关闭。"""
+        try:
+            kb = int(self.cfg_mgr.config.get("img_send_shrink_kb", 250))
+        except Exception:
+            kb = 250
+        return max(0, kb) * 1024
 
     async def _invoke_send_with_guard(
         self, fn, label: str, *args, _bot: Any = None, _gid: Any = None, **kwargs
     ):
-        """发送守卫（兼顾「真实送达校验防发两张图」与「未送达自动补发兜底」）：
-        1. 若快速失败（耗时 < 4.5s 且非 NTEvent 监听超时）且消息同时含 reply + image（常见于原消息被撤回或引用 ID 失效），
-           原地剥离 reply 段后补发一次，确保图片能发出去。
-        2. 若发生发送超时（retcode=1200 或 timeout），调用 get_group_msg_history 真实核验群内是否已发出：
-           - 已实际送达：返回已送达回执，绝不重复补发；
-           - 确认未送达：剥离可能失效的 reply 段后重试补发一次，避免消息被吞！
-        """
+        """发送前置体积守卫 + 超时送达核实与安全补发。"""
         _msg = self._extract_send_message(args, kwargs)
+        if _msg is not None:
+            limit = self._send_shrink_limit_bytes()
+            if limit > 0:
+                try:
+                    await asyncio.to_thread(self._shrink_oversized_images, _msg, limit)
+                except Exception:
+                    pass
         t0 = time.monotonic()
-        send_start_ts = int(time.time())
+        _send_ts = time.time()
         try:
             return await fn(*args, **kwargs)
         except Exception as e:
             elapsed = time.monotonic() - t0
-            err_s = f"{e} {repr(e)}"
-            is_nt_listener_timeout = "Timeout: NTEvent" in err_s or "timed out" in err_s.lower()
             if (
                 _msg is not None
                 and elapsed < 4.5
-                and not is_nt_listener_timeout
+                and not self._is_send_timeout_error(e)
                 and self._strip_reply_from_image_msg(_msg)
             ):
                 logger.warning(
@@ -663,38 +820,57 @@ class HandlersMixin:
                 except Exception as e_retry:
                     e = e_retry
             if self._is_send_timeout_error(e):
-                delivered_mid = await self._verify_group_msg_delivered(_bot, _gid, send_start_ts)
-                if delivered_mid is not None:
-                    logger.warning(
-                        f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
-                        f"经群历史消息真实校验确认已送达(message_id={delivered_mid})，不重复补发"
-                    )
-                    return {
-                        "message_id": None if delivered_mid is True else delivered_mid,
-                        "status": "ok",
-                        "retcode": 0,
-                    }
-                logger.warning(
-                    f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
-                    f"经群历史消息真实校验确认未送达，正在执行补发兜底..."
-                )
-                if _msg is not None:
-                    self._strip_reply_from_image_msg(_msg)
-                try:
-                    return await fn(*args, **kwargs)
-                except Exception as e2:
-                    delivered_mid2 = await self._verify_group_msg_delivered(_bot, _gid, send_start_ts)
-                    if delivered_mid2 is not None:
-                        logger.info(
-                            f"[{PLUGIN_NAME}] {label} 补发后经群历史消息校验确认已送达(message_id={delivered_mid2})"
+                eff_gid = self._extract_send_gid(args, kwargs, _gid)
+                self_id = kwargs.get("self_id")
+                if self_id is None:
+                    for a in args:
+                        if isinstance(a, dict) and a.get("self_id") is not None:
+                            self_id = a.get("self_id")
+                            break
+                if eff_gid and self._has_image_seg(_msg):
+                    try:
+                        v_status, v_mid = await self._verify_group_image_delivered(
+                            eff_gid, _send_ts, bot_inst=_bot, self_id=self_id
                         )
-                        return {
-                            "message_id": None if delivered_mid2 is True else delivered_mid2,
-                            "status": "ok",
-                            "retcode": 0,
-                        }
-                    logger.error(f"[{PLUGIN_NAME}] {label} 补发仍失败且未送达: {e2}")
-                    raise e2
+                    except TypeError:
+                        v_status, v_mid = await self._verify_group_image_delivered(
+                            eff_gid, _send_ts
+                        )
+                    if v_status == "delivered":
+                        logger.info(
+                            f"[{PLUGIN_NAME}] {label} 响应超时({e})，"
+                            f"群历史确认图片已送达(message_id={v_mid})，跳过重发"
+                        )
+                        return {"message_id": v_mid, "status": "ok", "retcode": 0}
+                    if v_status == "not_delivered":
+                        try:
+                            await asyncio.to_thread(
+                                self._shrink_oversized_images, _msg, 1
+                            )
+                        except Exception:
+                            pass
+                        stripped = self._strip_reply_from_image_msg(_msg)
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] {label} 发送超时({e})且确认未送达，"
+                            f"已降质图片{'并剥离引用' if stripped else ''}后补发一次"
+                        )
+                        try:
+                            return await fn(*args, **kwargs)
+                        except Exception as e2:
+                            if self._is_send_timeout_error(e2):
+                                logger.warning(
+                                    f"[{PLUGIN_NAME}] {label} 补发再次超时({e2})，停止重试"
+                                )
+                                return {
+                                    "message_id": None,
+                                    "status": "timeout",
+                                    "retcode": 1200,
+                                }
+                            raise
+                logger.warning(
+                    f"[{PLUGIN_NAME}] {label} 发送超时({e})，"
+                    f"消息可能已实际送达，不自动重发以避免重复"
+                )
             raise
 
     @staticmethod

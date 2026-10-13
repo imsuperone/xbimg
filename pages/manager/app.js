@@ -1135,14 +1135,6 @@ async def render_text_to_image(text: str):
     if (typeof raw === "string") { try { raw = JSON.parse(raw||"{}"); } catch(e){ raw={}; } }
     return (raw && typeof raw==="object") ? raw : {};
   }
-  function getGroupScales() {
-    const cfgs = getGroupConfigs();
-    let raw = currentConfig.group_font_scales;
-    if (typeof raw === "string") { try { raw = JSON.parse(raw||"{}"); } catch(e){ raw={}; } }
-    const res = (raw && typeof raw==="object") ? Object.assign({}, raw) : {};
-    Object.keys(cfgs).forEach(k=>{ if(cfgs[k] && cfgs[k].font_scale) res[k]=cfgs[k].font_scale; });
-    return res;
-  }
 
   function getKeywordPresets() {
     let p = currentConfig.keyword_presets;
