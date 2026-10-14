@@ -207,10 +207,12 @@ class HandlersMixin:
 
     @staticmethod
     def _is_send_timeout_error(exc: BaseException) -> bool:
-        """是否为 OneBot/NapCat 发送超时（ActionFailed retcode=1200）。
+        """是否为 OneBot/NapCat 发送超时（ActionFailed retcode=1200）或原生网络超时。
 
         必须见到超时标记才认定：仅类名含 ActionFailed 可能是业务拒发，
         误判会导致超时日志掩盖真实错误。"""
+        if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+            return True
         try:
             msg = str(exc)
         except Exception:
@@ -599,7 +601,9 @@ class HandlersMixin:
             try:
                 if not path.is_file() or path.stat().st_size <= max_bytes:
                     continue
-                shrunk = HandlersMixin._prepare_shrunk_image(Image.open(path))
+                with Image.open(path) as raw_img:
+                    raw_img.load()
+                    shrunk = HandlersMixin._prepare_shrunk_image(raw_img)
                 if shrunk is None:
                     continue
                 tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{os.urandom(3).hex()}")
@@ -1118,6 +1122,12 @@ class HandlersMixin:
             if callable(orig_send):
                 try:
                     bot_inst.send_group_msg = orig_send
+                except Exception:
+                    pass
+            orig_priv = HandlersMixin._take_bot_orig(bot_inst, "_msg2img_orig_send_private_msg")
+            if callable(orig_priv):
+                try:
+                    bot_inst.send_private_msg = orig_priv
                 except Exception:
                     pass
             orig_call = HandlersMixin._take_bot_orig(bot_inst, "_msg2img_orig_call_action")

@@ -201,6 +201,9 @@ class GroupsMixin:
         if mode == "whitelist":
             tokens = self._parsed_group_list()
             return self._match_group_tokens(gid, tokens)
+        if mode == "blacklist":
+            tokens = self._parsed_group_list()
+            return not self._match_group_tokens(gid, tokens)
         return False
 
 

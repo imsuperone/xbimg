@@ -179,7 +179,7 @@ class CommandsMixin:
             g_mode_label = group_map.get(g_mode, "仅白名单群生效")
             if g_mode in ("whitelist", "blacklist"):
                 g_mode_label += f"（已设 {len(g_tokens)} 群）"
-            stats = getattr(self.cfg_mgr, "stats", {}) or {}
+            stats = self.cfg_mgr.get_stats() if hasattr(self.cfg_mgr, "get_stats") else (getattr(self.cfg_mgr, "stats", {}) or {})
             total_r = int(stats.get("total_rendered", 0) or 0)
             total_v = int(stats.get("violations_blocked", 0) or 0)
             mod_on = bool(cfg.get("enable_keywords_moderation", True) and cfg.get("moderation_mode") != "none")
