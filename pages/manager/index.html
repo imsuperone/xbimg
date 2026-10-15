@@ -57,19 +57,19 @@
     <nav class="category-tabs-bar">
       <button type="button" class="cat-tab active" data-tab="visual">
         <span class="cat-icon">🎨</span>
-        <span class="cat-title">视觉与排版</span>
+        <span class="cat-title">排版样式</span>
       </button>
       <button type="button" class="cat-tab" data-tab="fonts">
         <span class="cat-icon">🔤</span>
-        <span class="cat-title">字体与表情符号</span>
+        <span class="cat-title">字体表情</span>
       </button>
       <button type="button" class="cat-tab" data-tab="moderation">
         <span class="cat-icon">🛡️</span>
-        <span class="cat-title">安全审查与遮蔽</span>
+        <span class="cat-title">敏感词过滤</span>
       </button>
       <button type="button" class="cat-tab" data-tab="groups">
         <span class="cat-icon">👥</span>
-        <span class="cat-title">群聊生效与配置</span>
+        <span class="cat-title">群开关</span>
       </button>
       <button type="button" class="cat-tab cat-tab-preview" data-tab="preview">
         <span class="cat-icon">👁️</span>
@@ -80,8 +80,9 @@
     <!-- Main Workspace (Single Column, Tab-Driven Architecture) -->
     <main class="main-content-wrap" id="mainWorkspace">
 
-      <!-- ==================== Tab 1: 视觉与排版 ==================== -->
+      <!-- ==================== Tab 1: 排版样式 ==================== -->
       <section class="settings-section active" data-section="visual">
+        <div class="sub-group-header">🚀 基础与触发</div>
         <!-- Switch Card: Master Engine Switch -->
         <div class="m3-card">
           <div class="card-row-split">
@@ -131,6 +132,7 @@
           </div>
         </div>
 
+        <div class="sub-group-header">🎨 外观与主题</div>
         <!-- Card: Visual Styles, Themes & Starfield -->
         <div class="m3-card">
           <h2 class="card-title">视觉样式与排版主题</h2>
@@ -190,6 +192,7 @@
           </div>
         </div>
 
+        <div class="sub-group-header">📦 尺寸与体积</div>
         <!-- Card: Output File Size & Quality -->
         <div class="m3-card">
           <h2 class="card-title">输出图片体积优化</h2>
