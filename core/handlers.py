@@ -213,13 +213,17 @@ class HandlersMixin:
         误判会导致超时日志掩盖真实错误。"""
         if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
             return True
+        if getattr(exc, "retcode", None) == 1200 or getattr(exc, "status_code", None) == 1200:
+            return True
         try:
-            msg = str(exc)
+            msg = f"{exc} {repr(exc)} {getattr(exc, 'message', '')} {getattr(exc, 'wording', '')}".lower()
         except Exception:
             return False
         return (
             "retcode=1200" in msg
-            or "timeout" in msg.lower()
+            or "retcode': 1200" in msg
+            or "timeout" in msg
+            or "nodeikernelmsgservice" in msg
         )
 
     @staticmethod
@@ -846,35 +850,19 @@ class HandlersMixin:
                             f"群历史确认图片已送达(message_id={v_mid})，跳过重发"
                         )
                         return {"message_id": v_mid, "status": "ok", "retcode": 0}
-                    if v_status == "not_delivered":
-                        try:
-                            await asyncio.to_thread(
-                                self._shrink_oversized_images, _msg, 1
-                            )
-                        except Exception:
-                            pass
-                        stripped = self._strip_reply_from_image_msg(_msg)
-                        logger.warning(
-                            f"[{PLUGIN_NAME}] {label} 发送超时({e})且确认未送达，"
-                            f"已降质图片{'并剥离引用' if stripped else ''}后补发一次"
-                        )
-                        try:
-                            return await fn(*args, **kwargs)
-                        except Exception as e2:
-                            if self._is_send_timeout_error(e2):
-                                logger.warning(
-                                    f"[{PLUGIN_NAME}] {label} 补发再次超时({e2})，停止重试"
-                                )
-                                return {
-                                    "message_id": None,
-                                    "status": "timeout",
-                                    "retcode": 1200,
-                                }
-                            raise
+                    # NapCat/OneBot retcode=1200/NTEvent Timeout 说明底层 NTQQ 核心已接单投递，
+                    # 仅等待回调事件超时。历史消息写入有秒级延迟，短时查不到绝不代表未送达。
+                    # 严禁盲目二次补发（否则群里必发两张图），严禁向上裸抛（否则上游重试导致双发）。
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] {label} 发送响应超时({e})，"
+                        f"QQ NT 核心已接单投递，不自动补发以杜绝重复图片"
+                    )
+                    return {"message_id": v_mid or 0, "status": "ok", "retcode": 0}
                 logger.warning(
                     f"[{PLUGIN_NAME}] {label} 发送超时({e})，"
                     f"消息可能已实际送达，不自动重发以避免重复"
                 )
+                return {"message_id": 0, "status": "ok", "retcode": 0}
             raise
 
     @staticmethod
