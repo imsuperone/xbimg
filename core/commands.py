@@ -79,12 +79,18 @@ class CommandsMixin:
             table = {
                 "style": {
                     "key": "style",
-                    "aliases": {"ios": "ios", "android16": "android16", "android": "android16"},
+                    "aliases": {
+                        "ios": "ios", "android16": "android16", "android": "android16",
+                        "minimal": "minimal", "极简": "minimal", "极简黑白": "minimal",
+                        "paper": "paper", "书卷": "paper", "暖阳书卷": "paper",
+                        "bento": "bento", "便当": "bento", "现代便当": "bento",
+                        "nordic": "nordic", "北欧": "nordic", "冷杉": "nordic", "北欧冷杉": "nordic",
+                    },
                     "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
                     "set_ok": "已将【{t}】的视觉风格设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group style ios / android16 / default [群号]",
+                    "usage": "用法：/xbimg group style ios / android16 / minimal / paper / bento / nordic / default [群号]",
                 },
                 "theme": {
                     "key": "theme_mode",
@@ -100,7 +106,15 @@ class CommandsMixin:
             hit = spec["aliases"].get(value)
             spec["hit"] = hit
             if kind == "style":
-                spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(hit.upper() if hit else ""))
+                style_disp = {
+                    "ios": "iOS 磨砂卡片",
+                    "android16": "Android 16 质感胶囊",
+                    "minimal": "极简黑白",
+                    "paper": "暖阳书卷",
+                    "bento": "现代便当",
+                    "nordic": "北欧冷杉",
+                }
+                spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(style_disp.get(hit, hit.upper()) if hit else ""))
             else:
                 spec["set_ok"] = spec["set_ok"].format(
                     t="{t}", v=("深色暗黑" if hit == "dark" else "浅色明亮"))
@@ -272,12 +286,37 @@ class CommandsMixin:
             except Exception:
                 yield event.plain_result("用法：/xbimg minlen <1-1000>")
         elif sub == "style":
-            if arg in ("ios", "android16"):
-                cfg["style"] = arg
+            style_map = {
+                "ios": "ios", "android16": "android16", "android": "android16",
+                "minimal": "minimal", "极简": "minimal", "极简黑白": "minimal",
+                "paper": "paper", "书卷": "paper", "暖阳书卷": "paper",
+                "bento": "bento", "便当": "bento", "现代便当": "bento",
+                "nordic": "nordic", "北欧": "nordic", "冷杉": "nordic", "北欧冷杉": "nordic",
+            }
+            target_style = style_map.get(str(arg).lower())
+            if target_style:
+                cfg["style"] = target_style
                 self.cfg_mgr.save()
-                yield event.plain_result(f"全局视觉风格已切换为：{arg.upper()}")
+                style_names = {
+                    "ios": "iOS 磨砂卡片",
+                    "android16": "Android 16 质感胶囊",
+                    "minimal": "极简黑白 (Clean Minimal)",
+                    "paper": "暖阳书卷 (Editorial Paper)",
+                    "bento": "现代便当 (Modern Bento)",
+                    "nordic": "北欧冷杉 (Nordic Frost)",
+                }
+                yield event.plain_result(f"全局视觉风格已切换为：{style_names.get(target_style, target_style)}")
             else:
-                yield event.plain_result("用法：/xbimg style ios 或 /xbimg style android16")
+                yield event.plain_result(
+                    "用法：/xbimg style <风格>\n"
+                    "支持风格：\n"
+                    "  - ios: iOS 磨砂卡片\n"
+                    "  - android16: Android 16 质感胶囊\n"
+                    "  - minimal: 极简黑白 (Clean Minimal)\n"
+                    "  - paper: 暖阳书卷 (Editorial Paper)\n"
+                    "  - bento: 现代便当 (Modern Bento)\n"
+                    "  - nordic: 北欧冷杉 (Nordic Frost)"
+                )
         elif sub in ("theme", "配色"):
             if arg in ("light", "浅色"):
                 cfg["theme_mode"] = "light"
@@ -607,7 +646,7 @@ class CommandsMixin:
                     "[单群指令]（末尾可加 [群号] 操作指定群）\n"
                     "  /xbimg group on | off [群号] — 开启/关闭本群转图\n"
                     "  /xbimg group set <50-500> [群号] — 单群字号\n"
-                    "  /xbimg group style ios|android16|default [群号]\n"
+                    "  /xbimg group style ios|android16|minimal|paper|bento|nordic|default [群号]\n"
                     "  /xbimg group theme light|dark|default [群号]\n"
                     "  /xbimg group kw <词库ID>|default [群号]\n"
                     "  /xbimg group ttf <字体ID> [群号] ｜ /xbimg group list\n"

@@ -1,4 +1,4 @@
-# 消息转图助手 v1.3.32
+# 消息转图助手 v1.3.33
 
 > 将机器人发出的纯文本消息渲染为高品质图片，附内容审查与 Web 控制台。
 
@@ -9,13 +9,14 @@
 本插件基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 开发。AstrBot 是一个松耦合、异步、支持多消息平台部署，具有易用的插件系统和完善的大语言模型（LLM）接入功能的聊天机器人及开发框架，使用文档见 [docs.astrbot.app](https://docs.astrbot.app)。
 
 - 插件 ID：`astrbot_plugin_xbimg`
-- 当前版本：`v1.3.32`
+- 当前版本：`v1.3.33`
 - 运行要求：AstrBot `>=3.4.0`，平台 `aiocqhttp`
 - 仓库：https://github.com/imsuperone/xbimg
 
 ## 功能
 
-- 双主题：iOS 磨砂玻璃风格与 Android 16 胶囊卡片风格。
+- 6 款极简美学风格：拒绝浓厚 AI 浮夸感，坚持排版美感与可读性（iOS 磨砂卡片、Android 16 质感胶囊、极简黑白、暖阳书卷、现代便当、北欧冷杉），Web 控制台支持下拉选择与实时效果预览。
+- 配色主题：浅色与深色暗黑双模式，完美适配全风格。
 - 星空背景：随机十字星、星芒与光晕粒子，密度可调。
 - 画质档位：原画、均衡、极小三档可选。
 - 链接策略：遇 URL 转图、保留纯文本或附提取后的纯文本链接。
@@ -38,7 +39,7 @@
 | `/xbimg on` / `off` | 总开关 |
 | `/xbimg trigger always` / `violation` | 始终转图 / 仅违规时转图 |
 | `/xbimg minlen <1-1000>` | 最小触发字数 |
-| `/xbimg style ios` / `android16` | 全局视觉风格 |
+| `/xbimg style <ios\|android16\|minimal\|paper\|bento\|nordic>` | 全局视觉风格切换 |
 | `/xbimg theme light` / `dark` | 全局浅色 / 深色 |
 | `/xbimg star on` / `off`、`density sparse\|medium\|dense` | 星空背景与密度 |
 | `/xbimg quality lossless` / `balanced` / `compact` | 原画 / 均衡 / 极小 |
@@ -57,7 +58,7 @@
 | `/xbimg group` | 本群配置卡片与指南 |
 | `/xbimg group on` / `off [群号]` | 开启或关闭指定群聊转图 |
 | `/xbimg group set <50-500> [群号]` | 单群字体大小 |
-| `/xbimg group style / theme / kw ... [群号]` | 单群风格、主题、词库（`default` 跟随全局） |
+| `/xbimg group style / theme / kw ... [群号]` | 单群风格（支持 6 款风格）、主题、词库（`default` 跟随全局） |
 | `/xbimg group ttf <字体id> [群号]` | 单群精选字体 |
 | `/xbimg group list` / `reset [群号]` / `test [群号]` | 列表 / 恢复跟随全局 / 效果测试 |
 

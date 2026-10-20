@@ -139,15 +139,19 @@
           <p class="card-desc">自定义生成图片的视觉外观、配色主题与背景效果。</p>
 
           <div class="form-group">
-            <label class="form-label">默认渲染样式</label>
-            <div class="m3-segmented-control" id="segStyle">
-              <button type="button" class="seg-item active" data-val="ios">
-                iOS 磨砂玻璃
-              </button>
-              <button type="button" class="seg-item" data-val="android16">
-                Android 16 质感
-              </button>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+              <label class="form-label" for="cfgStyle" style="margin-bottom:0;">默认转图风格</label>
+              <span id="cfgStyleBadge" style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:var(--m3-sys-color-surface-container-high); color:var(--m3-sys-color-primary);">iOS 磨砂卡片</span>
             </div>
+            <select id="cfgStyle" class="m3-input" style="cursor:pointer; font-weight:600;">
+              <option value="ios">📱 iOS 磨砂卡片（Apple 经典透白拟态 · 灵动红黄绿）</option>
+              <option value="android16">🤖 Android 16（Material 3 质感胶囊 · 温暖大地色）</option>
+              <option value="minimal">📐 极简黑白（Clean Minimal · 瑞士国际排版 · 纯粹利落）</option>
+              <option value="paper">📖 暖阳书卷（Editorial Paper · 温润人文纸感 · 朱砂点缀）</option>
+              <option value="bento">🍱 现代便当（Modern Bento · 现代模块美学 · 科技靛蓝）</option>
+              <option value="nordic">🌲 北欧冷杉（Nordic Frost · 冷杉青石灰 · 清冷静谧）</option>
+            </select>
+            <span id="cfgStyleDesc" class="field-hint" style="margin-top:6px; display:block;">Apple 磨砂透白卡片，灵动三色红黄绿圆点，经典 SF 蓝强调色。</span>
           </div>
 
           <div class="form-group">

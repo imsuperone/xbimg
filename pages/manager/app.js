@@ -649,12 +649,32 @@ async def render_text_to_image(text: str):
     return `${(v / 1000).toFixed(1)}s`;
   }
 
+  function updateStyleHint(style) {
+    const badge = document.getElementById("cfgStyleBadge");
+    const desc = document.getElementById("cfgStyleDesc");
+    const hints = {
+      ios: { badge: "iOS 磨砂卡片", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，经典 SF 蓝强调色。" },
+      android16: { badge: "Android 16", desc: "Material 3 Expressive 质感胶囊，大圆角曲线与温暖大地色系。" },
+      minimal: { badge: "极简黑白", desc: "瑞士国际主义排版，纯黑白灰无极，极致可读性，干净纯粹利落。" },
+      paper: { badge: "暖阳书卷", desc: "温润象牙暖米纸墨质感，典雅朱砂印泥红点缀，护眼人文手账感。" },
+      bento: { badge: "现代便当", desc: "当代科技模块卡片美学，科技靛蓝点缀与圆角便当胶囊标签。" },
+      nordic: { badge: "北欧冷杉", desc: "低饱和冷杉灰绿与青石灰配色，冷淡克制，沉静自然抗视疲劳。" }
+    };
+    const h = hints[style] || hints.ios;
+    if (badge) badge.textContent = h.badge;
+    if (desc) desc.textContent = h.desc;
+  }
+
   function renderConfigToUI(cfg) {
     const enableEl = document.getElementById("cfgEnable");
     if (enableEl) enableEl.checked = Boolean(cfg.enable ?? true);
 
     setSegmentedValue("segRenderTrigger", cfg.render_trigger || "always");
-    setSegmentedValue("segStyle", cfg.style || "ios");
+    const cfgStyleEl = document.getElementById("cfgStyle");
+    if (cfgStyleEl) {
+      cfgStyleEl.value = cfg.style || "ios";
+      updateStyleHint(cfgStyleEl.value);
+    }
     setSegmentedValue("segTheme", cfg.theme_mode || "light");
 
     const starBgEl = document.getElementById("cfgStarBg");
@@ -958,7 +978,7 @@ async def render_text_to_image(text: str):
       platform_preset: document.getElementById("sel_platform_preset")?.value || "custom",
       allowed_platforms: document.getElementById("cfgAllowedPlatforms")?.value.trim() || "onebot, aiocqhttp",
       render_trigger: getSegmentedValue("segRenderTrigger", "always"),
-      style: getSegmentedValue("segStyle", "ios"),
+      style: document.getElementById("cfgStyle")?.value || "ios",
       theme_mode: getSegmentedValue("segTheme", "light"),
       star_background: starBgEl ? starBgEl.checked : true,
       star_density: getSegmentedValue("segStarDensity", "medium"),
@@ -1456,7 +1476,15 @@ async def render_text_to_image(text: str):
       const curKw = c.keyword_preset || "";
       const curTrig = c.render_trigger || "";
       const curMinLen = (c.min_length_threshold !== undefined && c.min_length_threshold !== null && c.min_length_threshold !== "") ? c.min_length_threshold : "";
-      const globalStyleName = (currentConfig.style || "ios").toUpperCase();
+      const STYLE_NAMES = {
+        ios: "iOS 磨砂卡片",
+        android16: "Android 16",
+        minimal: "极简黑白",
+        paper: "暖阳书卷",
+        bento: "现代便当",
+        nordic: "北欧冷杉"
+      };
+      const globalStyleName = STYLE_NAMES[currentConfig.style] || (currentConfig.style || "ios").toUpperCase();
       const globalThemeName = (currentConfig.theme_mode === "dark") ? "深色" : "浅色";
 
       const row=document.createElement("div");
@@ -1481,8 +1509,12 @@ async def render_text_to_image(text: str):
         `    <label>视觉风格</label>` +
         `    <select class="sg-select sg-style" data-gid="${escapeHtml(gid)}">` +
         `      <option value=""${!curStyle ? " selected" : ""}>沿用全局设置（${globalStyleName}）</option>` +
-        `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>iOS 磨砂玻璃</option>` +
-        `      <option value="android16"${curStyle === "android16" ? " selected" : ""}>Android 16 M3</option>` +
+        `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>📱 iOS 磨砂卡片</option>` +
+        `      <option value="android16"${curStyle === "android16" ? " selected" : ""}>🤖 Android 16</option>` +
+        `      <option value="minimal"${curStyle === "minimal" ? " selected" : ""}>📐 极简黑白</option>` +
+        `      <option value="paper"${curStyle === "paper" ? " selected" : ""}>📖 暖阳书卷</option>` +
+        `      <option value="bento"${curStyle === "bento" ? " selected" : ""}>🍱 现代便当</option>` +
+        `      <option value="nordic"${curStyle === "nordic" ? " selected" : ""}>🌲 北欧冷杉</option>` +
         `    </select>` +
         `  </div>` +
         `  <div class="sg-item">` +
@@ -2013,7 +2045,8 @@ async def render_text_to_image(text: str):
 
     const starBgEl = document.getElementById("cfgStarBg");
     const themeMode = getSegmentedValue("segTheme", "light");
-    const styleMode = getSegmentedValue("segStyle", "ios");
+    const cfgStyleEl = document.getElementById("cfgStyle");
+    const styleMode = cfgStyleEl ? cfgStyleEl.value : getSegmentedValue("segStyle", "ios");
     const mosaicMode = resolvePreviewMosaicMode();
 
     // 后端优先使用 text 明文；不再双发 text_base64（大文本体积减半）
@@ -2538,6 +2571,11 @@ async def render_text_to_image(text: str):
           txt.value = (presets[activeKey].keywords || "").trim();
         }
         triggerAutoSave();
+      }
+      if (e.target && e.target.id === "cfgStyle") {
+        updateStyleHint(e.target.value);
+        triggerAutoSave();
+        schedulePreview();
       }
       if (e.target && e.target.id === "fontSelectDropdown") {
         // 持久化目录字体下拉选择即时生效

@@ -2224,6 +2224,142 @@ THEMES = {
         divider=(50, 52, 58, 180),
         star_colors=[(255, 210, 130), (165, 215, 170), (210, 150, 220), (255, 225, 140), (248, 248, 248)],
     ),
+    ("minimal", "light"): ThemeColors(
+        bg_gradient_start=(246, 246, 248),
+        bg_gradient_end=(236, 236, 238),
+        card_bg=(255, 255, 255, 255),
+        card_border=(222, 222, 226, 220),
+        card_shadow=(10, 10, 15, 16),
+        text_primary=(18, 18, 20),
+        text_secondary=(72, 72, 78),
+        text_muted=(140, 140, 148),
+        accent=(32, 32, 36),
+        accent_bg=(0, 0, 0, 12),
+        code_bg=(246, 246, 248, 255),
+        code_border=(224, 224, 228, 200),
+        code_text=(24, 24, 26),
+        divider=(228, 228, 232, 200),
+        star_colors=[(180, 180, 185), (200, 200, 205), (160, 160, 165), (210, 210, 215), (240, 240, 240)],
+    ),
+    ("minimal", "dark"): ThemeColors(
+        bg_gradient_start=(18, 18, 20),
+        bg_gradient_end=(10, 10, 12),
+        card_bg=(26, 26, 28, 250),
+        card_border=(255, 255, 255, 28),
+        card_shadow=(0, 0, 0, 90),
+        text_primary=(242, 242, 245),
+        text_secondary=(160, 160, 168),
+        text_muted=(105, 105, 112),
+        accent=(225, 225, 230),
+        accent_bg=(255, 255, 255, 24),
+        code_bg=(18, 18, 20, 255),
+        code_border=(48, 48, 52, 180),
+        code_text=(225, 225, 230),
+        divider=(42, 42, 46, 180),
+        star_colors=[(190, 190, 195), (150, 150, 155), (170, 170, 175), (210, 210, 215), (230, 230, 235)],
+    ),
+    ("paper", "light"): ThemeColors(
+        bg_gradient_start=(248, 245, 238),
+        bg_gradient_end=(238, 233, 222),
+        card_bg=(255, 253, 249, 250),
+        card_border=(228, 220, 206, 200),
+        card_shadow=(55, 42, 30, 18),
+        text_primary=(42, 36, 32),
+        text_secondary=(94, 82, 74),
+        text_muted=(152, 140, 130),
+        accent=(175, 62, 45),
+        accent_bg=(175, 62, 45, 20),
+        code_bg=(245, 241, 233, 255),
+        code_border=(225, 217, 202, 200),
+        code_text=(46, 38, 30),
+        divider=(226, 218, 205, 200),
+        star_colors=[(230, 190, 140), (210, 175, 130), (220, 160, 130), (240, 210, 160), (250, 240, 220)],
+    ),
+    ("paper", "dark"): ThemeColors(
+        bg_gradient_start=(28, 24, 22),
+        bg_gradient_end=(16, 14, 13),
+        card_bg=(36, 32, 29, 242),
+        card_border=(255, 255, 255, 24),
+        card_shadow=(0, 0, 0, 85),
+        text_primary=(240, 235, 228),
+        text_secondary=(174, 166, 156),
+        text_muted=(116, 108, 100),
+        accent=(226, 120, 92),
+        accent_bg=(226, 120, 92, 34),
+        code_bg=(25, 22, 20, 255),
+        code_border=(62, 55, 50, 180),
+        code_text=(230, 224, 216),
+        divider=(54, 48, 44, 180),
+        star_colors=[(235, 180, 130), (215, 150, 120), (200, 170, 140), (245, 200, 150), (240, 230, 220)],
+    ),
+    ("bento", "light"): ThemeColors(
+        bg_gradient_start=(240, 244, 250),
+        bg_gradient_end=(228, 234, 244),
+        card_bg=(255, 255, 255, 250),
+        card_border=(216, 225, 238, 220),
+        card_shadow=(20, 36, 64, 20),
+        text_primary=(22, 28, 42),
+        text_secondary=(72, 84, 106),
+        text_muted=(132, 145, 166),
+        accent=(54, 88, 224),
+        accent_bg=(54, 88, 224, 22),
+        code_bg=(242, 245, 252, 255),
+        code_border=(216, 225, 240, 200),
+        code_text=(26, 34, 50),
+        divider=(226, 233, 244, 200),
+        star_colors=[(80, 125, 240), (115, 165, 255), (135, 205, 240), (175, 195, 255), (255, 255, 255)],
+    ),
+    ("bento", "dark"): ThemeColors(
+        bg_gradient_start=(16, 20, 29),
+        bg_gradient_end=(10, 13, 19),
+        card_bg=(25, 31, 44, 242),
+        card_border=(255, 255, 255, 28),
+        card_shadow=(0, 0, 0, 90),
+        text_primary=(238, 242, 250),
+        text_secondary=(154, 166, 185),
+        text_muted=(100, 112, 130),
+        accent=(108, 148, 255),
+        accent_bg=(108, 148, 255, 34),
+        code_bg=(19, 23, 33, 255),
+        code_border=(48, 58, 76, 180),
+        code_text=(220, 230, 245),
+        divider=(42, 52, 68, 180),
+        star_colors=[(115, 155, 255), (145, 185, 255), (95, 195, 240), (175, 205, 255), (245, 248, 255)],
+    ),
+    ("nordic", "light"): ThemeColors(
+        bg_gradient_start=(242, 246, 244),
+        bg_gradient_end=(230, 238, 234),
+        card_bg=(255, 255, 255, 248),
+        card_border=(214, 226, 220, 200),
+        card_shadow=(26, 46, 38, 18),
+        text_primary=(24, 34, 30),
+        text_secondary=(76, 92, 86),
+        text_muted=(136, 150, 144),
+        accent=(42, 112, 92),
+        accent_bg=(42, 112, 92, 20),
+        code_bg=(242, 247, 244, 255),
+        code_border=(214, 226, 220, 200),
+        code_text=(28, 40, 34),
+        divider=(224, 234, 228, 200),
+        star_colors=[(105, 170, 145), (135, 190, 170), (165, 210, 195), (195, 225, 215), (255, 255, 255)],
+    ),
+    ("nordic", "dark"): ThemeColors(
+        bg_gradient_start=(18, 24, 22),
+        bg_gradient_end=(11, 15, 14),
+        card_bg=(26, 34, 31, 242),
+        card_border=(255, 255, 255, 26),
+        card_shadow=(0, 0, 0, 85),
+        text_primary=(236, 242, 238),
+        text_secondary=(154, 168, 162),
+        text_muted=(102, 116, 110),
+        accent=(95, 178, 150),
+        accent_bg=(95, 178, 150, 32),
+        code_bg=(19, 26, 23, 255),
+        code_border=(48, 64, 58, 180),
+        code_text=(220, 232, 226),
+        divider=(42, 56, 50, 180),
+        star_colors=[(108, 182, 156), (142, 202, 178), (158, 218, 192), (192, 232, 212), (242, 248, 245)],
+    ),
 }
 
 
@@ -3239,7 +3375,7 @@ def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
     """与 _prepare_layout 一致的轻量归一化（缓存键前置计算用，跳过昂贵排版）"""
     text = str(text or "").strip()
     style = str(style or "ios").lower()
-    if style not in ("ios", "android16"):
+    if style not in ("ios", "android16", "minimal", "paper", "bento", "nordic"):
         style = "ios"
     theme_mode = str(theme_mode or "light").lower()
     if theme_mode not in ("light", "dark"):
@@ -3503,7 +3639,16 @@ class MessageImageRenderer:
 
         # 3. 计算高度与留白（上下对齐：顶部 header 与底部 footer 对称留白）
         content_h = sum(lh for _, _, lh in rendered_lines)
-        header_h = 52 if style == "ios" else 40
+        if style == "ios":
+            header_h = 52
+        elif style == "bento":
+            header_h = 46
+        elif style == "minimal":
+            header_h = 38
+        elif style == "paper":
+            header_h = 42
+        else:
+            header_h = 40
         card_inner_pad_y = 24
         footer_gap = 14  # 正文与底部分割线间距（与顶部 header->正文 10px 对称）
         foot_font_tmp = get_font(11, bold=False)
@@ -3827,7 +3972,27 @@ class MessageImageRenderer:
             canvas = Image.alpha_composite(canvas, star_layer)
 
         # 6. 轻量柔和卡片投影（同尺寸直接复用缓存）
-        corner_radius = 24 if style == "ios" else 32
+        if style == "ios":
+            corner_radius = 24
+            card_border_w = 2
+        elif style == "android16":
+            corner_radius = 32
+            card_border_w = 1
+        elif style == "minimal":
+            corner_radius = 12
+            card_border_w = 1
+        elif style == "paper":
+            corner_radius = 10
+            card_border_w = 1
+        elif style == "bento":
+            corner_radius = 22
+            card_border_w = 1
+        elif style == "nordic":
+            corner_radius = 18
+            card_border_w = 1
+        else:
+            corner_radius = 24
+            card_border_w = 1
         blur_rad = 14
         pad = blur_rad * 2
         shadow_img = _get_card_shadow(card_w, card_h, corner_radius, theme.card_shadow, blur_rad)
@@ -3842,7 +4007,7 @@ class MessageImageRenderer:
             radius=corner_radius,
             fill=theme.card_bg,
             outline=theme.card_border,
-            width=2 if style == "ios" else 1,
+            width=card_border_w,
         )
 
         # 8. 绘制顶部栏
@@ -3856,6 +4021,68 @@ class MessageImageRenderer:
             c_draw.ellipse([inner_pad_x + 36, dot_y - dot_r, inner_pad_x + 36 + dot_r * 2, dot_y + dot_r], fill=(40, 200, 64))
 
             time_font = get_font(13, bold=False)
+            time_str = time.strftime("%H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        elif style == "minimal":
+            tag_font = get_font(11, bold=True)
+            c_draw.text((inner_pad_x, cur_y + 4), "TXT", font=tag_font, fill=theme.text_secondary)
+
+            time_font = get_font(12, bold=False)
+            time_str = time.strftime("%H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        elif style == "paper":
+            mark_font = get_font(12, bold=False)
+            c_draw.text((inner_pad_x, cur_y + 4), "◇  NOTE", font=mark_font, fill=theme.accent)
+
+            time_font = get_font(11, bold=False)
+            time_str = time.strftime("%m.%d  %H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 5), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        elif style == "bento":
+            # 现代便当胶囊微标签
+            badge_h = 20
+            badge_w = 62
+            badge_y = cur_y + 4
+            c_draw.rounded_rectangle(
+                [inner_pad_x, badge_y, inner_pad_x + badge_w, badge_y + badge_h],
+                radius=10,
+                fill=theme.accent_bg,
+            )
+            dot_r = 3
+            c_draw.ellipse(
+                [inner_pad_x + 8, badge_y + 7, inner_pad_x + 8 + dot_r * 2, badge_y + 7 + dot_r * 2],
+                fill=theme.accent,
+            )
+            badge_font = get_font(11, bold=True)
+            c_draw.text((inner_pad_x + 20, badge_y + 2), "NOTE", font=badge_font, fill=theme.accent)
+
+            time_font = get_font(12, bold=False)
+            time_str = time.strftime("%H:%M")
+            t_w, _ = _text_size(time_font, time_str)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 6), time_str, font=time_font, fill=theme.text_muted)
+
+            c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
+            cur_y += header_h
+
+        elif style == "nordic":
+            mark_font = get_font(12, bold=False)
+            c_draw.text((inner_pad_x, cur_y + 4), "✦  FROST", font=mark_font, fill=theme.accent)
+
+            time_font = get_font(12, bold=False)
             time_str = time.strftime("%H:%M")
             t_w, _ = _text_size(time_font, time_str)
             c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
@@ -3912,7 +4139,11 @@ class MessageImageRenderer:
                 for px, pw, py, pc in positions:
                     all_char_positions.append((px, pw, py, pc, line_h))
             elif block.block_type.startswith("heading"):
-                heading_color = theme.accent if (style == "android16" and block.block_type == "heading1") else theme.text_primary
+                heading_color = (
+                    theme.accent
+                    if (style in ("android16", "paper", "bento", "nordic") and block.block_type == "heading1")
+                    else theme.text_primary
+                )
                 positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, heading_color, block.font_size, emoji_remote_eff, emoji_style)
                 for px, pw, py, pc in positions:
                     all_char_positions.append((px, pw, py, pc, line_h))
