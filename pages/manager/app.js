@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.27
+// Version: 1.3.35
 // ==========================================================================
 (function () {
   "use strict";
@@ -653,16 +653,9 @@ async def render_text_to_image(text: str):
     const badge = document.getElementById("cfgStyleBadge");
     const desc = document.getElementById("cfgStyleDesc");
     const hints = {
-      ios: { badge: "iOS 经典拟态", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，纯粹利落无冗余。" },
-      android: { badge: "Android 原生", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
-      android16: { badge: "Android 原生", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
-      newspaper: { badge: "报刊便签", desc: "极简人文报刊排版，温润纸墨质感与纯粹细线分割，沉稳耐读。" },
-      paper: { badge: "报刊便签", desc: "极简人文报刊排版，温润纸墨质感与纯粹细线分割，沉稳耐读。" },
-      terminal: { badge: "极简控制台", desc: "极简黑白代码控制台，等宽字体与纯净对比，利落专注。" },
-      minimal: { badge: "极简控制台", desc: "极简黑白代码控制台，等宽字体与纯净对比，利落专注。" },
-      translucent: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" },
-      bento: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" },
-      nordic: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" }
+      ios: { badge: "iOS 磨砂卡片", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，纯粹利落无冗余。" },
+      android: { badge: "Android 质感胶囊", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
+      android16: { badge: "Android 质感胶囊", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" }
     };
     const h = hints[style] || hints.ios;
     if (badge) badge.textContent = h.badge;
@@ -683,7 +676,7 @@ async def render_text_to_image(text: str):
     const accentColorInput = document.getElementById("cfgThemeAccentColor");
     const accentPicker = document.getElementById("cfgThemeAccentPicker");
     if (accentColorInput) accentColorInput.value = cfg.theme_accent_color || "";
-    if (accentPicker && cfg.theme_accent_color) accentPicker.value = cfg.theme_accent_color;
+    if (accentPicker) accentPicker.value = cfg.theme_accent_color || "#0A84FF";
 
     const starBgEl = document.getElementById("cfgStarBg");
     const starDensityGroup = document.getElementById("starDensityGroup");
@@ -2542,6 +2535,53 @@ async def render_text_to_image(text: str):
         const valEl=document.getElementById("fontScaleVal");
         if(el){ el.value=100; if(valEl) valEl.textContent="100%"; triggerAutoSave(); triggerPreview(); }
         return;
+      }
+
+      // 15. 转图主题色预设色块快速点选
+      const presetBtn = e.target.closest(".preset-color-btn");
+      if (presetBtn) {
+        e.preventDefault();
+        const c = presetBtn.getAttribute("data-color");
+        const txt = document.getElementById("cfgThemeAccentColor");
+        const pkr = document.getElementById("cfgThemeAccentPicker");
+        if (txt && c) txt.value = c;
+        if (pkr && c) pkr.value = c;
+        triggerAutoSave();
+        triggerPreview();
+        toast("已应用转图主题色：" + c, "ok");
+        return;
+      }
+
+      // 16. 重置主题色为默认
+      if (e.target.closest("#btnResetAccentColor")) {
+        e.preventDefault();
+        const txt = document.getElementById("cfgThemeAccentColor");
+        const pkr = document.getElementById("cfgThemeAccentPicker");
+        if (txt) txt.value = "";
+        if (pkr) pkr.value = "#0A84FF";
+        triggerAutoSave();
+        triggerPreview();
+        toast("已恢复转图主题色为风格默认", "ok");
+        return;
+      }
+    });
+
+    // 主题颜色拾取器与文本输入动态联动
+    document.addEventListener("input", function (e) {
+      if (e.target && e.target.id === "cfgThemeAccentPicker") {
+        const txt = document.getElementById("cfgThemeAccentColor");
+        if (txt) txt.value = e.target.value.toUpperCase();
+        triggerAutoSave();
+        triggerPreview();
+      }
+      if (e.target && e.target.id === "cfgThemeAccentColor") {
+        const pkr = document.getElementById("cfgThemeAccentPicker");
+        const val = (e.target.value || "").trim();
+        if (pkr && /^#[0-9a-fA-F]{6}$/.test(val)) {
+          pkr.value = val;
+        }
+        triggerAutoSave();
+        triggerPreview();
       }
     });
 

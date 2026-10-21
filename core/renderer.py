@@ -3403,15 +3403,9 @@ def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
     """与 _prepare_layout 一致的轻量归一化（缓存键前置计算用，跳过昂贵排版）"""
     text = str(text or "").strip()
     style = str(style or "ios").lower()
-    if style in ("android", "android16"):
+    if style in ("android", "android16", "安卓"):
         style = "android16"
-    elif style in ("newspaper", "paper"):
-        style = "newspaper"
-    elif style in ("terminal", "minimal"):
-        style = "terminal"
-    elif style in ("translucent", "bento", "nordic"):
-        style = "translucent"
-    elif style not in ("ios", "android16", "newspaper", "terminal", "translucent"):
+    else:
         style = "ios"
     theme_mode = str(theme_mode or "light").lower()
     if theme_mode not in ("light", "dark"):

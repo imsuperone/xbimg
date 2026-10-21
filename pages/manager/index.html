@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>消息转图助手控制台</title>
-  <link rel="stylesheet" href="./style.css?v=1.3.32" />
+  <link rel="stylesheet" href="./style.css?v=1.3.35" />
   <style>
     html[data-boot] { visibility: hidden; background: #f4f6f8; }
     @media (prefers-color-scheme: dark) { html[data-boot] { background: #0f1115; } }
@@ -30,7 +30,7 @@
     <header class="top-bar">
       <div class="top-bar-brand">
         <div class="brand-text">
-          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.32">1.3.32</span></h1>
+          <h1>消息转图助手 <span class="version-tag" data-ver="1.3.35">1.3.35</span></h1>
         </div>
       </div>
       <div class="top-bar-actions">
@@ -144,11 +144,8 @@
               <span id="cfgStyleBadge" style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:var(--m3-sys-color-surface-container-high); color:var(--m3-sys-color-primary);">iOS 磨砂卡片</span>
             </div>
             <select id="cfgStyle" class="m3-input" style="cursor:pointer; font-weight:600;">
-              <option value="ios">📱 iOS 经典拟态（Apple 灵动三色圆点 · 磨砂透白）</option>
-              <option value="android">🤖 Android 原生（Material 3 质感胶囊 · 大圆角）</option>
-              <option value="newspaper">📰 报刊便签（Editorial · 极简人文纸感 · 纯粹耐读）</option>
-              <option value="terminal">💻 极简控制台（Terminal · 黑白等宽 · 纯净专注）</option>
-              <option value="translucent">✨ 亚克力微光（Glassmorphism · 现代流萤 · 简约通透）</option>
+              <option value="ios">📱 iOS 灵动磨砂（经典灵动三色圆点 · 磨砂质感）</option>
+              <option value="android">🤖 Android 质感胶囊（Material 3 灵动胶囊 · 现代克制）</option>
             </select>
             <span id="cfgStyleDesc" class="field-hint" style="margin-top:6px; display:block;">Apple 经典拟态卡片，灵动三色红黄绿圆点，纯粹利落无冗余。</span>
           </div>
@@ -182,7 +179,7 @@
                 <button type="button" id="btnResetAccentColor" class="m3-btn secondary-btn" style="font-size:12px; padding:4px 8px; cursor:pointer;">重置默认</button>
               </div>
             </div>
-            <span class="field-hint" style="margin-top:6px; display:block;">设置后将动态应用于 iOS、Android、报刊等所有转图风格的气泡、强调高亮与链接。</span>
+            <span class="field-hint" style="margin-top:6px; display:block;">设置后将动态应用于 iOS 与 Android 转图风格的气泡、强调高亮与链接。</span>
           </div>
 
           <div class="form-group">
@@ -708,6 +705,6 @@
     <div id="toastContainer" class="toast-container"></div>
   </div>
 
-  <script src="./app.js?v=1.3.32"></script>
+  <script src="./app.js?v=1.3.35"></script>
 </body>
 </html>

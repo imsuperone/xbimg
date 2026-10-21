@@ -82,15 +82,12 @@ class CommandsMixin:
                     "aliases": {
                         "ios": "ios", "苹果": "ios",
                         "android": "android16", "android16": "android16", "安卓": "android16",
-                        "newspaper": "newspaper", "paper": "newspaper", "报刊": "newspaper", "便签": "newspaper",
-                        "terminal": "terminal", "minimal": "terminal", "终端": "terminal", "控制台": "terminal",
-                        "translucent": "translucent", "bento": "translucent", "nordic": "translucent", "微光": "translucent", "亚克力": "translucent",
                     },
                     "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
                     "set_ok": "已将【{t}】的视觉风格设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group style ios / android / newspaper / terminal / translucent / default [群号]",
+                    "usage": "用法：/xbimg group style ios / android / default [群号]",
                 },
                 "color": {
                     "key": "theme_accent_color",
@@ -297,31 +294,22 @@ class CommandsMixin:
             style_map = {
                 "ios": "ios", "苹果": "ios",
                 "android": "android16", "android16": "android16", "安卓": "android16",
-                "newspaper": "newspaper", "paper": "newspaper", "报刊": "newspaper", "便签": "newspaper",
-                "terminal": "terminal", "minimal": "terminal", "终端": "terminal", "控制台": "terminal",
-                "translucent": "translucent", "bento": "translucent", "nordic": "translucent", "亚克力": "translucent", "微光": "translucent",
             }
             target_style = style_map.get(str(arg).lower())
             if target_style:
                 cfg["style"] = target_style
                 self.cfg_mgr.save()
                 style_names = {
-                    "ios": "iOS 经典拟态 (Apple 灵动三色点)",
-                    "android16": "Android 原生胶囊 (Material 3 质感)",
-                    "newspaper": "报刊便签 (Editorial 人文排版)",
-                    "terminal": "极简控制台 (Terminal 黑白等宽)",
-                    "translucent": "亚克力微光 (Glassmorphism 现代通透)",
+                    "ios": "iOS 磨砂玻璃 (经典灵动三色圆点)",
+                    "android16": "Android 质感胶囊 (Material 3 灵动胶囊)",
                 }
                 yield event.plain_result(f"全局视觉风格已切换为：{style_names.get(target_style, target_style)}")
             else:
                 yield event.plain_result(
                     "用法：/xbimg style <风格>\n"
                     "支持风格：\n"
-                    "  - ios: iOS 经典拟态（红黄绿三色点）\n"
-                    "  - android: Android 原生胶囊（Material 3 质感）\n"
-                    "  - newspaper: 报刊便签（极简人文排版）\n"
-                    "  - terminal: 极简控制台（黑白等宽质感）\n"
-                    "  - translucent: 亚克力微光（现代通透毛玻璃）"
+                    "  - ios: iOS 磨砂玻璃（灵动三色圆点）\n"
+                    "  - android: Android 质感胶囊（Material 3 灵动胶囊）"
                 )
         elif sub in ("color", "theme_color", "主题色", "颜色"):
             from .renderer import _parse_hex_color
