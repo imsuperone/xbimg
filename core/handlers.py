@@ -1239,6 +1239,7 @@ class HandlersMixin:
         theme_mode: Optional[str] = None,
         custom_font_path: str = "",
         custom_bold_font_path: str = "",
+        theme_color: str = "",
         perf_out: Optional[Dict] = None,
     ):
         """纯渲染步骤（审查已完成）：返回 List[Image]，失败返回 []。
@@ -1291,6 +1292,7 @@ class HandlersMixin:
                 card_max_width=card_max_w,
                 custom_font_path=custom_font_path or "",
                 custom_bold_font_path=custom_bold_font_path or "",
+                theme_color=str(theme_color or cfg.get("theme_accent_color", "") or "").strip(),
                 perf_out=perf_out,
             )
         except Exception as e:
@@ -1581,6 +1583,7 @@ class HandlersMixin:
                     theme_mode=grp_custom.get("theme_mode"),
                     custom_font_path=str(grp_custom.get("custom_font_path", "") or ""),
                     custom_bold_font_path=str(grp_custom.get("custom_bold_font_path", "") or ""),
+                    theme_color=str(grp_custom.get("theme_accent_color") or self.cfg_mgr.config.get("theme_accent_color", "") or ""),
                     perf_out=_pt.perf_out,
                 )
                 _elapsed = int((time.perf_counter() - _pt.t0) * 1000)

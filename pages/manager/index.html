@@ -144,14 +144,13 @@
               <span id="cfgStyleBadge" style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:10px; background:var(--m3-sys-color-surface-container-high); color:var(--m3-sys-color-primary);">iOS 磨砂卡片</span>
             </div>
             <select id="cfgStyle" class="m3-input" style="cursor:pointer; font-weight:600;">
-              <option value="ios">📱 iOS 磨砂卡片（Apple 经典透白拟态 · 灵动红黄绿）</option>
-              <option value="android16">🤖 Android 16（Material 3 质感胶囊 · 温暖大地色）</option>
-              <option value="minimal">📐 极简黑白（Clean Minimal · 瑞士国际排版 · 纯粹利落）</option>
-              <option value="paper">📖 暖阳书卷（Editorial Paper · 温润人文纸感 · 朱砂点缀）</option>
-              <option value="bento">🍱 现代便当（Modern Bento · 现代模块美学 · 科技靛蓝）</option>
-              <option value="nordic">🌲 北欧冷杉（Nordic Frost · 冷杉青石灰 · 清冷静谧）</option>
+              <option value="ios">📱 iOS 经典拟态（Apple 灵动三色圆点 · 磨砂透白）</option>
+              <option value="android">🤖 Android 原生（Material 3 质感胶囊 · 大圆角）</option>
+              <option value="newspaper">📰 报刊便签（Editorial · 极简人文纸感 · 纯粹耐读）</option>
+              <option value="terminal">💻 极简控制台（Terminal · 黑白等宽 · 纯净专注）</option>
+              <option value="translucent">✨ 亚克力微光（Glassmorphism · 现代流萤 · 简约通透）</option>
             </select>
-            <span id="cfgStyleDesc" class="field-hint" style="margin-top:6px; display:block;">Apple 磨砂透白卡片，灵动三色红黄绿圆点，经典 SF 蓝强调色。</span>
+            <span id="cfgStyleDesc" class="field-hint" style="margin-top:6px; display:block;">Apple 经典拟态卡片，灵动三色红黄绿圆点，纯粹利落无冗余。</span>
           </div>
 
           <div class="form-group">
@@ -164,6 +163,26 @@
                 深色
               </button>
             </div>
+          </div>
+
+          <div class="form-group" style="margin-top:16px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+              <label class="form-label" for="cfgThemeAccentColor" style="margin-bottom:0;">转图自定义主题色</label>
+              <span style="font-size:12px; color:var(--m3-sys-color-on-surface-variant);">覆盖全风格强调色</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <input type="color" id="cfgThemeAccentPicker" value="#0A84FF" style="width:36px; height:32px; border:none; border-radius:6px; cursor:pointer; background:none;">
+              <input type="text" id="cfgThemeAccentColor" class="m3-input" placeholder="留空遵循风格默认" style="width:160px; font-family:monospace; font-size:13px;" maxlength="9">
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button type="button" class="preset-color-btn" data-color="#0A84FF" style="width:20px; height:20px; border-radius:50%; background:#0A84FF; border:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="经典蓝"></button>
+                <button type="button" class="preset-color-btn" data-color="#10B981" style="width:20px; height:20px; border-radius:50%; background:#10B981; border:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="薄荷绿"></button>
+                <button type="button" class="preset-color-btn" data-color="#F59E0B" style="width:20px; height:20px; border-radius:50%; background:#F59E0B; border:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="暖阳金"></button>
+                <button type="button" class="preset-color-btn" data-color="#8B5CF6" style="width:20px; height:20px; border-radius:50%; background:#8B5CF6; border:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="香芋紫"></button>
+                <button type="button" class="preset-color-btn" data-color="#EF4444" style="width:20px; height:20px; border-radius:50%; background:#EF4444; border:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="绯红"></button>
+                <button type="button" id="btnResetAccentColor" class="m3-btn secondary-btn" style="font-size:12px; padding:4px 8px; cursor:pointer;">重置默认</button>
+              </div>
+            </div>
+            <span class="field-hint" style="margin-top:6px; display:block;">设置后将动态应用于 iOS、Android、报刊等所有转图风格的气泡、强调高亮与链接。</span>
           </div>
 
           <div class="form-group">

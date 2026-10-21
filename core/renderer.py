@@ -10,6 +10,7 @@
 - Emoji 全自动：复杂序列全彩图，单个 emoji 优先 Noto 全彩字体，缺失自动云端补全
 """
 
+import copy
 import hashlib
 import contextvars
 import io
@@ -2362,6 +2363,33 @@ THEMES = {
     ),
 }
 
+def _parse_hex_color(hex_str: str):
+    """解析十六进制颜色 (#RRGGBB 或 #RGB)，返回 (r, g, b) 或 None"""
+    if not hex_str:
+        return None
+    s = str(hex_str).strip().lstrip("#")
+    if len(s) == 6:
+        try:
+            return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+        except Exception:
+            return None
+    elif len(s) == 3:
+        try:
+            return (int(s[0]*2, 16), int(s[1]*2, 16), int(s[2]*2, 16))
+        except Exception:
+            return None
+    return None
+
+# 风格别名平滑补齐
+THEMES[("android", "light")] = THEMES[("android16", "light")]
+THEMES[("android", "dark")] = THEMES[("android16", "dark")]
+THEMES[("newspaper", "light")] = THEMES[("paper", "light")]
+THEMES[("newspaper", "dark")] = THEMES[("paper", "dark")]
+THEMES[("terminal", "light")] = THEMES[("minimal", "light")]
+THEMES[("terminal", "dark")] = THEMES[("minimal", "dark")]
+THEMES[("translucent", "light")] = THEMES[("bento", "light")]
+THEMES[("translucent", "dark")] = THEMES[("bento", "dark")]
+
 
 # ==========================================
 # 文本结构化解析与美学折行
@@ -3371,11 +3399,19 @@ def _draw_text_run_cached(
 
 
 def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
-                       emoji_style, emoji_remote=True):
+                       emoji_style, emoji_remote=True, theme_color=""):
     """与 _prepare_layout 一致的轻量归一化（缓存键前置计算用，跳过昂贵排版）"""
     text = str(text or "").strip()
     style = str(style or "ios").lower()
-    if style not in ("ios", "android16", "minimal", "paper", "bento", "nordic"):
+    if style in ("android", "android16"):
+        style = "android16"
+    elif style in ("newspaper", "paper"):
+        style = "newspaper"
+    elif style in ("terminal", "minimal"):
+        style = "terminal"
+    elif style in ("translucent", "bento", "nordic"):
+        style = "translucent"
+    elif style not in ("ios", "android16", "newspaper", "terminal", "translucent"):
         style = "ios"
     theme_mode = str(theme_mode or "light").lower()
     if theme_mode not in ("light", "dark"):
@@ -3399,7 +3435,8 @@ def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
         emoji_style = str(emoji_style).lower()
         if emoji_style not in ("none", "ios", "android", "windows"):
             emoji_style = "none"
-    return text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style
+    theme_color = str(theme_color or "").strip().lower()
+    return text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style, theme_color
 
 
 def _render_cache_key(text: str, style: str, theme_mode: str, star_background: bool,
@@ -3407,7 +3444,8 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
                       mosaic_half_pos: str, violation_words, font_scale: int,
                       emoji_style: str, page_max_h: int = 3000,
                       card_max_width: int = 680,
-                      group_font: Tuple[str, str] = ("", "")) -> tuple:
+                      group_font: Tuple[str, str] = ("", ""),
+                      theme_color: str = "") -> tuple:
     """渲染缓存键：文本哈希 + 全套渲染参数 + 字体代际。
     不含墙钟分钟：顶栏时间陈旧可接受，换来跨分钟同参直接命中（避免每分钟强制重渲）。"""
     try:
@@ -3433,7 +3471,7 @@ def _render_cache_key(text: str, style: str, theme_mode: str, star_background: b
     return (h, style, theme_mode, bool(star_background), str(star_density),
             mosaic_mode, mosaic_type, mosaic_half_pos, vw,
             int(font_scale or 100), str(emoji_style), epoch, pmh, cmw,
-            str((group_font or ("", ""))[0]), str((group_font or ("", ""))[1]))
+            str((group_font or ("", ""))[0]), str((group_font or ("", ""))[1]), str(theme_color or "").strip().lower())
 
 
 def _continuation_line(idx: int, total: int, font_scale: int = 100):
@@ -3531,6 +3569,7 @@ class MessageImageRenderer:
         card_max_width: int = 640,  # 卡片宽度基线（聊天气泡完整显示）
         custom_font_path: str = "",  # 单群专属常规字体（文件名/绝对路径），空则跟随全局
         custom_bold_font_path: str = "",  # 单群专属粗体，空则复用常规
+        theme_color: str = "",  # 转图自定义主题色 (#HEX)
         perf_out: Optional[Dict[str, float]] = None,  # 性能回填（仅 perf_log 开启时传入；None 则零开销）
     ) -> Image.Image:
         """渲染单图（长内容取第一页；完整多页请用 render_pages）"""
@@ -3544,6 +3583,7 @@ class MessageImageRenderer:
             card_max_width=card_max_width,
             custom_font_path=custom_font_path,
             custom_bold_font_path=custom_bold_font_path,
+            theme_color=theme_color,
             perf_out=perf_out,
         )
         return pages[0]
@@ -3560,15 +3600,25 @@ class MessageImageRenderer:
         emoji_style: Optional[str] = None,
         page_max_h: int = 3000,
         card_max_width: int = 640,
+        theme_color: str = "",
     ) -> Dict[str, Any]:
         """排版（与 render 旧逻辑一致）：参数归一化→分块→自适应宽度→折行→度量。
         返回绘图上下文 ctx，供 render / render_pages / _draw_page 共用。"""
         # 1. 参数归一化：唯一实现在 _norm_cache_params（缓存键与排版同源，杜绝两套规则漂移）
-        text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style = _norm_cache_params(
+        norm_res = _norm_cache_params(
             text, style, theme_mode, mosaic_half_pos, font_scale,
             emoji_style=emoji_style, emoji_remote=emoji_remote,
+            theme_color=theme_color,
         )
-        theme = THEMES.get((style, theme_mode), THEMES[("ios", "light")])
+        text, style, theme_mode, mosaic_half_pos, font_scale, emoji_style = norm_res[0], norm_res[1], norm_res[2], norm_res[3], norm_res[4], norm_res[5]
+        eff_theme_color = norm_res[6] if len(norm_res) > 6 else ""
+        base_theme = THEMES.get((style, theme_mode), THEMES[("ios", "light")])
+        theme = copy.copy(base_theme)
+        if eff_theme_color:
+            c_rgb = _parse_hex_color(eff_theme_color)
+            if c_rgb:
+                theme.accent = c_rgb
+                theme.accent_bg = (c_rgb[0], c_rgb[1], c_rgb[2], 28)
         _sc = lambda v: max(6, int(round(v * font_scale / 100)))
         # 是否允许云端
         emoji_remote_eff = emoji_style != "none"
@@ -3700,6 +3750,7 @@ class MessageImageRenderer:
         card_max_width: int = 640,
         custom_font_path: str = "",
         custom_bold_font_path: str = "",
+        theme_color: str = "",
         perf_out: Optional[Dict[str, float]] = None,
     ) -> List[Image.Image]:
         """长内容分页渲染：每页独立成卡（含顶栏/底栏），顺序返回图片列表。
@@ -3719,6 +3770,7 @@ class MessageImageRenderer:
                 mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
                 emoji_style=emoji_style, page_max_h=page_max_h,
                 card_max_width=card_max_width, group_font=group_font,
+                theme_color=theme_color,
                 perf_out=perf_out,
             )
         finally:
@@ -3745,6 +3797,7 @@ class MessageImageRenderer:
         page_max_h: int = 3000,
         card_max_width: int = 640,
         group_font: Tuple[str, str] = ("", ""),
+        theme_color: str = "",
         perf_out: Optional[Dict[str, float]] = None,
     ) -> List[Image.Image]:
         if perf_out is not None:
@@ -3755,16 +3808,19 @@ class MessageImageRenderer:
                     break
         # 缓存键前置：命中直接返回，跳过昂贵排版+预取+绘制
         try:
-            _nt, _ns, _ntm, _nmhp, _nfs, _nes = _norm_cache_params(
+            _norm = _norm_cache_params(
                 text, style, theme_mode, mosaic_half_pos, font_scale,
-                emoji_style, emoji_remote,
+                emoji_style, emoji_remote, theme_color,
             )
+            _nt, _ns, _ntm, _nmhp, _nfs, _nes = _norm[0], _norm[1], _norm[2], _norm[3], _norm[4], _norm[5]
+            _ntc = _norm[6] if len(_norm) > 6 else ""
             cache_key = _render_cache_key(
                 _nt, _ns, _ntm, star_background, star_density,
                 mosaic_mode, mosaic_type, _nmhp, violation_words,
                 _nfs, _nes,
                 page_max_h=page_max_h, card_max_width=card_max_width,
                 group_font=group_font,
+                theme_color=_ntc,
             )
         except Exception:
             cache_key = None
@@ -3797,6 +3853,7 @@ class MessageImageRenderer:
             mosaic_half_pos=mosaic_half_pos, font_scale=font_scale,
             emoji_remote=emoji_remote, emoji_style=emoji_style,
             page_max_h=page_max_h, card_max_width=card_max_width,
+            theme_color=theme_color,
         )
         if perf_out is not None:
             try:
@@ -3975,20 +4032,17 @@ class MessageImageRenderer:
         if style == "ios":
             corner_radius = 24
             card_border_w = 2
-        elif style == "android16":
-            corner_radius = 32
+        elif style in ("android", "android16"):
+            corner_radius = 30
             card_border_w = 1
-        elif style == "minimal":
+        elif style in ("terminal", "minimal"):
             corner_radius = 12
             card_border_w = 1
-        elif style == "paper":
+        elif style in ("newspaper", "paper"):
             corner_radius = 10
             card_border_w = 1
-        elif style == "bento":
-            corner_radius = 22
-            card_border_w = 1
-        elif style == "nordic":
-            corner_radius = 18
+        elif style in ("translucent", "bento", "nordic"):
+            corner_radius = 20
             card_border_w = 1
         else:
             corner_radius = 24
@@ -4010,7 +4064,7 @@ class MessageImageRenderer:
             width=card_border_w,
         )
 
-        # 8. 绘制顶部栏
+        # 8. 绘制顶部栏（极简、纯粹，杜绝任何人工合成英文标签）
         cur_y = card_inner_pad_y
 
         if style == "ios":
@@ -4028,9 +4082,16 @@ class MessageImageRenderer:
             c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
             cur_y += header_h
 
-        elif style == "minimal":
-            tag_font = get_font(11, bold=True)
-            c_draw.text((inner_pad_x, cur_y + 4), "TXT", font=tag_font, fill=theme.text_secondary)
+        elif style in ("android", "android16"):
+            # Android 原生 M3 胶囊微标志
+            pill_w = 28
+            pill_h = 4
+            pill_y = cur_y + 10
+            c_draw.rounded_rectangle(
+                [inner_pad_x, pill_y, inner_pad_x + pill_w, pill_y + pill_h],
+                radius=2,
+                fill=theme.accent,
+            )
 
             time_font = get_font(12, bold=False)
             time_str = time.strftime("%H:%M")
@@ -4040,47 +4101,47 @@ class MessageImageRenderer:
             c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
             cur_y += header_h
 
-        elif style == "paper":
-            mark_font = get_font(12, bold=False)
-            c_draw.text((inner_pad_x, cur_y + 4), "◇  NOTE", font=mark_font, fill=theme.accent)
-
-            time_font = get_font(11, bold=False)
-            time_str = time.strftime("%m.%d  %H:%M")
+        elif style in ("newspaper", "paper"):
+            # 报刊便签：左侧极简日期时间，右侧主题色微菱形，沉稳耐读
+            time_font = get_font(12, bold=False)
+            time_str = time.strftime("%Y.%m.%d  %H:%M")
             t_w, _ = _text_size(time_font, time_str)
-            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 5), time_str, font=time_font, fill=theme.text_muted)
+            c_draw.text((inner_pad_x, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
+
+            dia_x = card_w - inner_pad_x - 10
+            dia_y = cur_y + 11
+            c_draw.polygon([
+                (dia_x, dia_y - 4),
+                (dia_x + 4, dia_y),
+                (dia_x, dia_y + 4),
+                (dia_x - 4, dia_y)
+            ], fill=theme.accent)
 
             c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
             cur_y += header_h
 
-        elif style == "bento":
-            # 现代便当胶囊微标签
-            badge_h = 20
-            badge_w = 62
-            badge_y = cur_y + 4
-            c_draw.rounded_rectangle(
-                [inner_pad_x, badge_y, inner_pad_x + badge_w, badge_y + badge_h],
-                radius=10,
-                fill=theme.accent_bg,
-            )
-            dot_r = 3
-            c_draw.ellipse(
-                [inner_pad_x + 8, badge_y + 7, inner_pad_x + 8 + dot_r * 2, badge_y + 7 + dot_r * 2],
-                fill=theme.accent,
-            )
-            badge_font = get_font(11, bold=True)
-            c_draw.text((inner_pad_x + 20, badge_y + 2), "NOTE", font=badge_font, fill=theme.accent)
+        elif style in ("terminal", "minimal"):
+            # 极简黑白控制台：极简黑白三圆点，右侧时间
+            dot_y = cur_y + 11
+            dot_r = 4.5
+            dot_fill = theme.text_muted
+            c_draw.ellipse([inner_pad_x, dot_y - dot_r, inner_pad_x + dot_r * 2, dot_y + dot_r], fill=dot_fill)
+            c_draw.ellipse([inner_pad_x + 15, dot_y - dot_r, inner_pad_x + 15 + dot_r * 2, dot_y + dot_r], fill=dot_fill)
+            c_draw.ellipse([inner_pad_x + 30, dot_y - dot_r, inner_pad_x + 30 + dot_r * 2, dot_y + dot_r], fill=dot_fill)
 
             time_font = get_font(12, bold=False)
             time_str = time.strftime("%H:%M")
             t_w, _ = _text_size(time_font, time_str)
-            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 6), time_str, font=time_font, fill=theme.text_muted)
+            c_draw.text((card_w - inner_pad_x - t_w, cur_y + 4), time_str, font=time_font, fill=theme.text_muted)
 
             c_draw.line([(inner_pad_x, cur_y + header_h - 10), (card_w - inner_pad_x, cur_y + header_h - 10)], fill=theme.divider, width=1)
             cur_y += header_h
 
-        elif style == "nordic":
-            mark_font = get_font(12, bold=False)
-            c_draw.text((inner_pad_x, cur_y + 4), "✦  FROST", font=mark_font, fill=theme.accent)
+        elif style in ("translucent", "bento", "nordic"):
+            # 现代亚克力流萤：极简水平流光线与时间
+            line_w = 36
+            line_y = cur_y + 11
+            c_draw.line([(inner_pad_x, line_y), (inner_pad_x + line_w, line_y)], fill=theme.accent, width=2)
 
             time_font = get_font(12, bold=False)
             time_str = time.strftime("%H:%M")
@@ -4091,7 +4152,6 @@ class MessageImageRenderer:
             cur_y += header_h
 
         else:
-            # Android 16：无品牌顶栏，仅右侧时间（头像/账号已移除）
             time_font = get_font(12, bold=False)
             time_str = time.strftime("%m-%d %H:%M")
             t_w, _ = _text_size(time_font, time_str)

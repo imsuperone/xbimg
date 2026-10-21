@@ -80,17 +80,26 @@ class CommandsMixin:
                 "style": {
                     "key": "style",
                     "aliases": {
-                        "ios": "ios", "android16": "android16", "android": "android16",
-                        "minimal": "minimal", "极简": "minimal", "极简黑白": "minimal",
-                        "paper": "paper", "书卷": "paper", "暖阳书卷": "paper",
-                        "bento": "bento", "便当": "bento", "现代便当": "bento",
-                        "nordic": "nordic", "北欧": "nordic", "冷杉": "nordic", "北欧冷杉": "nordic",
+                        "ios": "ios", "苹果": "ios",
+                        "android": "android16", "android16": "android16", "安卓": "android16",
+                        "newspaper": "newspaper", "paper": "newspaper", "报刊": "newspaper", "便签": "newspaper",
+                        "terminal": "terminal", "minimal": "terminal", "终端": "terminal", "控制台": "terminal",
+                        "translucent": "translucent", "bento": "translucent", "nordic": "translucent", "微光": "translucent", "亚克力": "translucent",
                     },
                     "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
                     "set_ok": "已将【{t}】的视觉风格设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group style ios / android16 / minimal / paper / bento / nordic / default [群号]",
+                    "usage": "用法：/xbimg group style ios / android / newspaper / terminal / translucent / default [群号]",
+                },
+                "color": {
+                    "key": "theme_accent_color",
+                    "aliases": {},
+                    "reset_ok": "已将【{t}】的自定义转图主题色恢复为跟随全局默认。",
+                    "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group color default 123456",
+                    "set_ok": "已将【{t}】的自定义转图主题色设置为：{v}",
+                    "set_no_target": "当前不在群聊中，请附带群号。",
+                    "usage": "用法：/xbimg group color <#HEX颜色代码|default> [群号]",
                 },
                 "theme": {
                     "key": "theme_mode",
@@ -107,12 +116,11 @@ class CommandsMixin:
             spec["hit"] = hit
             if kind == "style":
                 style_disp = {
-                    "ios": "iOS 磨砂卡片",
-                    "android16": "Android 16 质感胶囊",
-                    "minimal": "极简黑白",
-                    "paper": "暖阳书卷",
-                    "bento": "现代便当",
-                    "nordic": "北欧冷杉",
+                    "ios": "iOS 经典拟态",
+                    "android16": "Android 原生胶囊",
+                    "newspaper": "报刊便签 (Editorial)",
+                    "terminal": "极简控制台 (Terminal)",
+                    "translucent": "亚克力微光 (Glassmorphism)",
                 }
                 spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(style_disp.get(hit, hit.upper()) if hit else ""))
             else:
@@ -287,36 +295,59 @@ class CommandsMixin:
                 yield event.plain_result("用法：/xbimg minlen <1-1000>")
         elif sub == "style":
             style_map = {
-                "ios": "ios", "android16": "android16", "android": "android16",
-                "minimal": "minimal", "极简": "minimal", "极简黑白": "minimal",
-                "paper": "paper", "书卷": "paper", "暖阳书卷": "paper",
-                "bento": "bento", "便当": "bento", "现代便当": "bento",
-                "nordic": "nordic", "北欧": "nordic", "冷杉": "nordic", "北欧冷杉": "nordic",
+                "ios": "ios", "苹果": "ios",
+                "android": "android16", "android16": "android16", "安卓": "android16",
+                "newspaper": "newspaper", "paper": "newspaper", "报刊": "newspaper", "便签": "newspaper",
+                "terminal": "terminal", "minimal": "terminal", "终端": "terminal", "控制台": "terminal",
+                "translucent": "translucent", "bento": "translucent", "nordic": "translucent", "亚克力": "translucent", "微光": "translucent",
             }
             target_style = style_map.get(str(arg).lower())
             if target_style:
                 cfg["style"] = target_style
                 self.cfg_mgr.save()
                 style_names = {
-                    "ios": "iOS 磨砂卡片",
-                    "android16": "Android 16 质感胶囊",
-                    "minimal": "极简黑白 (Clean Minimal)",
-                    "paper": "暖阳书卷 (Editorial Paper)",
-                    "bento": "现代便当 (Modern Bento)",
-                    "nordic": "北欧冷杉 (Nordic Frost)",
+                    "ios": "iOS 经典拟态 (Apple 灵动三色点)",
+                    "android16": "Android 原生胶囊 (Material 3 质感)",
+                    "newspaper": "报刊便签 (Editorial 人文排版)",
+                    "terminal": "极简控制台 (Terminal 黑白等宽)",
+                    "translucent": "亚克力微光 (Glassmorphism 现代通透)",
                 }
                 yield event.plain_result(f"全局视觉风格已切换为：{style_names.get(target_style, target_style)}")
             else:
                 yield event.plain_result(
                     "用法：/xbimg style <风格>\n"
                     "支持风格：\n"
-                    "  - ios: iOS 磨砂卡片\n"
-                    "  - android16: Android 16 质感胶囊\n"
-                    "  - minimal: 极简黑白 (Clean Minimal)\n"
-                    "  - paper: 暖阳书卷 (Editorial Paper)\n"
-                    "  - bento: 现代便当 (Modern Bento)\n"
-                    "  - nordic: 北欧冷杉 (Nordic Frost)"
+                    "  - ios: iOS 经典拟态（红黄绿三色点）\n"
+                    "  - android: Android 原生胶囊（Material 3 质感）\n"
+                    "  - newspaper: 报刊便签（极简人文排版）\n"
+                    "  - terminal: 极简控制台（黑白等宽质感）\n"
+                    "  - translucent: 亚克力微光（现代通透毛玻璃）"
                 )
+        elif sub in ("color", "theme_color", "主题色", "颜色"):
+            from .renderer import _parse_hex_color
+            arg_clean = str(arg or "").strip().lower()
+            if not arg_clean or arg_clean in ("default", "reset", "恢复", "默认"):
+                cfg["theme_accent_color"] = ""
+                self.cfg_mgr.save()
+                yield event.plain_result("✅ 转图自定义主题色已恢复为默认值（遵循风格预设）。")
+            else:
+                hex_rgb = _parse_hex_color(arg_clean)
+                if hex_rgb:
+                    hex_val = "#" + arg_clean.lstrip("#").upper()
+                    cfg["theme_accent_color"] = hex_val
+                    self.cfg_mgr.save()
+                    yield event.plain_result(f"✅ 转图主题色已成功设为：{hex_val}（已动态应用于气泡、高亮与所有风格）！")
+                else:
+                    yield event.plain_result(
+                        "用法：/xbimg color <#HEX颜色代码|default>\n"
+                        "示例：\n"
+                        "  - /xbimg color #0A84FF (经典蓝)\n"
+                        "  - /xbimg color #10B981 (薄荷绿)\n"
+                        "  - /xbimg color #F59E0B (暖阳金)\n"
+                        "  - /xbimg color #8B5CF6 (香芋紫)\n"
+                        "  - /xbimg color #EF4444 (绯红)\n"
+                        "  - /xbimg color default (重置默认)"
+                    )
         elif sub in ("theme", "配色"):
             if arg in ("light", "浅色"):
                 cfg["theme_mode"] = "light"

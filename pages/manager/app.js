@@ -653,12 +653,16 @@ async def render_text_to_image(text: str):
     const badge = document.getElementById("cfgStyleBadge");
     const desc = document.getElementById("cfgStyleDesc");
     const hints = {
-      ios: { badge: "iOS 磨砂卡片", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，经典 SF 蓝强调色。" },
-      android16: { badge: "Android 16", desc: "Material 3 Expressive 质感胶囊，大圆角曲线与温暖大地色系。" },
-      minimal: { badge: "极简黑白", desc: "瑞士国际主义排版，纯黑白灰无极，极致可读性，干净纯粹利落。" },
-      paper: { badge: "暖阳书卷", desc: "温润象牙暖米纸墨质感，典雅朱砂印泥红点缀，护眼人文手账感。" },
-      bento: { badge: "现代便当", desc: "当代科技模块卡片美学，科技靛蓝点缀与圆角便当胶囊标签。" },
-      nordic: { badge: "北欧冷杉", desc: "低饱和冷杉灰绿与青石灰配色，冷淡克制，沉静自然抗视疲劳。" }
+      ios: { badge: "iOS 经典拟态", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，纯粹利落无冗余。" },
+      android: { badge: "Android 原生", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
+      android16: { badge: "Android 原生", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
+      newspaper: { badge: "报刊便签", desc: "极简人文报刊排版，温润纸墨质感与纯粹细线分割，沉稳耐读。" },
+      paper: { badge: "报刊便签", desc: "极简人文报刊排版，温润纸墨质感与纯粹细线分割，沉稳耐读。" },
+      terminal: { badge: "极简控制台", desc: "极简黑白代码控制台，等宽字体与纯净对比，利落专注。" },
+      minimal: { badge: "极简控制台", desc: "极简黑白代码控制台，等宽字体与纯净对比，利落专注。" },
+      translucent: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" },
+      bento: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" },
+      nordic: { badge: "亚克力微光", desc: "现代轻盈毛玻璃微光，通透半透明与冷暖随心，极具未来感。" }
     };
     const h = hints[style] || hints.ios;
     if (badge) badge.textContent = h.badge;
@@ -676,6 +680,10 @@ async def render_text_to_image(text: str):
       updateStyleHint(cfgStyleEl.value);
     }
     setSegmentedValue("segTheme", cfg.theme_mode || "light");
+    const accentColorInput = document.getElementById("cfgThemeAccentColor");
+    const accentPicker = document.getElementById("cfgThemeAccentPicker");
+    if (accentColorInput) accentColorInput.value = cfg.theme_accent_color || "";
+    if (accentPicker && cfg.theme_accent_color) accentPicker.value = cfg.theme_accent_color;
 
     const starBgEl = document.getElementById("cfgStarBg");
     const starDensityGroup = document.getElementById("starDensityGroup");
@@ -980,6 +988,7 @@ async def render_text_to_image(text: str):
       render_trigger: getSegmentedValue("segRenderTrigger", "always"),
       style: document.getElementById("cfgStyle")?.value || "ios",
       theme_mode: getSegmentedValue("segTheme", "light"),
+      theme_accent_color: (document.getElementById("cfgThemeAccentColor")?.value || "").trim(),
       star_background: starBgEl ? starBgEl.checked : true,
       star_density: getSegmentedValue("segStarDensity", "medium"),
       min_length_threshold: minLen,

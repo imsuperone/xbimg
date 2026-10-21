@@ -548,6 +548,7 @@ class WebApiMixin:
                 except Exception:
                     pass
 
+            theme_accent_color = str(payload.get("theme_accent_color") or self.cfg_mgr.config.get("theme_accent_color", "") or "").strip()
             _t_prev = time.perf_counter()
             img = await asyncio.to_thread(
                 MessageImageRenderer.render,
@@ -563,6 +564,7 @@ class WebApiMixin:
                 font_scale=font_scale,
                 emoji_style=_es_prev,
                 emoji_remote=emoji_remote_prev,
+                theme_color=theme_accent_color,
             )
             _prev_ms = int((time.perf_counter() - _t_prev) * 1000)
             # 预览不计入业务渲染统计（预览是缩略 JPEG 管线，与真实落盘口径不同，
