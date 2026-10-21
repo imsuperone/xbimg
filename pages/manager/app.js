@@ -2733,6 +2733,26 @@ async def render_text_to_image(text: str):
     return 0;
   }
 
+  async function fetchAndApplyVersion() {
+    try {
+      let res = null;
+      const b = getBridge();
+      if (b && typeof b.apiGet === "function") {
+        try { res = await withBridgeTimeout(b.apiGet("version"), 3000, "version"); } catch (_) {}
+      }
+      if (!res || !res.version) {
+        res = await fetchWithPrefixFallback("version").catch(() => null);
+      }
+      const v = res && (res.version || (res.data && res.data.version));
+      if (v) {
+        document.querySelectorAll(".version-tag").forEach((el) => {
+          el.textContent = v;
+          el.dataset.ver = v;
+        });
+      }
+    } catch (_) {}
+  }
+
   function checkForUpdate() {
     try {
       const tag = document.querySelector(".version-tag");
@@ -2983,6 +3003,7 @@ async def render_text_to_image(text: str):
       enablePrivEl.addEventListener("change", triggerAutoSave);
     }
     notifyReady();
+    fetchAndApplyVersion();
 
     const inputEl = document.getElementById("previewInput");
     if (inputEl && !inputEl.value) {

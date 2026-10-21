@@ -174,6 +174,7 @@ class WebApiMixin:
             return
         reg = self.context.register_web_api
         pfx = PLUGIN_NAME
+        reg(f"/{pfx}/version", self._api_get_version, ["GET"], "获取插件版本号")
         reg(f"/{pfx}/config", self._api_get_config, ["GET"], "获取插件配置")
         reg(f"/{pfx}/config", self._api_save_config, ["POST"], "保存插件配置")
         reg(f"/{pfx}/stats", self._api_get_stats, ["GET"], "获取插件统计数据")
@@ -204,6 +205,19 @@ class WebApiMixin:
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
 
 
+
+    async def _api_get_version(self):
+        try:
+            from .version import get_version
+            ver = get_version()
+        except Exception:
+            ver = "1.3.36"
+        return json_response({
+            "ok": True,
+            "status": "ok",
+            "version": ver,
+            "plugin": PLUGIN_NAME,
+        })
 
     async def _api_get_config(self):
         return json_response({
