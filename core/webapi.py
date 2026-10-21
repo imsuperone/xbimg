@@ -211,7 +211,7 @@ class WebApiMixin:
             from .version import get_version
             ver = get_version()
         except Exception:
-            ver = "1.3.36"
+            ver = "1.3.37"
         return json_response({
             "ok": True,
             "status": "ok",
@@ -592,12 +592,12 @@ class WebApiMixin:
                     scale = 680 / thumb.width
                     thumb = thumb.resize(
                         (680, int(thumb.height * scale)),
-                        Image.LANCZOS,
+                        Image.BILINEAR,
                     )
                 rgb = thumb.convert("RGB")
                 buf = io.BytesIO()
                 try:
-                    rgb.save(buf, format="JPEG", quality=92, optimize=True, subsampling=0)
+                    rgb.save(buf, format="JPEG", quality=88, optimize=False)
                     return buf.getvalue()
                 finally:
                     try:

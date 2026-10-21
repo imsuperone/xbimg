@@ -3626,9 +3626,27 @@ class MessageImageRenderer:
                     theme.bg_gradient_start = _blend_rgb(base_theme.bg_gradient_start, c_rgb, 0.12)
                     theme.bg_gradient_end = _blend_rgb(base_theme.bg_gradient_end, c_rgb, 0.18)
                     theme.card_border = (
-                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[0],
-                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[1],
-                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[2],
+                        _blend_rgb((255, 255, 255), c_rgb, 0.18)[0],
+                        _blend_rgb((255, 255, 255), c_rgb, 0.18)[1],
+                        _blend_rgb((255, 255, 255), c_rgb, 0.18)[2],
+                        255,
+                    )
+                    theme.divider = (
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[0],
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[1],
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[2],
+                        200,
+                    )
+                    theme.code_border = (
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[0],
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[1],
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[2],
+                        200,
+                    )
+                    theme.code_bg = (
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.08)[0],
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.08)[1],
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.08)[2],
                         255,
                     )
                     theme.star_colors = [
@@ -3640,6 +3658,24 @@ class MessageImageRenderer:
                 else:
                     theme.bg_gradient_start = _blend_rgb(base_theme.bg_gradient_start, c_rgb, 0.14)
                     theme.bg_gradient_end = _blend_rgb(base_theme.bg_gradient_end, c_rgb, 0.08)
+                    theme.divider = (
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[0],
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[1],
+                        _blend_rgb(base_theme.divider[:3], c_rgb, 0.35)[2],
+                        180,
+                    )
+                    theme.code_border = (
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[0],
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[1],
+                        _blend_rgb(base_theme.code_border[:3], c_rgb, 0.35)[2],
+                        180,
+                    )
+                    theme.code_bg = (
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.12)[0],
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.12)[1],
+                        _blend_rgb(base_theme.code_bg[:3], c_rgb, 0.12)[2],
+                        255,
+                    )
                     theme.star_colors = [
                         _blend_rgb((255, 255, 255), c_rgb, 0.6),
                         c_rgb,
@@ -3749,6 +3785,7 @@ class MessageImageRenderer:
             "footer_block": footer_block, "foot_fh": foot_fh,
             "inner_pad_x": inner_pad_x, "content_h": content_h, "card_h": card_h,
             "rendered_lines": rendered_lines, "max_content": max_content,
+            "eff_theme_color": eff_theme_color,
         }
         if _lkey is not None:
             try:
@@ -3986,6 +4023,7 @@ class MessageImageRenderer:
         violation_words = ctx["violation_words"]
         emoji_style = ctx["emoji_style"]
         emoji_remote_eff = ctx["emoji_remote_eff"]
+        eff_theme_color = ctx.get("eff_theme_color", "")
         perf_out = ctx["perf_out"]
         content_h = sum(lh for _, _, lh in page_lines)
         card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
@@ -4118,7 +4156,7 @@ class MessageImageRenderer:
             c_draw.rounded_rectangle(
                 [inner_pad_x, pill_y, inner_pad_x + pill_w, pill_y + pill_h],
                 radius=2,
-                fill=theme.text_muted,
+                fill=_blend_rgb(theme.text_muted, theme.accent, 0.45) if eff_theme_color else theme.text_muted,
             )
 
             time_font = get_font(12, bold=False)
@@ -4223,15 +4261,35 @@ class MessageImageRenderer:
                 for px, pw, py, pc in positions:
                     all_char_positions.append((px, pw, py, pc, line_h))
             elif block.block_type == "bullet":
-                positions = _draw_mixed_text(card_surface, c_draw, content_x + 4, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
-                for px, pw, py, pc in positions:
-                    all_char_positions.append((px, pw, py, pc, line_h))
+                # 前景色彩对齐：引导符号/项目圆点以主题色点缀
+                m = _RE_BULLET.match(wrap_line)
+                if m and (eff_theme_color or style in ("android16", "paper", "bento", "nordic")):
+                    prefix = m.group(0)
+                    rest = wrap_line[len(prefix):]
+                    p_pos = _draw_mixed_text(card_surface, c_draw, content_x + 4, cur_y, prefix, font, theme.accent, block.font_size, emoji_remote_eff, emoji_style)
+                    for px, pw, py, pc in p_pos:
+                        all_char_positions.append((px, pw, py, pc, line_h))
+                    prefix_w = sum(pw for _, pw, _, _ in p_pos) if p_pos else _text_size(font, prefix)[0]
+                    r_pos = _draw_mixed_text(card_surface, c_draw, content_x + 4 + prefix_w, cur_y, rest, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+                    for px, pw, py, pc in r_pos:
+                        all_char_positions.append((px, pw, py, pc, line_h))
+                else:
+                    positions = _draw_mixed_text(card_surface, c_draw, content_x + 4, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+                    for px, pw, py, pc in positions:
+                        all_char_positions.append((px, pw, py, pc, line_h))
             elif block.block_type.startswith("heading"):
-                heading_color = (
-                    theme.accent
-                    if (style in ("android16", "paper", "bento", "nordic") and block.block_type == "heading1")
-                    else theme.text_primary
-                )
+                # 前景色彩对齐：设置主题色时所有标题对齐主题色体系，层级清晰
+                if eff_theme_color:
+                    if block.block_type == "heading1":
+                        heading_color = theme.accent
+                    elif block.block_type == "heading2":
+                        heading_color = _blend_rgb(theme.text_primary, theme.accent, 0.72)
+                    else:
+                        heading_color = _blend_rgb(theme.text_primary, theme.accent, 0.48)
+                elif style in ("android16", "paper", "bento", "nordic") and block.block_type == "heading1":
+                    heading_color = theme.accent
+                else:
+                    heading_color = theme.text_primary
                 positions = _draw_mixed_text(card_surface, c_draw, content_x, cur_y, wrap_line, font, heading_color, block.font_size, emoji_remote_eff, emoji_style)
                 for px, pw, py, pc in positions:
                     all_char_positions.append((px, pw, py, pc, line_h))

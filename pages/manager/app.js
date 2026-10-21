@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.36
+// Version: 1.3.37
 // ==========================================================================
 (function () {
   "use strict";
@@ -109,6 +109,9 @@
     `./`,
   ];
 
+  let _detectedPrefix = (function() {
+    try { return sessionStorage.getItem("xbimg_api_prefix") || ""; } catch(e) { return ""; }
+  })();
   let _detectFlight = null;
 
   async function fetchWithPrefixFallback(urlSuffix, options) {
@@ -131,6 +134,7 @@
         try {
           const res = await tryFetchJson(`${p}${urlSuffix}`, options || {});
           _detectedPrefix = p;
+          try { sessionStorage.setItem("xbimg_api_prefix", p); } catch(_) {}
           return res;
         } catch (e) {
           if (!firstErr) firstErr = `[${p}] ${e && e.message ? e.message : e}`;
@@ -2056,6 +2060,7 @@ async def render_text_to_image(text: str):
       mosaic_half_pos: getSegmentedValue("segMosaicHalfPos", "bottom"),
       font_scale: parseInt(document.getElementById("cfgFontScale")?.value || "100",10) || 100,
       emoji_style: getSegmentedValue("segEmojiStyle", "none"),
+      theme_accent_color: (document.getElementById("cfgThemeAccentColor")?.value || document.getElementById("cfgThemeAccentPicker")?.value || currentConfig?.theme_accent_color || "").trim(),
     };
 
     const spinner = document.getElementById("previewSpinner");
