@@ -81,7 +81,7 @@ class CommandsMixin:
                     "key": "style",
                     "aliases": {
                         "ios": "ios", "苹果": "ios",
-                        "android": "android16", "android16": "android16", "安卓": "android16",
+                        "android": "android", "android16": "android", "安卓": "android",
                     },
                     "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
@@ -113,11 +113,9 @@ class CommandsMixin:
             spec["hit"] = hit
             if kind == "style":
                 style_disp = {
-                    "ios": "iOS 经典拟态",
-                    "android16": "Android 原生胶囊",
-                    "newspaper": "报刊便签 (Editorial)",
-                    "terminal": "极简控制台 (Terminal)",
-                    "translucent": "亚克力微光 (Glassmorphism)",
+                    "ios": "iOS 磨砂卡片",
+                    "android": "Android 质感胶囊",
+                    "android16": "Android 质感胶囊",
                 }
                 spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(style_disp.get(hit, hit.upper()) if hit else ""))
             else:
@@ -665,7 +663,7 @@ class CommandsMixin:
                     "[单群指令]（末尾可加 [群号] 操作指定群）\n"
                     "  /xbimg group on | off [群号] — 开启/关闭本群转图\n"
                     "  /xbimg group set <50-500> [群号] — 单群字号\n"
-                    "  /xbimg group style ios|android16|minimal|paper|bento|nordic|default [群号]\n"
+                    "  /xbimg group style ios|android|default [群号]\n"
                     "  /xbimg group theme light|dark|default [群号]\n"
                     "  /xbimg group kw <词库ID>|default [群号]\n"
                     "  /xbimg group ttf <字体ID> [群号] ｜ /xbimg group list\n"

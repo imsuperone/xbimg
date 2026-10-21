@@ -2380,6 +2380,15 @@ def _parse_hex_color(hex_str: str):
             return None
     return None
 
+
+def _blend_rgb(c1: Tuple[int, int, int], c2: Tuple[int, int, int], ratio: float) -> Tuple[int, int, int]:
+    """按比例混合两种颜色：c1 * (1 - ratio) + c2 * ratio"""
+    ratio = max(0.0, min(1.0, float(ratio)))
+    r = int(round(c1[0] * (1.0 - ratio) + c2[0] * ratio))
+    g = int(round(c1[1] * (1.0 - ratio) + c2[1] * ratio))
+    b = int(round(c1[2] * (1.0 - ratio) + c2[2] * ratio))
+    return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+
 # 风格别名平滑补齐
 THEMES[("android", "light")] = THEMES[("android16", "light")]
 THEMES[("android", "dark")] = THEMES[("android16", "dark")]
@@ -3613,6 +3622,30 @@ class MessageImageRenderer:
             if c_rgb:
                 theme.accent = c_rgb
                 theme.accent_bg = (c_rgb[0], c_rgb[1], c_rgb[2], 28)
+                if theme_mode == "light":
+                    theme.bg_gradient_start = _blend_rgb(base_theme.bg_gradient_start, c_rgb, 0.12)
+                    theme.bg_gradient_end = _blend_rgb(base_theme.bg_gradient_end, c_rgb, 0.18)
+                    theme.card_border = (
+                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[0],
+                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[1],
+                        _blend_rgb((255, 255, 255), c_rgb, 0.14)[2],
+                        255,
+                    )
+                    theme.star_colors = [
+                        c_rgb,
+                        _blend_rgb((255, 214, 102), c_rgb, 0.35),
+                        _blend_rgb((160, 200, 255), c_rgb, 0.35),
+                        (255, 255, 255),
+                    ]
+                else:
+                    theme.bg_gradient_start = _blend_rgb(base_theme.bg_gradient_start, c_rgb, 0.14)
+                    theme.bg_gradient_end = _blend_rgb(base_theme.bg_gradient_end, c_rgb, 0.08)
+                    theme.star_colors = [
+                        _blend_rgb((255, 255, 255), c_rgb, 0.6),
+                        c_rgb,
+                        _blend_rgb((170, 210, 255), c_rgb, 0.35),
+                        (245, 248, 255),
+                    ]
         _sc = lambda v: max(6, int(round(v * font_scale / 100)))
         # 是否允许云端
         emoji_remote_eff = emoji_style != "none"
@@ -3625,6 +3658,7 @@ class MessageImageRenderer:
                 style, theme_mode, mosaic_half_pos, font_scale, emoji_style,
                 int(page_max_h or 3000), int(card_max_width or 640),
                 str(_grp[0]), str(_grp[1]), int(_FONT_EPOCH),
+                eff_theme_color,
             )
         except Exception:
             _lkey = None
@@ -4077,14 +4111,14 @@ class MessageImageRenderer:
             cur_y += header_h
 
         elif style in ("android", "android16"):
-            # Android 原生 M3 胶囊微标志
+            # Android 原生 M3 胶囊微标志（使用克制中性色，避免左上角突兀主题色块）
             pill_w = 28
             pill_h = 4
             pill_y = cur_y + 10
             c_draw.rounded_rectangle(
                 [inner_pad_x, pill_y, inner_pad_x + pill_w, pill_y + pill_h],
                 radius=2,
-                fill=theme.accent,
+                fill=theme.text_muted,
             )
 
             time_font = get_font(12, bold=False)

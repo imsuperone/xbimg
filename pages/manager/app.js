@@ -1480,11 +1480,8 @@ async def render_text_to_image(text: str):
       const curMinLen = (c.min_length_threshold !== undefined && c.min_length_threshold !== null && c.min_length_threshold !== "") ? c.min_length_threshold : "";
       const STYLE_NAMES = {
         ios: "iOS 磨砂卡片",
-        android16: "Android 16",
-        minimal: "极简黑白",
-        paper: "暖阳书卷",
-        bento: "现代便当",
-        nordic: "北欧冷杉"
+        android: "Android 质感胶囊",
+        android16: "Android 质感胶囊"
       };
       const globalStyleName = STYLE_NAMES[currentConfig.style] || (currentConfig.style || "ios").toUpperCase();
       const globalThemeName = (currentConfig.theme_mode === "dark") ? "深色" : "浅色";
@@ -1512,11 +1509,7 @@ async def render_text_to_image(text: str):
         `    <select class="sg-select sg-style" data-gid="${escapeHtml(gid)}">` +
         `      <option value=""${!curStyle ? " selected" : ""}>沿用全局设置（${globalStyleName}）</option>` +
         `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>📱 iOS 磨砂卡片</option>` +
-        `      <option value="android16"${curStyle === "android16" ? " selected" : ""}>🤖 Android 16</option>` +
-        `      <option value="minimal"${curStyle === "minimal" ? " selected" : ""}>📐 极简黑白</option>` +
-        `      <option value="paper"${curStyle === "paper" ? " selected" : ""}>📖 暖阳书卷</option>` +
-        `      <option value="bento"${curStyle === "bento" ? " selected" : ""}>🍱 现代便当</option>` +
-        `      <option value="nordic"${curStyle === "nordic" ? " selected" : ""}>🌲 北欧冷杉</option>` +
+        `      <option value="android"${(curStyle === "android" || curStyle === "android16") ? " selected" : ""}>🤖 Android 质感胶囊</option>` +
         `    </select>` +
         `  </div>` +
         `  <div class="sg-item">` +
