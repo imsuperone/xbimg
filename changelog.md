@@ -6,6 +6,11 @@
 - **修复主题色按钮抛错**：
   - "应用预设色块"与"恢复默认主题色"两处误调用不存在的 `toast()`，改为 `showToast()`。
 - **文档版本号对齐**：README 由 `v1.3.33` 更新至 `v1.3.38`，与 `metadata.yaml`、本 changelog 一致。
+- **工程清理（无行为变更，已用渲染样张逐像素校验）**：
+  - `renderer.py` 删除已不可达的 4 套风格配色（`minimal` / `paper` / `bento` / `nordic`）与风格别名键，以及顶栏、圆角、标题色里的死分支，共约 230 行；清理前后 `ios` / `android16` × 明暗共 7 组样张 SHA-256 完全一致；
+  - 清理 24 处未使用导入/变量、`webapi.py` 函数内重复导入与重复注释 banner；
+  - WebUI 删除 4 个无引用 id、5 条会被 JS 覆盖的写死词库 `<option>`、已废弃的群聊胶囊点击分支及其 CSS；
+  - 仓库保持 21 个受控文件、无新增目录；`pyflakes` 仅剩 5 条刻意的兼容再导出（供 `from main import _clean_urls` 与 `common.PLUGIN_NAME` 使用）。
 
 ## v1.3.37 (2026-10-21)
 

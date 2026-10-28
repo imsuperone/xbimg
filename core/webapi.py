@@ -166,9 +166,6 @@ class WebApiMixin:
 
 
 
-    # ==========================================
-    # WebUI 后端 API 接口
-    # ==========================================
     def _register_web_apis(self) -> None:
         if not _HAS_WEB_API:
             return
@@ -518,7 +515,6 @@ class WebApiMixin:
                     except Exception:
                         pass
 
-            text_provided = bool(text)
             if not text:
                 text = (
                     "# 实时预览测试\n"
@@ -535,7 +531,6 @@ class WebApiMixin:
             star_density = str(payload.get("star_density") or self.cfg_mgr.config.get("star_density", "medium"))
             mosaic_mode = str(payload.get("mosaic_mode", "none"))
             mosaic_type = str(payload.get("mosaic_type") or self.cfg_mgr.config.get("mosaic_type", "pixel"))
-            emoji_remote = bool(payload.get("emoji_remote", self.cfg_mgr.config.get("emoji_remote", True)))
             mosaic_half_pos = str(payload.get("mosaic_half_pos") or self.cfg_mgr.config.get("mosaic_half_pos", "bottom"))
             try:
                 font_scale = int(payload.get("font_scale", self.cfg_mgr.config.get("font_scale", 100)) or 100)
@@ -688,10 +683,6 @@ class WebApiMixin:
 
     async def _api_reset_config(self):
         from copy import deepcopy
-        try:
-            from .config import DEFAULT_CONFIG
-        except (ImportError, ValueError):
-            from core.config import DEFAULT_CONFIG
         self.cfg_mgr.config = deepcopy(DEFAULT_CONFIG)
         self.cfg_mgr.save()
         self._group_cache_sig = None
@@ -772,10 +763,6 @@ class WebApiMixin:
 
     def _usable_data_fonts(self) -> List[str]:
         """持久化目录可用字体文件名（排序，与 WebUI 列表同序），供删除后回退选用"""
-        try:
-            from .renderer import _is_usable_font
-        except (ImportError, ValueError):
-            from core.renderer import _is_usable_font
         out: List[str] = []
         try:
             d = self._fonts_data_dir()
@@ -839,11 +826,6 @@ class WebApiMixin:
 
     async def _api_fonts_files(self):
         """列出持久化目录中的字体文件（可删除的只有这些，随包/系统字体只读）"""
-        try:
-            from .renderer import _is_usable_font
-        except (ImportError, ValueError):
-            from core.renderer import _is_usable_font
-
         def _scan():
             # 目录遍历 + 整文件读 + FreeType 校验全是阻塞 IO，放工作线程
             d = self._fonts_data_dir()
@@ -883,10 +865,6 @@ class WebApiMixin:
                 return error_response("仅允许删除字体文件", status_code=400)
             # 先清缓存释放句柄
             try:
-                from .renderer import clear_font_cache
-            except (ImportError, ValueError):
-                from core.renderer import clear_font_cache
-            try:
                 clear_font_cache()
             except Exception:
                 pass
@@ -908,7 +886,7 @@ class WebApiMixin:
                     clear_font_cache()
                     await asyncio.sleep(0.05)
             if not deleted_ok:
-                return error_response(f"文件正在被占用，删除失败", status_code=500)
+                return error_response("文件正在被占用，删除失败", status_code=500)
 
             # 删除后回退：直链引用顺手清理，群专属失效引用清空，当前字体失效则按剩余列表回退
             try:

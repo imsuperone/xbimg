@@ -2044,7 +2044,7 @@ async def render_text_to_image(text: str):
     const starBgEl = document.getElementById("cfgStarBg");
     const themeMode = getSegmentedValue("segTheme", "light");
     const cfgStyleEl = document.getElementById("cfgStyle");
-    const styleMode = cfgStyleEl ? cfgStyleEl.value : getSegmentedValue("segStyle", "ios");
+    const styleMode = cfgStyleEl ? cfgStyleEl.value : "ios";
     const mosaicMode = resolvePreviewMosaicMode();
 
     // 后端优先使用 text 明文；不再双发 text_base64（大文本体积减半）
@@ -2407,15 +2407,6 @@ async def render_text_to_image(text: str):
             showToast("操作失败：" + err.message);
           }
         })();
-        return;
-      }
-
-      // 1. 群聊勾选胶囊点击
-      const groupChip = e.target.closest(".group-select-chip");
-      if (groupChip) {
-        e.preventDefault();
-        const gid = groupChip.getAttribute("data-gid");
-        if (gid) toggleGroupSelection(gid);
         return;
       }
 

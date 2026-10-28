@@ -41,7 +41,7 @@
           </svg>
         </button>
         <button id="themeToggleBtn" class="m3-icon-btn" title="切换深色与浅色主题" type="button">
-          <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
           </svg>
         </button>
@@ -78,7 +78,7 @@
     </nav>
 
     <!-- Main Workspace (Single Column, Tab-Driven Architecture) -->
-    <main class="main-content-wrap" id="mainWorkspace">
+    <main class="main-content-wrap">
 
       <!-- ==================== Tab 1: 排版样式 ==================== -->
       <section class="settings-section active" data-section="visual">
@@ -485,13 +485,7 @@
               <button id="addNewPresetBtn" class="m3-btn secondary-btn" type="button" style="padding:4px 12px; font-size:12px;">新建词库方案</button>
               <button id="delPresetBtn" class="font-file-del" type="button" style="padding:4px 10px; font-size:12px;" title="删除当前自定义词库">删除当前方案</button>
             </div>
-            <select id="keywordPresetSelect" class="m3-input" style="width:100%; margin-bottom:10px;">
-              <option value="default">标准综合词库（默认）</option>
-              <option value="anti_porn">涉黄与低俗内容库（严格）</option>
-              <option value="anti_gambling">涉赌涉诈与黑产库（严格）</option>
-              <option value="anti_drugs">涉毒与违禁品库（严格）</option>
-              <option value="xbbot_game">娱乐互动内容过滤库</option>
-            </select>
+            <select id="keywordPresetSelect" class="m3-input" style="width:100%; margin-bottom:10px;"></select>
           </div>
 
           <div class="form-group">
@@ -520,7 +514,7 @@
         </div>
 
         <!-- Card: Platform Management -->
-        <div class="m3-card" id="card_platform_mgr">
+        <div class="m3-card">
           <div class="card-row-split">
             <div>
               <h2 class="card-title">生效平台选择与管理</h2>
@@ -536,7 +530,7 @@
               <option value="custom">自定义组合（勾选下方平台或输入添加）</option>
             </select>
           </div>
-          <div class="form-group" id="platformCheckboxesGroup" style="margin-top: 12px;">
+          <div class="form-group" style="margin-top: 12px;">
             <label class="form-label">勾选允许生效的平台</label>
             <div class="platform-chips-wrap" id="platformChips">
               <label class="platform-chip-label">

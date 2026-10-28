@@ -5,19 +5,17 @@ import asyncio
 import os
 import re
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 try:
     from .common import (
-        AstrImage, AstrMessageEvent, PLUGIN_NAME, filter, logger,
+        AstrImage, AstrMessageEvent, PLUGIN_NAME, logger,
         _COMPRESS_CANON, _compress_level,
     )
     from .moderation import ContentModerator
     from .renderer import MessageImageRenderer, configure_fonts
 except (ImportError, ValueError):
     from core.common import (
-        AstrImage, AstrMessageEvent, PLUGIN_NAME, filter, logger,
+        AstrImage, AstrMessageEvent, PLUGIN_NAME, logger,
         _COMPRESS_CANON, _compress_level,
     )
     from core.moderation import ContentModerator

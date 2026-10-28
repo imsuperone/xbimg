@@ -1,7 +1,6 @@
 # -*- coding: utf-8 ---
 """群聊维度逻辑：白名单、专属配置、群号提取。"""
 
-import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional

@@ -7,7 +7,7 @@ import io
 import os
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
@@ -968,7 +968,6 @@ class HandlersMixin:
 
             @_safe_wraps(orig_send_private)
             async def patched_send_private(*args, **kwargs):
-                _uid = kwargs.get("user_id", args[0] if len(args) > 0 else None)
                 _msg = kwargs.get("message", args[1] if len(args) > 1 else None)
                 if not bool(self.cfg_mgr.config.get("enable", True)) or not bool(self.cfg_mgr.config.get("enable_private", True)):
                     return await orig_send_private(*args, **kwargs)
