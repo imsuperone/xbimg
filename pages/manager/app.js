@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.37
+// Version: 1.3.38
 // ==========================================================================
 (function () {
   "use strict";
@@ -43,7 +43,6 @@
     } catch (e) {}
   }
 
-  let _detectedPrefix = null;
   let _lastLegError = "";
   let _lastBridgeError = "";
 
@@ -2546,7 +2545,7 @@ async def render_text_to_image(text: str):
         if (pkr && c) pkr.value = c;
         triggerAutoSave();
         triggerPreview();
-        toast("已应用转图主题色：" + c, "ok");
+        showToast("已应用转图主题色：" + c, "ok");
         return;
       }
 
@@ -2559,7 +2558,7 @@ async def render_text_to_image(text: str):
         if (pkr) pkr.value = "#0A84FF";
         triggerAutoSave();
         triggerPreview();
-        toast("已恢复转图主题色为风格默认", "ok");
+        showToast("已恢复转图主题色为风格默认", "ok");
         return;
       }
     });

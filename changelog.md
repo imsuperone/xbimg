@@ -1,3 +1,12 @@
+## v1.3.38 (2026-10-28)
+
+- **修复 Web 控制台完全不可用（1.3.37 引入的回归）**：
+  - `pages/manager/app.js` 中 `_detectedPrefix` 被重复声明（第 46 行与第 112 行），整份脚本解析失败，浏览器控制台报 `SyntaxError: Identifier '_detectedPrefix' has already been declared`，导致面板看起来正常但所有页签与按钮均无响应、配置无法读取或保存；
+  - 现已移除重复的旧声明，保留带 `sessionStorage` 恢复能力的初始化版本。
+- **修复主题色按钮抛错**：
+  - "应用预设色块"与"恢复默认主题色"两处误调用不存在的 `toast()`，改为 `showToast()`。
+- **文档版本号对齐**：README 由 `v1.3.33` 更新至 `v1.3.38`，与 `metadata.yaml`、本 changelog 一致。
+
 ## v1.3.37 (2026-10-21)
 
 - **前景色与底色完整对齐（视觉统一）**：

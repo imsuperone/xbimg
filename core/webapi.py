@@ -211,7 +211,7 @@ class WebApiMixin:
             from .version import get_version
             ver = get_version()
         except Exception:
-            ver = "1.3.37"
+            ver = "1.3.38"
         return json_response({
             "ok": True,
             "status": "ok",
