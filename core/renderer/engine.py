@@ -209,24 +209,25 @@ class MessageImageRenderer:
 
         # 2. 动态自适应卡片宽度（支持字体百分比缩放自适应撑缩）
         if style == "dragon":
-            # 国风金龙模板：红框可用宽达 1680，自适应字号与紧凑排版
+            # 国风金龙模板：红框可用宽达 1720，自适应字号与紧凑排版
             scale_ratio = font_scale / 100.0
             card_w = 2208
-            inner_pad_x = 260
-            content_w = 1680
+            inner_pad_x = 240
+            content_w = 1720
             blocks = _parse_content_blocks(text)
             raw_lines = len([b for b in blocks if b.text])
             if raw_lines <= 8:
                 fs_body = max(28, int(round(56 * scale_ratio)))
                 fs_title = max(32, int(round(70 * scale_ratio)))
             elif raw_lines <= 14:
-                fs_body = max(24, int(round(46 * scale_ratio)))
-                fs_title = max(28, int(round(58 * scale_ratio)))
+                fs_body = max(24, int(round(48 * scale_ratio)))
+                fs_title = max(28, int(round(62 * scale_ratio)))
             else:
-                fs_body = max(22, int(round(40 * scale_ratio)))
-                fs_title = max(26, int(round(50 * scale_ratio)))
+                fs_body = max(22, int(round(42 * scale_ratio)))
+                fs_title = max(26, int(round(52 * scale_ratio)))
 
             for b in blocks:
+                b.is_bold = True
                 if b.block_type == "heading1":
                     b.font_size = fs_title
                 elif b.block_type in ("heading2", "heading3"):
@@ -239,23 +240,23 @@ class MessageImageRenderer:
                 if b.block_type == "divider":
                     rendered_lines.append(("", b, 30))
                     continue
-                font = get_font(b.font_size, bold=b.is_bold)
+                font = get_font(b.font_size, bold=True)
                 if not b.text:
                     rendered_lines.append(("", b, int(b.font_size * 0.7)))
                     continue
                 sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
-                line_h = int(b.font_size * 1.55)
+                line_h = int(b.font_size * 1.6)
                 for sl in sub_lines:
                     rendered_lines.append((sl, b, line_h))
 
-            header_h = 80
+            header_h = 100
             card_inner_pad_y = 20
             footer_gap = 20
             footer_block = 40
             foot_fh = 24
             content_h = sum(lh for _, _, lh in rendered_lines)
             card_h = 2080
-            max_content = 1340
+            max_content = 1440
         else:
             blocks = _parse_content_blocks(text)
             if font_scale != 100:
@@ -821,10 +822,8 @@ class MessageImageRenderer:
         total_pages: int,
         dragon_base: Image.Image,
     ) -> Image.Image:
-        """国风金龙模板单页绘制：纯粹、无歪斜、比例自适应紧凑的尊享金龙画幅"""
+        """国风金龙模板单页绘制：完整金龙画幅、烈焰金色外发光字体、标准卡片尺寸输出"""
         theme = ctx["theme"]
-        font_scale = ctx.get("font_scale", 100)
-        scale_ratio = font_scale / 100.0
         emoji_remote_eff = ctx["emoji_remote_eff"]
         emoji_style = ctx["emoji_style"]
         mosaic_mode = ctx["mosaic_mode"]
@@ -832,53 +831,47 @@ class MessageImageRenderer:
         mosaic_half_pos = ctx["mosaic_half_pos"]
         violation_words = ctx["violation_words"]
 
-        w, h = dragon_base.size  # 2208, 2080
+        # 使用无损金龙全尺寸底板（2208 x 2080），双龙身姿浑然天成
+        canvas = dragon_base.copy()
+        w, h = canvas.size
 
         # 1. 计算文本总高度与最宽宽度
         text_h = sum(lh for _, _, lh in page_lines)
-        target_mid_h = max(420, min(1340, text_h + 140))
-
-        # 2. 纯 PIL 三段式动态自适应底图（顶龙首 0..420 + 中间自适应伸缩 + 底龙尾 1760..2080）
-        top_cap = dragon_base.crop((0, 0, w, 420))
-        bot_cap = dragon_base.crop((0, 1760, w, h))
-        bot_h = h - 1760  # 320
-
-        if target_mid_h < 1340:
-            mid_part = dragon_base.crop((0, 420, w, 1760))
-            mid_scaled = mid_part.resize((w, target_mid_h), Image.LANCZOS)
-            canvas = Image.new("RGBA", (w, 420 + target_mid_h + bot_h), (0, 0, 0, 0))
-            canvas.paste(top_cap, (0, 0))
-            canvas.paste(mid_scaled, (0, 420))
-            canvas.paste(bot_cap, (0, 420 + target_mid_h))
-        else:
-            canvas = dragon_base.copy()
-
-        draw = ImageDraw.Draw(canvas)
-
-        # 3. 计算文本最宽行，实现整体内容块水平严格居中，左右留白对称
         max_w = 0.0
         for wrap_line, block, _ in page_lines:
             if wrap_line:
-                font = get_font(block.font_size, bold=block.is_bold)
+                font = get_font(block.font_size, bold=True)
                 lw = _text_advance(font, wrap_line)
                 if lw > max_w:
                     max_w = lw
 
+        # 2. 水平与垂直在图一红框（x: 240..1968, y: 380..1820）内自适应居中平衡
         center_x = w // 2
-        content_x = max(260, int(center_x - max_w / 2))
+        content_x = max(240, int(center_x - max_w / 2))
 
-        # 4. 垂直居中于红框核心区域（y: 360 到 420 + target_mid_h），且不需要日期/时间
-        box_top = 360
-        box_bot = 420 + target_mid_h
-        cur_y = int(box_top + (box_bot - box_top - text_h) / 2)
+        # 垂直居中于可用高度（1440px）
+        avail_box_h = 1440
+        cur_y = int(380 + max(0, (avail_box_h - text_h) / 2))
 
         all_char_positions: List[Tuple[float, float, float, str, int]] = []
+        draw = ImageDraw.Draw(canvas)
 
-        # 5. 原汁原味排版，不生造任何伪标题
+        # 3. 金色烈焰发光文字绘制辅助函数
+        def _draw_glowing_line(tx, ty, line_str, font, text_color, font_size, glow_color=(255, 140, 30), glow_radius=4):
+            # 辉光层：在透明层上绘制柔和金橙色轮廓并模糊
+            glow_im = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            gd = ImageDraw.Draw(glow_im)
+            gd.text((tx, ty), line_str, font=font, fill=(*glow_color, 200))
+            blurred = glow_im.filter(ImageFilter.GaussianBlur(glow_radius))
+            canvas.paste(blurred, (0, 0), blurred)
+            # 主文字层：绘制清晰主体与全彩 Emoji
+            return _draw_mixed_text(canvas, draw, tx, ty, line_str, font, text_color, font_size, emoji_remote_eff, emoji_style)
+
+        # 4. 原汁原味排版，无任何多余伪标题，无任何右上角时间
         for wrap_line, block, line_h in page_lines:
             if block.block_type == "divider":
                 div_y = cur_y + line_h // 2
-                draw.line([(content_x, div_y), (min(1840, content_x + int(max_w) + 40), div_y)], fill=theme.divider, width=2)
+                draw.line([(content_x, div_y), (min(1940, content_x + int(max_w) + 40), div_y)], fill=theme.divider, width=2)
                 cur_y += line_h
                 continue
 
@@ -886,35 +879,35 @@ class MessageImageRenderer:
                 cur_y += int(line_h * 0.7)
                 continue
 
-            font = get_font(block.font_size, bold=block.is_bold)
+            font = get_font(block.font_size, bold=True)
             if block.block_type == "code":
                 draw.rounded_rectangle(
-                    [content_x - 10, cur_y - 4, min(1840, content_x + int(max_w) + 20), cur_y + line_h + 4],
+                    [content_x - 10, cur_y - 4, min(1940, content_x + int(max_w) + 20), cur_y + line_h + 4],
                     radius=8, fill=theme.code_bg, outline=theme.code_border, width=1,
                 )
                 positions = _draw_mixed_text(canvas, draw, content_x + 10, cur_y, wrap_line, font, theme.code_text, block.font_size, emoji_remote_eff, emoji_style)
             elif block.block_type == "quote":
                 draw.rounded_rectangle([content_x, cur_y, content_x + 5, cur_y + line_h - 4], radius=3, fill=theme.accent)
-                positions = _draw_mixed_text(canvas, draw, content_x + 22, cur_y, wrap_line, font, theme.text_secondary, block.font_size, emoji_remote_eff, emoji_style)
+                positions = _draw_glowing_line(content_x + 22, cur_y, wrap_line, font, theme.text_secondary, block.font_size, glow_color=(255, 120, 20), glow_radius=4)
             elif block.block_type.startswith("heading"):
-                positions = _draw_mixed_text(canvas, draw, content_x, cur_y, wrap_line, font, theme.accent, block.font_size, emoji_remote_eff, emoji_style)
+                positions = _draw_glowing_line(content_x, cur_y, wrap_line, font, (255, 220, 90), block.font_size, glow_color=(255, 150, 40), glow_radius=6)
             else:
-                positions = _draw_mixed_text(canvas, draw, content_x, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+                positions = _draw_glowing_line(content_x, cur_y, wrap_line, font, (255, 252, 246), block.font_size, glow_color=(255, 130, 20), glow_radius=4)
 
             for px, pw, py, pc in positions:
                 all_char_positions.append((px, pw, py, pc, line_h))
 
             cur_y += line_h
 
-        # 6. 底栏水印（图二红框标红位置：最外层金框下边的火星与黑底交界处居中）
+        # 5. 底栏水印：完全落在图二红框标记的最外层底边中央 (y: h - 55)
         wm_text = "by xbimg" + (f" · ({page_idx + 1}/{total_pages})" if total_pages > 1 else "")
-        wm_font = get_font(max(18, int(round(28 * scale_ratio))), bold=False)
+        wm_font = get_font(32, bold=False)
         wm_w, _ = _text_size(wm_font, wm_text)
-        wm_x = int(w // 2 - wm_w / 2)
-        wm_y = canvas.height - 50
+        wm_x = (w - wm_w) // 2
+        wm_y = h - 55
         draw.text((wm_x, wm_y), wm_text, font=wm_font, fill=(210, 155, 75))
 
-        # 7. 字级打码
+        # 6. 字级打码
         if mosaic_mode in ("half", "full") and all_char_positions:
             cls._apply_word_level_mosaic(
                 card_surface=canvas,
@@ -928,10 +921,11 @@ class MessageImageRenderer:
                 mosaic_half_pos=mosaic_half_pos,
             )
 
-        # 8. 压比例：等比缩放到清晰的 1080px 宽度输出，比例与手机聊天窗口完美融合
+        # 7. 尺寸适配：等比缩放到标准 680px 卡片宽度（高度约为 641px），完美对齐 iOS / Android 卡片规格！
         out_rgb = canvas.convert("RGB")
-        final_h = int(round(1080 * out_rgb.height / out_rgb.width))
-        return out_rgb.resize((1080, final_h), Image.LANCZOS)
+        target_w = 680
+        target_h = int(round(target_w * h / w))
+        return out_rgb.resize((target_w, target_h), Image.LANCZOS)
 
     @classmethod
     def _apply_word_level_mosaic(
