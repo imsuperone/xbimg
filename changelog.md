@@ -1,3 +1,7 @@
+## v1.3.41 (2026-10-30)
+
+- **修复命令模块导入缺失**：补充 `core/commands.py` 中 `_save_test_images` 类型标注所依赖的 `from typing import List`，修复 AstrBot 插件管理器在载入时抛出 `NameError: name 'List' is not defined` 导致插件载入失败的致命异常。
+
 ## v1.3.40 (2026-10-30)
 
 - **渲染引擎拆包（架构）**：`core/renderer.py`（4362 行）拆为 `core/renderer/` 包——

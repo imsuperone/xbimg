@@ -5,6 +5,7 @@ import asyncio
 import os
 import re
 import time
+from typing import List
 
 try:
     from .common import (
