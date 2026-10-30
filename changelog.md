@@ -1,6 +1,10 @@
 ## v1.3.41 (2026-10-30)
 
-- **修复命令模块导入缺失**：补充 `core/commands.py` 中 `_save_test_images` 类型标注所依赖的 `from typing import List`，修复 AstrBot 插件管理器在载入时抛出 `NameError: name 'List' is not defined` 导致插件载入失败的致命异常。
+- **新增国风金龙风格模板 (`style="dragon"`)**：
+  - 新增双金龙环绕烈焰底板模板（`assets/templates/dragon_bg.jpg`），去除了任何第三方水印；
+  - 完美融入现有渲染管线，支持标准 Markdown 排版、字号放缩、Emoji 混合渲染及按群独立配置；
+  - `/xbimg style dragon` / `/xbimg style 金龙` 及 Web 控制台下拉直接切换。
+- **修复命令模块导入缺失**：补充 `core/commands.py` 中 `_save_test_images` 类型标注所依赖的 `from typing import List`，修复 AstrBot 插件管理器在载入时抛出 `NameError: name 'List' is not defined` 导致插件载入失败的异常。
 
 ## v1.3.40 (2026-10-30)
 

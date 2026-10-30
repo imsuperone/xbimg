@@ -49,6 +49,8 @@ def _norm_cache_params(text, style, theme_mode, mosaic_half_pos, font_scale,
     style = str(style or "ios").lower()
     if style in ("android", "android16", "安卓"):
         style = "android16"
+    elif style in ("dragon", "金龙", "国风", "golden_dragon"):
+        style = "dragon"
     else:
         style = "ios"
     theme_mode = str(theme_mode or "light").lower()
@@ -206,66 +208,105 @@ class MessageImageRenderer:
                 pass
 
         # 2. 动态自适应卡片宽度（支持字体百分比缩放自适应撑缩）
-        blocks = _parse_content_blocks(text)
-        if font_scale != 100:
+        if style == "dragon":
+            # 国风金龙模板：固定 2208x2080 尊享画幅，内容区域自适应
+            scale_ratio = font_scale / 100.0
+            card_w = 2208
+            inner_pad_x = 240
+            content_w = card_w - inner_pad_x * 2  # 1728
+            base_fs = max(24, int(round(46 * scale_ratio)))
+            blocks = _parse_content_blocks(text)
             for b in blocks:
-                b.font_size = _sc(b.font_size)
+                if b.block_type == "heading1":
+                    b.font_size = max(28, int(round(54 * scale_ratio)))
+                elif b.block_type in ("heading2", "heading3"):
+                    b.font_size = max(26, int(round(48 * scale_ratio)))
+                else:
+                    b.font_size = base_fs
 
-        max_natural_w = 0.0
-        for b in blocks:
-            if not b.text or b.block_type == "divider":
-                continue
-            font = get_font(b.font_size, bold=b.is_bold)
-            w = _text_advance(font, b.text)
-            if w > max_natural_w:
-                max_natural_w = w
+            rendered_lines: List[Tuple[str, LineBlock, int]] = []
+            for b in blocks:
+                if b.block_type == "divider":
+                    rendered_lines.append(("", b, 30))
+                    continue
+                font = get_font(b.font_size, bold=b.is_bold)
+                if not b.text:
+                    rendered_lines.append(("", b, int(b.font_size * 0.8)))
+                    continue
+                sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
+                line_h = int(b.font_size * 1.6)
+                for sl in sub_lines:
+                    rendered_lines.append((sl, b, line_h))
 
-        # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔；
-        # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）；
-        # 最后一步绝对上限：任何字号下卡片都不超过该宽度
-        scale_ratio = font_scale / 100.0
-        try:
-            _cw_base = max(480, min(1200, int(card_max_width or 640)))
-        except Exception:
-            _cw_base = 640
-        inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
-        min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
-        max_w = max(min_w + 120, int(round(_cw_base * min(2.8, max(0.75, scale_ratio)))))
-        card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
-        card_w = min(card_w, _cw_base)
-        content_w = max(200, card_w - inner_pad_x * 2)
+            header_h = 160
+            card_inner_pad_y = 20
+            footer_gap = 20
+            footer_block = 60
+            foot_fh = 24
+            content_h = sum(lh for _, _, lh in rendered_lines)
+            card_h = 2080
+            max_content = 1380
+        else:
+            blocks = _parse_content_blocks(text)
+            if font_scale != 100:
+                for b in blocks:
+                    b.font_size = _sc(b.font_size)
 
-        rendered_lines: List[Tuple[str, LineBlock, int]] = []
-        for b in blocks:
-            if b.block_type == "divider":
-                rendered_lines.append(("", b, 24))
-                continue
-            font = get_font(b.font_size, bold=b.is_bold)
-            if not b.text:
-                rendered_lines.append(("", b, int(b.font_size * 0.8)))
-                continue
+            max_natural_w = 0.0
+            for b in blocks:
+                if not b.text or b.block_type == "divider":
+                    continue
+                font = get_font(b.font_size, bold=b.is_bold)
+                w = _text_advance(font, b.text)
+                if w > max_natural_w:
+                    max_natural_w = w
 
-            sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
-            line_h = int(b.font_size * 1.56)
-            for sl in sub_lines:
-                rendered_lines.append((sl, b, line_h))
+            # 自适应留白与宽度基准：随 font_scale 动态放缩，50% 小巧，500% 宽阔；
+            # 卡片上限收敛保证聊天气泡内完整显示（超长单行宁可折行变高，不横向撑出被裁）；
+            # 最后一步绝对上限：任何字号下卡片都不超过该宽度
+            scale_ratio = font_scale / 100.0
+            try:
+                _cw_base = max(480, min(1200, int(card_max_width or 640)))
+            except Exception:
+                _cw_base = 640
+            inner_pad_x = max(24, int(round(40 * min(1.8, max(0.7, scale_ratio)))))
+            min_w = max(380, int(round(560 * min(2.5, max(0.65, scale_ratio)))))
+            max_w = max(min_w + 120, int(round(_cw_base * min(2.8, max(0.75, scale_ratio)))))
+            card_w = max(min_w, min(max_w, int(max_natural_w) + inner_pad_x * 2 + int(40 * scale_ratio)))
+            card_w = min(card_w, _cw_base)
+            content_w = max(200, card_w - inner_pad_x * 2)
 
-        # 3. 计算高度与留白（上下对齐：顶部 header 与底部 footer 对称留白）
-        content_h = sum(lh for _, _, lh in rendered_lines)
-        header_h = 52 if style == "ios" else 40
-        card_inner_pad_y = 24
-        footer_gap = 14  # 正文与底部分割线间距（与顶部 header->正文 10px 对称）
-        foot_font_tmp = get_font(11, bold=False)
-        _, foot_fh = _text_size(foot_font_tmp, "Ag")
-        foot_fh = max(12, int(foot_fh) or 12)
-        footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
-        card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
-        # 单页总高度上限（默认 3000，点开看长图长度不限；超限分页输出，不再丢弃截断）
-        try:
-            page_max_h = max(800, min(3800, int(page_max_h or 3000)))
-        except Exception:
-            page_max_h = 3000
-        max_content = max(400, page_max_h - (card_inner_pad_y*2 + header_h + footer_gap + footer_block))
+            rendered_lines: List[Tuple[str, LineBlock, int]] = []
+            for b in blocks:
+                if b.block_type == "divider":
+                    rendered_lines.append(("", b, 24))
+                    continue
+                font = get_font(b.font_size, bold=b.is_bold)
+                if not b.text:
+                    rendered_lines.append(("", b, int(b.font_size * 0.8)))
+                    continue
+
+                sub_lines = _wrap_text_line(b.text, font, content_w, b.font_size)
+                line_h = int(b.font_size * 1.56)
+                for sl in sub_lines:
+                    rendered_lines.append((sl, b, line_h))
+
+            # 3. 计算高度与留白（上下对齐：顶部 header 与底部 footer 对称留白）
+            content_h = sum(lh for _, _, lh in rendered_lines)
+            header_h = 52 if style == "ios" else 40
+            card_inner_pad_y = 24
+            footer_gap = 14  # 正文与底部分割线间距（与顶部 header->正文 10px 对称）
+            foot_font_tmp = get_font(11, bold=False)
+            _, foot_fh = _text_size(foot_font_tmp, "Ag")
+            foot_fh = max(12, int(foot_fh) or 12)
+            footer_block = 1 + 8 + foot_fh  # 分割线(1) + 间距(8) + 文字高度
+            card_h = card_inner_pad_y + header_h + content_h + footer_gap + footer_block + card_inner_pad_y
+            # 单页总高度上限（默认 3000，点开看长图长度不限；超限分页输出，不再丢弃截断）
+            try:
+                page_max_h = max(800, min(3800, int(page_max_h or 3000)))
+            except Exception:
+                page_max_h = 3000
+            max_content = max(400, page_max_h - (card_inner_pad_y*2 + header_h + footer_gap + footer_block))
         ctx = {
             "text": text, "style": style, "theme": theme, "theme_mode": theme_mode,
             "mosaic_half_pos": mosaic_half_pos, "font_scale": font_scale,
@@ -489,6 +530,11 @@ class MessageImageRenderer:
         _render_pages_inner 在排版后注入，避免逐层抄送十几个形参。
         """
         style = ctx["style"]
+        if style == "dragon":
+            dragon_bg = shared.get_dragon_template_bg()
+            if dragon_bg is not None:
+                return cls._draw_dragon_page(ctx, page_lines, page_idx, total_pages, dragon_bg)
+
         theme = ctx["theme"]
         text = ctx["text"]
         card_w = ctx["card_w"]
@@ -753,6 +799,116 @@ class MessageImageRenderer:
 
         # 12. 将卡片合成到画布上
         canvas.paste(card_surface, (margin_x, margin_y), card_surface)
+
+        return canvas.convert("RGB")
+
+    @classmethod
+    def _draw_dragon_page(
+        cls,
+        ctx: Dict[str, Any],
+        page_lines: List[Tuple[str, LineBlock, int]],
+        page_idx: int,
+        total_pages: int,
+        canvas: Image.Image,
+    ) -> Image.Image:
+        """国风金龙模板单页绘制：在 2208x2080 尊享底图上排版绘制通用文本"""
+        theme = ctx["theme"]
+        font_scale = ctx.get("font_scale", 100)
+        scale_ratio = font_scale / 100.0
+        emoji_remote_eff = ctx["emoji_remote_eff"]
+        emoji_style = ctx["emoji_style"]
+        mosaic_mode = ctx["mosaic_mode"]
+        mosaic_type = ctx["mosaic_type"]
+        mosaic_half_pos = ctx["mosaic_half_pos"]
+        violation_words = ctx["violation_words"]
+
+        draw = ImageDraw.Draw(canvas)
+        time_font = get_font(max(18, int(round(28 * scale_ratio))), bold=False)
+        time_str = time.strftime("%H:%M")
+        draw.text((1820, 310), time_str, font=time_font, fill=theme.text_muted)
+
+        # 首行若为大标题则提升至顶栏卡槽，否则在顶栏放通用卡片标并全量在卡内排版
+        has_title = False
+        title_text = ""
+        lines_to_draw = page_lines
+        if page_lines and page_lines[0][1].block_type.startswith("heading"):
+            has_title = True
+            title_text = page_lines[0][0]
+            lines_to_draw = page_lines[1:]
+        elif page_lines and (page_lines[0][0].startswith("🪪") or page_lines[0][0].startswith("📋") or "档案" in page_lines[0][0]):
+            has_title = True
+            title_text = page_lines[0][0]
+            lines_to_draw = page_lines[1:]
+
+        if not has_title:
+            title_text = "🪪 消息卡片"
+
+        title_fs = max(26, int(round(54 * scale_ratio)))
+        title_font = get_font(title_fs, bold=True)
+        _draw_mixed_text(
+            canvas, draw, 240, 295, title_text, title_font,
+            theme.accent if has_title else (255, 246, 224),
+            title_fs, emoji_remote_eff, emoji_style,
+        )
+
+        content_x = 240
+        all_char_positions: List[Tuple[float, float, float, str, int]] = []
+        cur_y = 440
+        total_lh = sum(lh for _, _, lh in lines_to_draw)
+        avail_h = 1360
+        extra_gap = 0
+        if 0 < total_lh < avail_h and len(lines_to_draw) > 1:
+            extra_gap = min(35, int((avail_h - total_lh) / (len(lines_to_draw) * 1.5)))
+
+        for wrap_line, block, line_h in lines_to_draw:
+            if block.block_type == "divider":
+                div_y = cur_y + line_h // 2
+                draw.line([(content_x, div_y), (1840, div_y)], fill=theme.divider, width=2)
+                cur_y += line_h + extra_gap
+                continue
+
+            if not wrap_line:
+                cur_y += int(line_h * 0.7) + extra_gap
+                continue
+
+            font = get_font(block.font_size, bold=block.is_bold)
+            if block.block_type == "code":
+                draw.rounded_rectangle(
+                    [content_x - 10, cur_y - 4, 1850, cur_y + line_h + 4],
+                    radius=8, fill=theme.code_bg, outline=theme.code_border, width=1,
+                )
+                positions = _draw_mixed_text(canvas, draw, content_x + 10, cur_y, wrap_line, font, theme.code_text, block.font_size, emoji_remote_eff, emoji_style)
+            elif block.block_type == "quote":
+                draw.rounded_rectangle([content_x, cur_y, content_x + 5, cur_y + line_h - 4], radius=3, fill=theme.accent)
+                positions = _draw_mixed_text(canvas, draw, content_x + 22, cur_y, wrap_line, font, theme.text_secondary, block.font_size, emoji_remote_eff, emoji_style)
+            elif block.block_type == "bullet":
+                positions = _draw_mixed_text(canvas, draw, content_x, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+            elif block.block_type.startswith("heading"):
+                positions = _draw_mixed_text(canvas, draw, content_x, cur_y, wrap_line, font, theme.accent, block.font_size, emoji_remote_eff, emoji_style)
+            else:
+                positions = _draw_mixed_text(canvas, draw, content_x, cur_y, wrap_line, font, theme.text_primary, block.font_size, emoji_remote_eff, emoji_style)
+
+            for px, pw, py, pc in positions:
+                all_char_positions.append((px, pw, py, pc, line_h))
+
+            cur_y += line_h + extra_gap
+
+        foot_font = get_font(max(14, int(round(24 * scale_ratio))), bold=False)
+        ft_text = "Generated by xbimg" + (f" · ({page_idx + 1}/{total_pages})" if total_pages > 1 else "")
+        draw.text((240, 1870), ft_text, font=foot_font, fill=theme.text_muted)
+
+        if mosaic_mode in ("half", "full") and all_char_positions:
+            cls._apply_word_level_mosaic(
+                card_surface=canvas,
+                all_char_positions=all_char_positions,
+                text=ctx["text"],
+                violation_words=violation_words or [],
+                mosaic_mode=mosaic_mode,
+                mosaic_type=mosaic_type,
+                theme=theme,
+                card_w=2000,
+                mosaic_half_pos=mosaic_half_pos,
+            )
 
         return canvas.convert("RGB")
 

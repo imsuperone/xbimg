@@ -658,7 +658,8 @@ async def render_text_to_image(text: str):
     const hints = {
       ios: { badge: "iOS 磨砂卡片", desc: "Apple 磨砂透白卡片，灵动三色红黄绿圆点，纯粹利落无冗余。" },
       android: { badge: "Android 质感胶囊", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
-      android16: { badge: "Android 质感胶囊", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" }
+      android16: { badge: "Android 质感胶囊", desc: "Material 3 质感胶囊，大圆角曲线与层级阴影，原生质感。" },
+      dragon: { badge: "国风金龙", desc: "华丽霸气双金龙环绕，烈焰金芒与黑金暗夜底板，至尊视觉。" }
     };
     const h = hints[style] || hints.ios;
     if (badge) badge.textContent = h.badge;
@@ -1484,7 +1485,8 @@ async def render_text_to_image(text: str):
       const STYLE_NAMES = {
         ios: "iOS 磨砂卡片",
         android: "Android 质感胶囊",
-        android16: "Android 质感胶囊"
+        android16: "Android 质感胶囊",
+        dragon: "国风金龙"
       };
       const globalStyleName = STYLE_NAMES[currentConfig.style] || (currentConfig.style || "ios").toUpperCase();
       const globalThemeName = (currentConfig.theme_mode === "dark") ? "深色" : "浅色";
@@ -1513,6 +1515,7 @@ async def render_text_to_image(text: str):
         `      <option value=""${!curStyle ? " selected" : ""}>沿用全局设置（${globalStyleName}）</option>` +
         `      <option value="ios"${curStyle === "ios" ? " selected" : ""}>📱 iOS 磨砂卡片</option>` +
         `      <option value="android"${(curStyle === "android" || curStyle === "android16") ? " selected" : ""}>🤖 Android 质感胶囊</option>` +
+        `      <option value="dragon"${curStyle === "dragon" ? " selected" : ""}>🐉 国风金龙</option>` +
         `    </select>` +
         `  </div>` +
         `  <div class="sg-item">` +

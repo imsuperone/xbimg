@@ -2,11 +2,30 @@
 """渲染引擎 · 基础层：常量、字符/emoji 簇原语、文本度量、数据目录解析（全包最底层，不依赖兄弟模块）。"""
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from PIL import ImageFont
 # 本地资源目录（需先于字体探测定义：支持用户在 assets/fonts 下自带 CJK 字体）
 EMOJI_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "emojis"
 BUNDLED_FONTS_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "assets" / "templates"
+DRAGON_BG_PATH = TEMPLATES_DIR / "dragon_bg.jpg"
+_DRAGON_BG_CACHE: Optional[Any] = None
+
+
+def get_dragon_template_bg() -> Optional[Any]:
+    """获取国风金龙模板底图（带内存缓存，返回可独立绘制的副本）"""
+    global _DRAGON_BG_CACHE
+    if _DRAGON_BG_CACHE is not None:
+        return _DRAGON_BG_CACHE.copy()
+    if DRAGON_BG_PATH.is_file():
+        try:
+            from PIL import Image
+            im = Image.open(DRAGON_BG_PATH).convert("RGBA")
+            _DRAGON_BG_CACHE = im
+            return im.copy()
+        except Exception:
+            pass
+    return None
 
 # 预编译正则（避免每行文本重复编译）
 _RE_DIVIDER = re.compile(r"^[-*_]{3,}$")
@@ -56,6 +75,8 @@ def is_emoji_char(char: str) -> bool:
     if not char:
         return False
     cp = ord(char[0])
+    if cp in (0x2605, 0x2606):  # ★ 与 ☆ 为正文排版符号，交由常规字体绘制
+        return False
     return (
         0x1F300 <= cp <= 0x1FAFF or
         0x2600 <= cp <= 0x27BF or

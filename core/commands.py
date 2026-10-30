@@ -81,12 +81,13 @@ class CommandsMixin:
                     "aliases": {
                         "ios": "ios", "苹果": "ios",
                         "android": "android", "android16": "android", "安卓": "android",
+                        "dragon": "dragon", "金龙": "dragon", "国风": "dragon",
                     },
                     "reset_ok": "已将【{t}】的视觉风格恢复为跟随全局默认。",
                     "reset_no_target": "当前不在群聊中，请附带群号，例如：/xbimg group style default 123456",
                     "set_ok": "已将【{t}】的视觉风格设置为：{v}",
                     "set_no_target": "当前不在群聊中，请附带群号。",
-                    "usage": "用法：/xbimg group style ios / android / default [群号]",
+                    "usage": "用法：/xbimg group style ios / android / dragon / default [群号]",
                 },
                 "color": {
                     "key": "theme_accent_color",
@@ -115,6 +116,7 @@ class CommandsMixin:
                     "ios": "iOS 磨砂卡片",
                     "android": "Android 质感胶囊",
                     "android16": "Android 质感胶囊",
+                    "dragon": "国风金龙 (霸气金龙特效)",
                 }
                 spec["set_ok"] = spec["set_ok"].format(t="{t}", v=(style_disp.get(hit, hit.upper()) if hit else ""))
             else:
@@ -305,6 +307,7 @@ class CommandsMixin:
             style_map = {
                 "ios": "ios", "苹果": "ios",
                 "android": "android16", "android16": "android16", "安卓": "android16",
+                "dragon": "dragon", "金龙": "dragon", "国风": "dragon",
             }
             target_style = style_map.get(str(arg).lower())
             if target_style:
@@ -313,6 +316,7 @@ class CommandsMixin:
                 style_names = {
                     "ios": "iOS 磨砂玻璃 (经典灵动三色圆点)",
                     "android16": "Android 质感胶囊 (Material 3 灵动胶囊)",
+                    "dragon": "国风金龙 (霸气金龙特效)",
                 }
                 yield event.plain_result(f"全局视觉风格已切换为：{style_names.get(target_style, target_style)}")
             else:
@@ -320,7 +324,8 @@ class CommandsMixin:
                     "用法：/xbimg style <风格>\n"
                     "支持风格：\n"
                     "  - ios: iOS 磨砂玻璃（灵动三色圆点）\n"
-                    "  - android: Android 质感胶囊（Material 3 灵动胶囊）"
+                    "  - android: Android 质感胶囊（Material 3 灵动胶囊）\n"
+                    "  - dragon: 国风金龙（霸气金龙特效）"
                 )
         elif sub in ("color", "theme_color", "主题色", "颜色"):
             from .renderer import _parse_hex_color

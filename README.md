@@ -15,7 +15,7 @@
 
 ## 功能
 
-- 两套经典高级风格：拒绝浓厚 AI 浮夸感，坚持排版美感与可读性（iOS 磨砂卡片、Android 16 质感胶囊），Web 控制台支持下拉选择与实时效果预览。
+- 经典高级风格：拒绝浓厚 AI 浮夸感，坚持排版美感与可读性（iOS 磨砂卡片、Android 16 质感胶囊、国风金龙），Web 控制台支持下拉选择与实时效果预览。
 - 配色主题：浅色与深色暗黑双模式，完美适配全风格。
 - 星空背景：随机十字星、星芒与光晕粒子，密度可调。
 - 画质档位：原画、均衡、极小三档可选。
@@ -39,7 +39,7 @@
 | `/xbimg on` / `off` | 总开关 |
 | `/xbimg trigger always` / `violation` | 始终转图 / 仅违规时转图 |
 | `/xbimg minlen <1-1000>` | 最小触发字数 |
-| `/xbimg style ios` / `android16` | 全局视觉风格切换 |
+| `/xbimg style ios` / `android16` / `dragon` | 全局视觉风格切换 |
 | `/xbimg theme light` / `dark` | 全局浅色 / 深色 |
 | `/xbimg star on` / `off`、`density sparse\|medium\|dense` | 星空背景与密度 |
 | `/xbimg quality lossless` / `balanced` / `compact` | 原画 / 均衡 / 极小 |
@@ -58,7 +58,7 @@
 | `/xbimg group` | 本群配置卡片与指南 |
 | `/xbimg group on` / `off [群号]` | 开启或关闭指定群聊转图 |
 | `/xbimg group set <50-500> [群号]` | 单群字体大小 |
-| `/xbimg group style / theme / kw ... [群号]` | 单群风格（ios / android16）、主题、词库（`default` 跟随全局） |
+| `/xbimg group style / theme / kw ... [群号]` | 单群风格（ios / android16 / dragon）、主题、词库（`default` 跟随全局） |
 | `/xbimg group ttf <字体id> [群号]` | 单群精选字体 |
 | `/xbimg group list` / `reset [群号]` / `test [群号]` | 列表 / 恢复跟随全局 / 效果测试 |
 
