@@ -1,4 +1,4 @@
-# -*- coding: utf-8 ---
+# -*- coding: utf-8 -*-
 """渲染管线与消息钩子：审查+渲染+落盘、适配器补丁、装饰器钩子。"""
 
 import asyncio
@@ -1212,7 +1212,7 @@ class HandlersMixin:
 
         violation_only 门控用它先判断，非违规直接返回，避免付 PIL 渲染成本。
         """
-        mod_res = await self.moderator.review(full_text, self.context, preset_name=keyword_preset)
+        mod_res = await self.moderator.review(full_text, preset_name=keyword_preset)
         eff_text = full_text
         mosaic_mode = "none"
         if mod_res.is_violated:
@@ -1537,18 +1537,12 @@ class HandlersMixin:
             return _reuse
         _claim = self._claim_text_render(full_text)
         if not _claim:
-            # 另一路径正在渲染/已处理：按 outcome 复用或等待其完成后复用
+            # 另一路径正在渲染：等其到达终态后复用结果（done/blocked 均可复用），
+            # 条目消失/超时则重新认领走完整渲染；仍失败则调用方保留原消息
+            await self._await_inflight_claim(full_text)
             _reuse = self._reuse_prior(full_text)
             if _reuse is not None:
                 return _reuse
-            # outcome 未定（首条仍在渲染）→ 等待终态后复用，避免丢转图
-            _st = await self._await_inflight_claim(full_text)
-            _reuse = self._reuse_prior(full_text)
-            if _reuse is not None:
-                return _reuse
-            if _st == "blocked":
-                return ("blocked", [])
-            # 条目已消失/超时 → 重新认领走完整渲染；仍失败则调用方保留原消息
             _claim = self._claim_text_render(full_text)
             if not _claim:
                 return ("miss", [])
@@ -1847,8 +1841,6 @@ class HandlersMixin:
 
         # 链接处理策略：仅 extract_append 才需要产出附带文案（准入判断已在上方完成）
         link_mode = str(cfg.get("link_mode", "as_image") or "as_image")
-        urls_found = _clean_urls(_URL_PATTERN.findall(full_text)) \
-            if link_mode == "extract_append" else []
 
         # 共用渲染管线：认领/复用/审查/渲染/落盘/记账（命中与新渲染统一组装）
         status_m, payload_m = await self._pipeline_text_to_images(
@@ -1879,10 +1871,10 @@ class HandlersMixin:
             if comp.__class__.__name__ in ("Image", "Record", "Video", "File"):
                 new_chain.append(comp)
 
-        # 若配置为提取并附带可点击纯文本链接
-        if link_mode == "extract_append" and urls_found:
-            links_text = "\n🔗 快捷直达链接：\n" + "\n".join(urls_found[:5])
-            new_chain.append(Plain(links_text))
+        # 若配置为提取并附带可点击纯文本链接（与适配器路径共用同一文案实现）
+        _link = self._link_append_text(full_text, link_mode)
+        if _link:
+            new_chain.append(Plain(_link))
 
         result.chain = new_chain
 
@@ -1937,18 +1929,14 @@ class HandlersMixin:
                 now = time.time()
 
                 def _sweep_names():
-                    # t2i_/test_ 成图 + preview_tmp_/preview_ 独立预览 + 下载/落盘 tmp
+                    # t2i_/test_ 成图 + 下载/落盘 tmp（preview 已不再落盘）
                     for p in self.cache_dir.iterdir():
                         if not p.is_file():
                             continue
                         n = p.name
                         if (n.startswith("t2i_") or n.startswith("test_")
-                                or n.startswith("preview_tmp_") or n.startswith("preview_")
                                 or n.endswith(".downloading")
                                 or ".tmp." in n):
-                            # preview_latest.jpg 常驻复用，不参与清扫
-                            if n == "preview_latest.jpg":
-                                continue
                             yield p
 
                 deleted: List[Path] = []
@@ -1970,14 +1958,15 @@ class HandlersMixin:
                             deleted.append(p)
                     except Exception:
                         pass
-                # 数量兜底：超过 300 张删最旧的（防止高频群聊打爆磁盘）
-                remain = sorted(_sweep_names(), key=lambda p: _mtime(p) or 0.0)
-                for p in remain[:-300]:
-                    try:
-                        p.unlink(missing_ok=True)
-                        deleted.append(p)
-                    except Exception:
-                        pass
+                # 数量兜底：超过 300 张删最旧的（防止高频群聊打爆磁盘）；
+                # 复用上一轮列表（刚按 mtime 排序），不再二次 iterdir
+                if len(cached_files) > 300:
+                    for p in cached_files[:-300]:
+                        try:
+                            p.unlink(missing_ok=True)
+                            deleted.append(p)
+                        except Exception:
+                            pass
                 # 双向一致：文件被清扫后同步失效引用它的内存渲染缓存条目
                 for p in deleted:
                     try:

@@ -11,6 +11,7 @@
 -
 - 文件结构：编排层（本文件）+ core/common（垫片/常量）
 -   + core/groups（群逻辑）+ core/handlers（渲染管线/钩子）
+-   + core/renderer/（渲染引擎包：shared/fonts/emoji/theme/layout/painter/engine）
 -   + core/commands（/xbimg）+ core/webapi（WebUI 接口）
 """
 
@@ -25,6 +26,14 @@ for _submod in (
     "core.common",
     "core.config",
     "core.moderation",
+    # 渲染引擎包：先重载子模块再重载包 __init__（from 转发要取到新对象）
+    "core.renderer.shared",
+    "core.renderer.fonts",
+    "core.renderer.emoji",
+    "core.renderer.theme",
+    "core.renderer.layout",
+    "core.renderer.painter",
+    "core.renderer.engine",
     "core.renderer",
     "core.groups",
     "core.handlers",
@@ -32,8 +41,6 @@ for _submod in (
     "core.webapi",
 ):
     for _prefix in (f"{__package__}." if __package__ else "", "astrbot_plugin_xbimg."):
-        if not _prefix:
-            continue
         _full_name = _prefix + _submod
         if _full_name in _sys_reload.modules:
             try:
@@ -48,7 +55,10 @@ try:
     )
     from .core.config import ConfigManager, PLUGIN_NAME as _PN
     from .core.moderation import ContentModerator
-    from .core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download
+    from .core.renderer import (
+        MessageImageRenderer, configure_fonts, needs_cjk_download,
+        preload_font_sizes, _data_subdir, _ensure_base_pngs,
+    )
     from .core.groups import GroupsMixin
     from .core.handlers import HandlersMixin
     from .core.commands import CommandsMixin
@@ -64,7 +74,10 @@ except (ImportError, ValueError):
     )
     from core.config import ConfigManager, PLUGIN_NAME as _PN
     from core.moderation import ContentModerator
-    from core.renderer import MessageImageRenderer, configure_fonts, needs_cjk_download
+    from core.renderer import (
+        MessageImageRenderer, configure_fonts, needs_cjk_download,
+        preload_font_sizes, _data_subdir, _ensure_base_pngs,
+    )
     from core.groups import GroupsMixin
     from core.handlers import HandlersMixin
     from core.commands import CommandsMixin
@@ -83,8 +96,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         self.cache_dir = self.cfg_mgr.cache_dir
         self._seen_groups: Dict[str, Dict[str, Any]] = {}
         self._load_seen_groups()
-        # 预览图 nonce 锁：nonce -> 过期时间戳（10 分钟），防 preview_img 被任意人直读
-        self._preview_nonces: Dict[str, float] = {}
         # 测试指令冷却：name:gid -> 上次时间戳，防任意成员刷测试图
         self._test_cooldowns: Dict[str, float] = {}
         # emoji 样式代际：每次用户显式改样式/删除即 +1，旧下载任务完成不再强行切回
@@ -96,7 +107,6 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
         # 群白名单解析缓存：(mode, raw_list) -> tokens
         self._group_cache_sig: Optional[tuple] = None
         self._group_cache_tokens: List[str] = []
-        self._group_cache_cleaned: List[str] = []
         # Bot 实例缓存（避免每次全量 dir() 遍历）
         self._bots_cache: List[Any] = []
         self._bots_cache_time: float = 0.0
@@ -147,24 +157,25 @@ class Msg2ImgPlugin(Star, GroupsMixin, HandlersMixin, CommandsMixin, WebApiMixin
             await asyncio.sleep(0.2)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return
+
             def _warm_assets():
-                try:
-                    from .core.renderer import preload_font_sizes, _data_subdir, _ensure_base_pngs
-                except Exception:
-                    try:
-                        from core.renderer import preload_font_sizes, _data_subdir, _ensure_base_pngs
-                    except Exception:
-                        return
                 try:
                     preload_font_sizes()
                 except Exception:
                     pass
+                # 仅在 emoji 样式启用时预热基础 PNG：none 模式不产生任何 emoji 网络/磁盘行为
                 try:
-                    d = _data_subdir("emoji")
-                    if d is not None:
-                        _ensure_base_pngs(d)
+                    _es = str(self.cfg_mgr.config.get("emoji_style", "none") or "none").lower()
                 except Exception:
-                    pass
+                    _es = "none"
+                if _es != "none":
+                    try:
+                        d = _data_subdir("emoji")
+                        if d is not None:
+                            _ensure_base_pngs(d)
+                    except Exception:
+                        pass
+
             await asyncio.to_thread(_warm_assets)
             if self._cache_stop_event is not None and self._cache_stop_event.is_set():
                 return

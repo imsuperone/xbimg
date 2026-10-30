@@ -50,3 +50,6 @@ backup_1_1_6/
 # 测试不进 GitHub（zip 已由 pack.py 排除）
 test_*.py
 tests/
+
+# 本地接口文档与架构文档（归档于 aihelp/，不上传）
+docs/

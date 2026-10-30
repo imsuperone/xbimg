@@ -6,7 +6,7 @@ _CACHE = ""
 
 
 def get_version(plugin_base: str = "") -> str:
-    """动态读取根目录 metadata.yaml 的 version 字段，绝不硬编码。带缓存。"""
+    """动态读取根目录 metadata.yaml 的 version 字段（唯一真相源，绝不硬编码）。带缓存。"""
     global _CACHE
     if _CACHE:
         return _CACHE
@@ -23,4 +23,4 @@ def get_version(plugin_base: str = "") -> str:
                             return v
         except Exception:
             pass
-    return "1.3.38"
+    return ""

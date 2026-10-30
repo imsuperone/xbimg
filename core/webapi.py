@@ -17,13 +17,13 @@ from PIL import Image
 
 try:
     from .common import (
-        FileResponse, PLUGIN_NAME, _HAS_WEB_API, error_response,
+        PLUGIN_NAME, _HAS_WEB_API, error_response,
         json_response, logger, request,
     )
     from .config import DEFAULT_CONFIG
     from .moderation import ContentModerator
     from .renderer import (
-        MessageImageRenderer, _is_usable_font,
+        MessageImageRenderer, _font_data_dir, _is_usable_font,
         clear_font_cache, configure_fonts,
         delete_curated_font, delete_emoji_pack, download_curated_font,
         download_emoji_pack, download_missing_fonts, ensure_emoji_assets,
@@ -31,13 +31,13 @@ try:
     )
 except (ImportError, ValueError):
     from core.common import (
-        FileResponse, PLUGIN_NAME, _HAS_WEB_API, error_response,
+        PLUGIN_NAME, _HAS_WEB_API, error_response,
         json_response, logger, request,
     )
     from core.config import DEFAULT_CONFIG
     from core.moderation import ContentModerator
     from core.renderer import (
-        MessageImageRenderer, _is_usable_font,
+        MessageImageRenderer, _font_data_dir, _is_usable_font,
         clear_font_cache, configure_fonts,
         delete_curated_font, delete_emoji_pack, download_curated_font,
         download_emoji_pack, download_missing_fonts, ensure_emoji_assets,
@@ -71,94 +71,9 @@ def _cdn_probe_host(host: str, timeout: float = 4.0) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)[:120]}
 
 
-def _read_query_param(name: str, default: str = "") -> str:
-    """读当前请求的 query 参数，三代兼容：
-    新版 AstrBot request.query → 旧版 request.args → 古董 Quart environ。
-    必须兼容的原因：新版 request 根本没有 .args，读不到轮询 job_id 会一直 404。
-    """
-    try:
-        if request is None:
-            return default
-    except Exception:
-        return default
-    try:
-        q = getattr(request, "query", None)
-        if q is not None:
-            try:
-                v = q.get(name, "")
-            except Exception:
-                v = ""
-            if v:
-                return str(v)
-    except Exception:
-        pass
-    try:
-        args = getattr(request, "args", None)
-        if args is not None:
-            try:
-                v = args.get(name, "")
-            except Exception:
-                v = ""
-            if v:
-                return str(v)
-    except Exception:
-        pass
-    try:
-        env = getattr(request, "environ", None) or {}
-        qs = str(env.get("QUERY_STRING", "") or "")
-        if qs:
-            from urllib.parse import parse_qs
-            vals = parse_qs(qs).get(name, [])
-            if vals:
-                return str(vals[0])
-    except Exception:
-        pass
-    return default
-
-
 class WebApiMixin:
     """WebApiMixin：由 Msg2ImgPlugin 多继承组合，依赖其 __init__ 初始化的属性。"""
 
-
-    def _issue_preview_nonce(self) -> str:
-        """签发预览图一次性 nonce（10 分钟有效，防未鉴权直读 preview_img）"""
-        try:
-            now = time.time()
-            # 顺手清理过期
-            for k, exp in list(self._preview_nonces.items()):
-                if exp <= now:
-                    self._preview_nonces.pop(k, None)
-            while len(self._preview_nonces) >= 32:
-                self._preview_nonces.pop(next(iter(self._preview_nonces)), None)
-            nonce = f"pv_{int(now * 1000):x}_{os.urandom(8).hex()}"
-            self._preview_nonces[nonce] = now + 600
-            return nonce
-        except Exception:
-            return ""
-
-
-
-    def _check_preview_nonce(self, nonce: str) -> bool:
-        """校验预览 nonce（有效期内可用；读不到 query 接口时放行保兼容并记日志）"""
-        try:
-            if not nonce:
-                return False
-            exp = self._preview_nonces.get(str(nonce), 0)
-            if exp and float(exp) > time.time():
-                return True
-        except Exception:
-            pass
-        return False
-
-
-
-    def _read_nonce_from_request(self) -> Optional[str]:
-        """从当前请求读 nonce：读不到返回 None（调用方按版本保兼容）"""
-        try:
-            v = _read_query_param("nonce", "")
-            return str(v) if v else None
-        except Exception:
-            return None
 
     # ==========================================
     # WebUI 后端 API 接口
@@ -178,25 +93,20 @@ class WebApiMixin:
         reg(f"/{pfx}/groups", self._api_list_groups, ["GET"], "列出群聊列表")
         reg(f"/{pfx}/groups/fetch", self._api_fetch_groups, ["POST", "GET"], "主动拉取机器人所有群")
         reg(f"/{pfx}/preview", self._api_render_preview, ["POST"], "实时渲染预览图")
-        reg(f"/{pfx}/preview_img", self._api_get_preview_img, ["GET"], "获取最新预览图图片")
         reg(f"/{pfx}/reset", self._api_reset_config, ["POST"], "重置默认配置")
         reg(f"/{pfx}/fonts/status", self._api_fonts_status, ["GET"], "查询字体状态")
         reg(f"/{pfx}/fonts/download", self._api_fonts_download, ["POST"], "下载缺失字体")
         reg(f"/{pfx}/fonts/files", self._api_fonts_files, ["GET"], "列出持久化目录字体")
         reg(f"/{pfx}/fonts/delete", self._api_fonts_delete, ["POST"], "删除持久化目录字体")
         reg(f"/{pfx}/fonts/curated", self._api_fonts_curated, ["GET"], "精选字体列表")
-        reg(f"/{pfx}/fonts/curated_install", self._api_fonts_curated_install, ["POST"], "安装精选字体")
         reg(f"/{pfx}/fonts/curated_delete", self._api_fonts_curated_delete, ["POST"], "删除精选字体")
         reg(f"/{pfx}/emoji/packs", self._api_emoji_packs, ["GET"], "Emoji 样式列表")
         reg(f"/{pfx}/emoji/cdn_check", self._api_emoji_cdn_check, ["GET"], "检测容器到各 CDN 的连通性")
-        reg(f"/{pfx}/emoji/download", self._api_emoji_download, ["POST"], "下载 Emoji 样式")
         reg(f"/{pfx}/emoji/download_async", self._api_emoji_download_async, ["POST"], "后台下载 Emoji（立即返回任务）")
-        reg(f"/{pfx}/emoji/download_status", self._api_emoji_download_status, ["GET"], "查询 Emoji 下载进度（query）")
-        reg(f"/{pfx}/emoji/download_status/<job_id>", self._api_emoji_download_status_path, ["GET"], "查询 Emoji 下载进度（路径）")
+        reg(f"/{pfx}/emoji/download_status/<job_id>", self._api_emoji_download_status_path, ["GET"], "查询 Emoji 下载进度")
         reg(f"/{pfx}/emoji/delete", self._api_emoji_delete, ["POST"], "删除 Emoji 样式")
         reg(f"/{pfx}/fonts/curated_install_async", self._api_fonts_curated_install_async, ["POST"], "后台安装精选字体")
-        reg(f"/{pfx}/fonts/curated_install_status", self._api_fonts_curated_install_status, ["GET"], "查询精选字体安装进度（query）")
-        reg(f"/{pfx}/fonts/curated_install_status/<job_id>", self._api_fonts_curated_install_status_path, ["GET"], "查询精选字体安装进度（路径）")
+        reg(f"/{pfx}/fonts/curated_install_status/<job_id>", self._api_fonts_curated_install_status_path, ["GET"], "查询精选字体安装进度")
         reg(f"/{pfx}/presets/update_status", self._api_presets_update_status, ["GET"], "查询官方词库更新")
         reg(f"/{pfx}/presets/apply_update", self._api_presets_apply_update, ["POST"], "覆盖更新官方词库")
         reg(f"/{pfx}/presets/dismiss_update", self._api_presets_dismiss_update, ["POST"], "保留本地词库不再提示")
@@ -204,15 +114,10 @@ class WebApiMixin:
 
 
     async def _api_get_version(self):
-        try:
-            from .version import get_version
-            ver = get_version()
-        except Exception:
-            ver = "1.3.38"
+        from .version import get_version
         return json_response({
             "ok": True,
-            "status": "ok",
-            "version": ver,
+            "version": get_version(),
             "plugin": PLUGIN_NAME,
         })
 
@@ -267,10 +172,7 @@ class WebApiMixin:
                     self._bump_emoji_style_gen()
             except Exception:
                 pass
-            try:
-                configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-            except Exception as e:
-                logger.warning(f"[{PLUGIN_NAME}] 字体配置同步异常: {e}")
+            self._reconfig_fonts()
             self.moderator = ContentModerator(self.cfg_mgr.config)
             if not saved_ok:
                 # 内存已按新配置生效，但磁盘没写上：如实报错，避免「保存成功」假象
@@ -601,40 +503,9 @@ class WebApiMixin:
                         pass
 
             jpeg_bytes = await asyncio.to_thread(_encode_preview)
-            preview_path = self.cache_dir / "preview_latest.jpg"
-            tmp_path = self.cache_dir / f"preview_tmp_{os.getpid()}_{int(time.time()*1000)}_{os.urandom(2).hex()}.jpg"
-            try:
-                # 原子发布：先写唯一 tmp 再替换，多人同时预览互不覆盖
-                tmp_path.write_bytes(jpeg_bytes)
-                os.replace(str(tmp_path), str(preview_path))
-            except Exception as e:
-                logger.warning(f"[{PLUGIN_NAME}] 预览图落盘失败: {e}")
-            finally:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
             b64_str = base64.b64encode(jpeg_bytes).decode("utf-8")
-
-            t_stamp = int(time.time() * 1000)
-            _nonce = self._issue_preview_nonce()
-            # 按 nonce 落一份独立文件：多人同时预览各读各的，不再串图；
-            # 10 分钟后自动清理（与 nonce 有效期一致），读不到则回退 preview_latest
-            if _nonce:
-                try:
-                    _safe = "".join(c for c in str(_nonce) if c.isalnum() or c in ("_", "-"))[:64]
-                    if _safe:
-                        (self.cache_dir / f"preview_{_safe}.jpg").write_bytes(jpeg_bytes)
-                        try:
-                            self._schedule_delete(self.cache_dir / f"preview_{_safe}.jpg", 600)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            _nonce_qs = f"&nonce={_nonce}" if _nonce else ""
             return json_response({
                 "ok": True,
-                "image_url": f"/{PLUGIN_NAME}/preview_img?t={t_stamp}{_nonce_qs}",
                 "image_base64": f"data:image/jpeg;base64,{b64_str}",
                 "width": img.width,
                 "height": img.height,
@@ -646,50 +517,12 @@ class WebApiMixin:
 
 
 
-    async def _api_get_preview_img(self):
-        """流式输出最新预览图文件，避免 IPC 传输大 JSON 字符串（需预览接口签发的 nonce）"""
-        _nonce = self._read_nonce_from_request()
-        if _nonce is None:
-            # 读不到 query（极老版本请求对象）：拒绝直读，引导用 JSON 内 base64 字段；
-            # 之前“放行保兼容”等于无鉴权，已收紧
-            return error_response("预览凭证缺失，请重新生成预览（前端请使用 image_base64 字段兜底）", status_code=403)
-        elif not self._check_preview_nonce(_nonce):
-            return error_response("预览凭证无效或已过期，请重新生成预览", status_code=403)
-        try:
-            _safe = "".join(c for c in str(_nonce) if c.isalnum() or c in ("_", "-"))[:64]
-            _per = self.cache_dir / f"preview_{_safe}.jpg" if _safe else None
-        except Exception:
-            _per = None
-        img_path = _per if (_per is not None and _per.is_file()) else (self.cache_dir / "preview_latest.jpg")
-        if not img_path.exists():
-            return error_response("预览图不存在", status_code=404)
-        try:
-            # 读盘放工作线程，不阻塞事件循环
-            data = await asyncio.to_thread(img_path.read_bytes)
-        except Exception:
-            return error_response("预览图读取失败", status_code=500)
-        if FileResponse is not None:
-            try:
-                return FileResponse(content=data, media_type="image/jpeg")
-            except Exception:
-                pass
-        try:
-            from astrbot.api.web import file_response
-            return file_response(img_path)
-        except Exception:
-            return error_response("输出图片流失败", status_code=500)
-
-
-
     async def _api_reset_config(self):
         from copy import deepcopy
         self.cfg_mgr.config = deepcopy(DEFAULT_CONFIG)
         self.cfg_mgr.save()
         self._group_cache_sig = None
-        try:
-            configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-        except Exception:
-            pass
+        self._reconfig_fonts()
         self.moderator = ContentModerator(self.cfg_mgr.config)
         return json_response({"ok": True, "config": self.cfg_mgr.config})
 
@@ -717,10 +550,7 @@ class WebApiMixin:
                         err = (err + "; " + eres["error"]).strip("; ")
             except Exception as e:
                 err = (err + f"; Emoji: {e}").strip("; ")
-            try:
-                configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-            except Exception:
-                pass
+            self._reconfig_fonts()
             ok = bool(dl) or not err
             return json_response({"ok": ok, "downloaded": dl, "error": err})
         except Exception as e:
@@ -728,36 +558,23 @@ class WebApiMixin:
 
 
 
+    def _reconfig_fonts(self) -> None:
+        """资源（字体/emoji）变动后统一同步生效配置：唯一入口，删除/下载后调用"""
+        try:
+            configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
+        except Exception as e:
+            logger.warning(f"[{PLUGIN_NAME}] 字体配置同步异常: {e}")
+
     def _fonts_data_dir(self):
-        """持久化字体目录：直接复用 renderer._font_data_dir（唯一来源，避免双份逻辑漂移）"""
-        try:
-            try:
-                from .renderer import _font_data_dir
-            except (ImportError, ValueError):
-                from core.renderer import _font_data_dir
-            d = _font_data_dir()
-            if d is not None:
-                return d
-        except Exception:
-            pass
-        try:
-            try:
-                from .renderer import FONT_DATA_SUBDIR
-            except (ImportError, ValueError):
-                from core.renderer import FONT_DATA_SUBDIR
-            d = self.cfg_mgr.data_dir / FONT_DATA_SUBDIR
-            try:
-                d.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            return d
-        except Exception:
+        """持久化字体目录：唯一来源 renderer._font_data_dir"""
+        d = _font_data_dir()
+        if d is None:
             d = self.cfg_mgr.data_dir / "fonts"
             try:
                 d.mkdir(parents=True, exist_ok=True)
             except Exception:
                 pass
-            return d
+        return d
 
 
 
@@ -803,7 +620,7 @@ class WebApiMixin:
                 if str(cfg.get("font_source", "")) == "custom":
                     cfg["font_source"] = "auto"
                 self.cfg_mgr.save()
-                configure_fonts(cfg, self.cfg_mgr.data_dir)
+                self._reconfig_fonts()
             except Exception:
                 pass
             return ""
@@ -817,7 +634,7 @@ class WebApiMixin:
                 "custom_bold_font_path": "",
                 "font_source": "custom",
             })
-            configure_fonts(cfg, self.cfg_mgr.data_dir)
+            self._reconfig_fonts()
         except Exception:
             pass
         return pick
@@ -917,10 +734,7 @@ class WebApiMixin:
                 pass
             # 回退扫描含整文件 FreeType 校验，放工作线程（返回值不变）
             picked = await asyncio.to_thread(self._fallback_font_after_delete)
-            try:
-                configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-            except Exception:
-                pass
+            self._reconfig_fonts()
             return json_response({"ok": True, "deleted": name, "fallback": picked, "fonts": get_font_status()})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
@@ -940,10 +754,7 @@ class WebApiMixin:
                 pass
             res = await asyncio.to_thread(delete_curated_font, cid)
             picked = await asyncio.to_thread(self._fallback_font_after_delete)
-            try:
-                configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-            except Exception:
-                pass
+            self._reconfig_fonts()
             return json_response({"ok": res.get("ok", False), **res, "fallback": picked, "fonts": get_font_status()})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
@@ -955,29 +766,6 @@ class WebApiMixin:
             return json_response({"ok": True, "curated": get_curated_fonts_status()})
         except Exception as e:
             return error_response(f"获取精选列表失败: {e}", status_code=500)
-
-
-
-    async def _api_fonts_curated_install(self):
-        try:
-            payload = await request.json(default={})
-            if not isinstance(payload, dict):
-                payload = {}
-            cid = str(payload.get("id", "") or "").strip()
-            if not cid:
-                try:
-                    logger.warning(
-                        f"[{PLUGIN_NAME}] curated_install 缺少字体 id："
-                        f"keys={sorted(payload.keys())} raw={str(payload)[:200]}"
-                    )
-                except Exception:
-                    pass
-                return error_response(f"缺少字体 id: {str(payload)[:100] or '空参数'}", status_code=400)
-            res = await asyncio.to_thread(download_curated_font, cid)
-            # 仅下载不自动切换（切换请走 group ttf / 字体选择），此处不再回写 _FONT_CONF
-            return json_response({"ok": res.get("ok", False), **res})
-        except Exception as e:
-            return error_response(f"安装失败: {e}", status_code=500)
 
 
 
@@ -1009,39 +797,6 @@ class WebApiMixin:
 
 
 
-    async def _api_emoji_download(self):
-        try:
-            payload = await request.json(default={})
-            if not isinstance(payload, dict):
-                payload = {}
-            style = str(payload.get("style", "") or payload.get("id", "") or "").strip().lower()
-            if style not in ("ios", "android", "windows"):
-                try:
-                    logger.warning(
-                        f"[{PLUGIN_NAME}] emoji/download 未知样式："
-                        f"keys={sorted(payload.keys())} raw={str(payload)[:200]}"
-                    )
-                except Exception:
-                    pass
-                return error_response(f"未知样式: {style or '空'}", status_code=400)
-            res = await asyncio.to_thread(download_emoji_pack, style)
-            # 保存选择
-            try:
-                self.cfg_mgr.config["emoji_style"] = style
-                self.cfg_mgr.save({"emoji_style": style})
-                from .renderer import configure_fonts as _cf
-            except (ImportError, ValueError):
-                from core.renderer import configure_fonts as _cf
-            try:
-                _cf(self.cfg_mgr.config, self.cfg_mgr.data_dir)
-            except Exception:
-                pass
-            return json_response({"ok": res.get("ok", False), **res})
-        except Exception as e:
-            return error_response(f"下载失败: {e}", status_code=500)
-
-
-
     async def _api_emoji_delete(self):
         try:
             payload = await request.json(default={})
@@ -1059,10 +814,7 @@ class WebApiMixin:
                 return error_response(f"未知样式: {style or '空'}", status_code=400)
             # 先取消相关后台下载任务，再删文件（否则任务完成会复活样式与文件）
             try:
-                if style == "all":
-                    self._cancel_download_jobs("emoji", "")
-                else:
-                    self._cancel_download_jobs("emoji", style)
+                self._cancel_download_jobs("emoji", "" if style == "all" else style)
             except Exception:
                 pass
             res = await asyncio.to_thread(delete_emoji_pack, style)
@@ -1073,15 +825,9 @@ class WebApiMixin:
                     self.cfg_mgr.config["emoji_style"] = "none"
                     self.cfg_mgr.save({"emoji_style": "none"})
                     self._bump_emoji_style_gen()
-                    from .renderer import configure_fonts as _cf2
-                else:
-                    from .renderer import configure_fonts as _cf2
-            except (ImportError, ValueError):
-                from core.renderer import configure_fonts as _cf2
-            try:
-                _cf2(self.cfg_mgr.config, self.cfg_mgr.data_dir)
             except Exception:
                 pass
+            self._reconfig_fonts()
             return json_response({"ok": res.get("ok", False), **res})
         except Exception as e:
             return error_response(f"删除失败: {e}", status_code=500)
@@ -1271,7 +1017,7 @@ class WebApiMixin:
                     try:
                         self.cfg_mgr.config["emoji_style"] = target
                         self.cfg_mgr.save({"emoji_style": target})
-                        configure_fonts(self.cfg_mgr.config, self.cfg_mgr.data_dir)
+                        self._reconfig_fonts()
                     except Exception as e:
                         logger.warning(f"[{PLUGIN_NAME}] 下载后配置生效异常: {e}")
             detail = ""
@@ -1341,11 +1087,9 @@ class WebApiMixin:
             return error_response(f"启动下载失败: {e}", status_code=500)
 
     def _download_status_for(self, job_id: Any):
-        """按 job_id 查任务（路径参数与 query 参数共用逻辑）"""
+        """按路径 job_id 查任务（唯一状态查询实现，emoji 与精选字体共用任务表）"""
         try:
             jid = str(job_id or "").strip()
-            if not jid:
-                jid = _read_query_param("job_id", "")
             pub = self._job_public(jid) if jid else None
             if pub is None:
                 return error_response("任务不存在或已过期", status_code=404)
@@ -1353,12 +1097,8 @@ class WebApiMixin:
         except Exception as e:
             return error_response(f"查询失败: {e}", status_code=500)
 
-    async def _api_emoji_download_status(self):
-        """查询 Emoji 后台下载进度：GET ?job_id=xxx（旧式，桥接对 query 支持不佳时用路径版）"""
-        return self._download_status_for(None)
-
     async def _api_emoji_download_status_path(self, job_id: str = "", **kwargs):
-        """查询 Emoji 后台下载进度：GET download_status/<job_id>（桥接推荐形态）"""
+        """查询 Emoji 后台下载进度：GET download_status/<job_id>"""
         return self._download_status_for(job_id)
 
     async def _api_fonts_curated_install_async(self):
@@ -1376,10 +1116,6 @@ class WebApiMixin:
             return json_response({"ok": True, "job_id": jid, "status": "running"})
         except Exception as e:
             return error_response(f"启动安装失败: {e}", status_code=500)
-
-    async def _api_fonts_curated_install_status(self):
-        """查询精选字体后台安装进度：GET ?job_id=xxx（与 emoji 共用任务表）"""
-        return self._download_status_for(None)
 
     async def _api_fonts_curated_install_status_path(self, job_id: str = "", **kwargs):
         """查询精选字体后台安装进度：GET curated_install_status/<job_id>"""

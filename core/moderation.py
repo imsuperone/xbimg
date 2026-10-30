@@ -129,10 +129,8 @@ class ContentModerator:
 
         return len(matched) > 0, matched
 
-    async def review(self, text: str, context: Optional[Any] = None, preset_name: Optional[str] = None) -> ModerationResult:
-        """
-        全流程审查统一入口
-        """
+    async def review(self, text: str, preset_name: Optional[str] = None) -> ModerationResult:
+        """全流程审查统一入口"""
         mode = self.config.get("moderation_mode", "keywords")
         action_pref = self.config.get("violation_action", "mosaic_half")
         kw_enabled = bool(self.config.get("enable_keywords_moderation", True)) and (mode != "none")

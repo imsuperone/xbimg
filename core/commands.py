@@ -1,4 +1,4 @@
-# -*- coding: utf-8 ---
+# -*- coding: utf-8 -*-
 """/xbimg 聊天指令。"""
 
 import asyncio
@@ -134,6 +134,20 @@ class CommandsMixin:
     # ==========================================
     # 管理指令交互 (仅保留纯净的 /xbimg 指令)
     # ==========================================
+    async def _save_test_images(self, imgs) -> List[tuple]:
+        """测试图落盘（唯一实现，/xbimg test 与 group test 共用）：返回 [(img, path)]，45 秒后自动清理"""
+        pairs: List[tuple] = []
+        for idx, im in enumerate(imgs or []):
+            try:
+                # 毫秒+序号+随机：同秒并发 test 不互相覆盖
+                path = self.cache_dir / f"test_{int(time.time()*1000)}_{idx}_{os.urandom(2).hex()}.png"
+                await asyncio.to_thread(im.save, str(path), "PNG")
+                self._schedule_delete(path, 45)
+                pairs.append((im, path))
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+        return pairs
+
     async def cmd_xbimg(self, event: AstrMessageEvent, sub: str = "", arg: str = ""):
         """消息转图助手管理指令"""
         sub = sub.strip().lower()
@@ -840,19 +854,10 @@ class CommandsMixin:
                         yield event.plain_result(f"测试图生成失败: {e}")
                         return
                     chain_imgs = []
-                    chain_pairs = []
                     _pt_g.before_save()
-                    for _idx, _im in enumerate(img or []):
-                        try:
-                            img_filename = f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
-                            img_path = self.cache_dir / img_filename
-                            await asyncio.to_thread(_im.save, str(img_path), "PNG")
-                            self._schedule_delete(img_path, 45)
-                            chain_pairs.append((_im, img_path))
-                            chain_imgs.append(AstrImage.fromFileSystem(str(img_path)))
-                        except Exception as e:
-                            logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+                    chain_pairs = await self._save_test_images(img)
                     _pt_g.set_result([p[0] for p in chain_pairs], [p[1] for p in chain_pairs])
+                    chain_imgs = [AstrImage.fromFileSystem(str(p[1])) for p in chain_pairs]
                     if not chain_imgs:
                         yield event.plain_result("测试图生成失败：图片为空。")
                         return
@@ -891,20 +896,10 @@ class CommandsMixin:
                 except Exception as e:
                     yield event.plain_result(f"测试图生成失败: {e}")
                     return
-                test_imgs = []
-                test_pairs = []
                 _pt_t.before_save()
-                for _idx, _im in enumerate(imgs or []):
-                    # 毫秒+序号+随机：同秒并发 test 不互相覆盖；45 秒后自动清理
-                    try:
-                        test_path = self.cache_dir / f"test_{int(time.time()*1000)}_{_idx}_{os.urandom(2).hex()}.png"
-                        await asyncio.to_thread(_im.save, str(test_path), "PNG")
-                        self._schedule_delete(test_path, 45)
-                        test_pairs.append((_im, test_path))
-                        test_imgs.append(AstrImage.fromFileSystem(str(test_path)))
-                    except Exception as e:
-                        logger.warning(f"[{PLUGIN_NAME}] 测试图落盘失败: {e}")
+                test_pairs = await self._save_test_images(imgs)
                 _pt_t.set_result([p[0] for p in test_pairs], [p[1] for p in test_pairs])
+                test_imgs = [AstrImage.fromFileSystem(str(p[1])) for p in test_pairs]
                 if not test_imgs:
                     yield event.plain_result("测试图生成失败：图片为空。")
                     return

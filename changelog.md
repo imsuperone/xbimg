@@ -1,3 +1,26 @@
+## v1.3.40 (2026-10-30)
+
+- **渲染引擎拆包（架构）**：`core/renderer.py`（4362 行）拆为 `core/renderer/` 包——
+  `shared`(常量/簇原语/度量) → `fonts`(字体) → `emoji`(表情) → `theme`(配色) / `layout`(排版)
+  → `painter`(绘制) → `engine`(编排)；包 `__init__` 经 PEP 562 `__getattr__` 转发，
+  拆分前 `from core.renderer import X` 的所有用法（含 monkeypatch 语义）100% 兼容；
+  热重载清单同步更新（先子模块后包）。全量 106 项测试在工作区与部署目录双通过。
+- **修复链接文案双实现**：`on_decorating_result` 内联拼接"快捷直达链接"与
+  `_link_append_text` 两套规则并存，统一为后者唯一实现。
+- **修复 emoji 未启用时的无谓网络行为**：`emoji_style=none`（默认）下启动预热不再
+  请求 Twemoji 下载基础表情包（此前每次启动/测试都会发起 61 个 PNG 的网络请求）。
+- **删除无调用方死代码（约 500 行）**：`preview_img` 端点与整套 nonce 机制、
+  同步版 `emoji/download` / `fonts/curated_install`、query 版下载状态接口、
+  `_read_query_param` 三代兼容层、`FileResponse` 导入、renderer 遗留别名等。
+- **精简**：主题色覆盖 70 行展开式混合 → 表驱动 `_apply_theme_accent`；测试图落盘
+  两份循环 → `_save_test_images` 单实现；`configure_fonts` 九处散调 → `_reconfig_fonts`
+  唯一入口；同文复用三次判定 → 两次；缓存清扫单遍扫描。
+- **文档**：README 版本与风格表对齐实际实现（仅 ios / android16 两款）；接口清单归档于本地 aihelp 文档体系（不上传仓库）。
+
+## v1.3.39 (2026-10-30)
+
+- 版本号重排（内容并入 1.3.40 发布）。
+
 ## v1.3.38 (2026-10-28)
 
 - **修复 Web 控制台完全不可用（1.3.37 引入的回归）**：

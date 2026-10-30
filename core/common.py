@@ -72,10 +72,6 @@ except Exception:
     error_response = None  # type: ignore
     request = None  # type: ignore
 
-try:
-    from starlette.responses import Response as FileResponse
-except Exception:
-    FileResponse = None  # type: ignore
 
 try:
     from .config import PLUGIN_NAME

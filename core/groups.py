@@ -1,4 +1,4 @@
-# -*- coding: utf-8 ---
+# -*- coding: utf-8 -*-
 """群聊维度逻辑：白名单、专属配置、群号提取。"""
 
 import time
@@ -158,29 +158,19 @@ class GroupsMixin:
         tokens = [g.strip() for g in _SPLIT_GROUP_RE.split(raw_list) if g.strip()]
         self._group_cache_sig = sig
         self._group_cache_tokens = tokens
-        # 同步缓存清洗后的纯数字 token，命中判断时不再逐条做正则
-        try:
-            self._group_cache_cleaned = [_NON_DIGIT_RE.sub("", t) for t in tokens]
-        except Exception:
-            self._group_cache_cleaned = [""] * len(tokens)
         return tokens
 
 
 
     def _match_group_tokens(self, gid: str, tokens: List[str]) -> bool:
         clean_gid = _NON_DIGIT_RE.sub("", gid)
-        cleaned = getattr(self, "_group_cache_cleaned", None)
-        if not isinstance(cleaned, list) or len(cleaned) != len(tokens):
-            try:
-                cleaned = [_NON_DIGIT_RE.sub("", t) for t in tokens]
-            except Exception:
-                cleaned = [""] * len(tokens)
         gid_lower = gid.lower()
-        for t, clean_t in zip(tokens, cleaned):
+        for t in tokens:
             if gid == t or gid_lower == t.lower():
                 return True
-            if t.endswith(":" + gid) or t.lower().endswith(":" + gid_lower):
+            if t.lower().endswith(":" + gid_lower):
                 return True
+            clean_t = _NON_DIGIT_RE.sub("", t)
             if clean_t and clean_gid and clean_gid == clean_t:
                 return True
         return False

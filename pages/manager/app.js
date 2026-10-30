@@ -1,6 +1,6 @@
 // ==========================================================================
 // 消息转图助手 · Android 16 (Material 3 Expressive) Web Client
-// Version: 1.3.38
+// Version: 1.3.40
 // ==========================================================================
 (function () {
   "use strict";
@@ -1653,22 +1653,11 @@ async def render_text_to_image(text: str):
   async function downloadEmojiPack(style){
     try{
       showToast("正在后台下载表情符号 "+style+"，完成后将自动生效…");
-      let res = null, asyncOk = false;
-      try {
-        // 新版后端：立即返回任务，走轮询（不受面板超时限制）
-        res = await api.post("emoji/download_async", {style});
-        asyncOk = true;
-      } catch (e) {
-        res = null; // 旧版后端无此接口，走同步兼容
-      }
-      if (asyncOk && res && res.job_id) {
-        const job = await pollDownloadJob("emoji/download_status", res.job_id);
-        // 轮询返回的是任务包，展平为下载结果
-        const r = (job && job.result) || {};
-        res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, storage_kb: r.storage_kb, error: r.error || job.detail };
-      } else if (!asyncOk) {
-        res = await api.post("emoji/download", {style});
-      }
+      // 异步任务接口：立即返回 job，前端轮询进度（不受面板桥接单请求超时限制）
+      const started = await api.post("emoji/download_async", {style});
+      const job = await pollDownloadJob("emoji/download_status", started.job_id);
+      const r = (job && job.result) || {};
+      const res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, storage_kb: r.storage_kb, error: r.error || job.detail };
       if(res&&res.ok) {
           showToast("表情符号下载完成，可进行选择");
         setSegmentedValue("segEmojiStyle", style);
@@ -1719,20 +1708,11 @@ async def render_text_to_image(text: str):
     _installingCurated = cid;
     try {
       showToast("正在后台下载字体，请稍候…");
-      let res = null, asyncOk = false;
-      try {
-        res = await api.post("fonts/curated_install_async", { id: cid });
-        asyncOk = true;
-      } catch (e) {
-        res = null; // 旧版后端无此接口，走同步兼容
-      }
-      if (asyncOk && res && res.job_id) {
-        const job = await pollDownloadJob("fonts/curated_install_status", res.job_id);
-        const r = (job && job.result) || {};
-        res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, error: r.error || job.detail };
-      } else if (!asyncOk) {
-        res = await api.post("fonts/curated_install", { id: cid });
-      }
+      // 异步任务接口：立即返回 job，前端轮询进度
+      const started = await api.post("fonts/curated_install_async", { id: cid });
+      const job = await pollDownloadJob("fonts/curated_install_status", started.job_id);
+      const r = (job && job.result) || {};
+      const res = { ok: job.status === "done" && (r.ok !== false), downloaded: r.downloaded, error: r.error || job.detail };
       if (res && res.ok) {
         const dl = (res.downloaded || []).join("、");
         if (res.error) {
