@@ -10,7 +10,7 @@ desc: |
   - 多套敏感词库审查与违规处置（半字打码、全码、拦截、警示卡片）
   - 按群配置字体、风格与词库
   - 全屏 Web 控制台与实时渲染测试台
-version: 1.3.48
+version: 1.3.49
 author: Light
 repo: https://github.com/imsuperone/xbimg
 support_platforms:

@@ -216,18 +216,29 @@ class MessageImageRenderer:
             content_w = 1880
             blocks = _parse_content_blocks(text)
             raw_lines = len([b for b in blocks if b.text])
-            if raw_lines <= 8:
-                fs_body = max(45, int(round(88 * scale_ratio)))
-                fs_title = max(55, int(round(110 * scale_ratio)))
+            if raw_lines <= 2:
+                # 只有 1~2 行极短文本：字号超大化，杜绝字少留白空旷！
+                fs_body = max(56, int(round(108 * scale_ratio)))
+                fs_title = max(64, int(round(124 * scale_ratio)))
+                line_factor = 1.80
+            elif raw_lines <= 5:
+                # 3~5 行短文本：字号饱满充满红框！
+                fs_body = max(48, int(round(92 * scale_ratio)))
+                fs_title = max(58, int(round(112 * scale_ratio)))
+                line_factor = 1.70
+            elif raw_lines <= 10:
+                # 6~10 行中长/游戏文本：字体粗壮醒目！
+                fs_body = max(38, int(round(70 * scale_ratio)))
+                fs_title = max(46, int(round(86 * scale_ratio)))
                 line_factor = 1.62
-            elif raw_lines <= 14:
-                fs_body = max(34, int(round(64 * scale_ratio)))
-                fs_title = max(42, int(round(80 * scale_ratio)))
-                line_factor = 1.58
+            elif raw_lines <= 16:
+                fs_body = max(30, int(round(54 * scale_ratio)))
+                fs_title = max(36, int(round(66 * scale_ratio)))
+                line_factor = 1.56
             else:
-                fs_body = max(26, int(round(48 * scale_ratio)))
-                fs_title = max(32, int(round(60 * scale_ratio)))
-                line_factor = 1.55
+                fs_body = max(24, int(round(44 * scale_ratio)))
+                fs_title = max(28, int(round(54 * scale_ratio)))
+                line_factor = 1.50
 
             for b in blocks:
                 b.is_bold = True
@@ -838,11 +849,11 @@ class MessageImageRenderer:
         canvas = dragon_base.copy()
         w, h = canvas.size
 
-        # 2. 黑色阴影对齐并进一步扩大（左右压到龙身边缘，深邃平滑无白斑）
+        # 2. 黑色阴影对齐并进一步扩大（左右压到龙身边缘，半透明透气无死黑）
         shadow_plate = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         spd = ImageDraw.Draw(shadow_plate)
-        spd.rounded_rectangle([150, 260, 2058, 1870], radius=32, fill=(16, 10, 6, 235))
-        blurred_shadow = shadow_plate.filter(ImageFilter.GaussianBlur(16))
+        spd.rounded_rectangle([130, 240, 2078, 1860], radius=36, fill=(18, 10, 6, 110))
+        blurred_shadow = shadow_plate.filter(ImageFilter.GaussianBlur(14))
         canvas.paste(blurred_shadow, (0, 0), blurred_shadow)
 
         # 3. 计算文本总高度与最宽宽度
