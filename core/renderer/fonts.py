@@ -1041,16 +1041,6 @@ def _font_covers(font: ImageFont.FreeTypeFont, ch: str) -> bool:
             ok = True  # 外框不同必为不同字形
         else:
             ok = _mask_bytes(m) != _mask_bytes(ref)
-        if ok:
-            # 启发式通过后再用 cmap 复核（有 fonttools 时）：文件级缺字则必缺
-            try:
-                sp = getattr(font, "_src_path", None)
-                if isinstance(sp, str) and sp:
-                    cmap = _file_cmap(sp)
-                    if cmap is not None and ord(ch) not in cmap:
-                        ok = False
-            except Exception:
-                pass
     except Exception:
         ok = True
     _cache_put(_COVER_CACHE, key, ok, 6000)
@@ -1077,7 +1067,7 @@ def _resolve_char_font(ch: str, primary: ImageFont.FreeTypeFont) -> ImageFont.Fr
     解决用户自定义装饰字体（如哥特体）缺 CJK/符号字形导致的满屏豆腐块：
     拉丁字母仍用装饰字体渲染保持风格，中文与符号自动用链中字体补齐。
     """
-    if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH:
+    if not ch or ch.isspace() or ord(ch) < 0x20 or ch in _BLANK_PASSTHROUGH or is_emoji_char(ch):
         return primary
     try:
         key = (_font_key(primary), getattr(primary, "size", 0), ch)
@@ -1322,6 +1312,8 @@ def _note_uncovered(font, ch: str):
 def _adv_text(font: ImageFont.FreeTypeFont, ch: str) -> float:
     """正文字符推进宽度（含缺字回退与 NFKC 兜底，与实际绘制一致）"""
     try:
+        if ch.isascii() or (0x4E00 <= ord(ch) <= 0x9FFF):
+            return _char_advance(font, ch)
         dc, f = _draw_char_and_font(ch, font)
         return _char_advance(f, dc)
     except Exception:
